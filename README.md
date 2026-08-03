@@ -51,8 +51,13 @@ cargo install --path . --root ~/.local --force
 ## Use
 
 ```console
-# Create .agents/skills/ and ensure ~/.tink exists
+# Create .agents/skills/ and ensure ~/.tink exists.
+# In a terminal, asks about ZEN.md and Twotink (skill-scout + skill-eval-loop).
 tink init
+
+# Same choices without prompts
+tink init --with-zen --with-twotink
+tink init --no-zen --no-twotink
 
 # Copy one local skill, or one skill from a public GitHub repo
 tink add ../my-skill

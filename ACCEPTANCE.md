@@ -7,8 +7,8 @@ imports, and maintains a home inventory at `~/.tink` (override: `TINK_HOME`).
 **Authority:** This file is the evaluator. Implementation stops when every row
 below has an automated test that passes on macOS with `git` on `PATH`.
 
-**Out of v1:** `wipe`, setup option bundles (ZEN/Twotink/workflows/manage-tink),
-self-update, private GitHub auth, Windows, Linux CI as a gate.
+**Out of v1:** `wipe`, weekly GitHub update workflows, self-update, private
+GitHub auth, Windows, Linux CI as a gate.
 
 **Dogfood:** Prefer an installed `tink` from this repo, or `cargo run -q -- …`.
 
@@ -16,7 +16,7 @@ self-update, private GitHub auth, Windows, Linux CI as a gate.
 
 | Command | Meaning |
 |---|---|
-| `tink init` | Create `.agents/skills/` only; ensure inventory root exists |
+| `tink init` | Create `.agents/skills/`; optional ZEN + Twotink prompts; ensure inventory |
 | `tink add <source> [--skill <name>]` | Install one local or public GitHub skill |
 | `tink check` | Validate project skills; no network; no writes |
 | `tink refresh [name]` | Refresh clean GitHub imports; refuse local edits |
@@ -41,8 +41,9 @@ Ids are stable. Tests must name or comment the id they prove.
 |---|---|---|
 | I1 | `init` in empty project | Creates `.agents/skills/` as real directories (not symlinks) |
 | I2 | `init` when `.agents` is a symlink | Exit ≠ 0; mentions symlink; creates nothing unsafe |
-| I3 | `init` | Does **not** write `AGENTS.md`, `ZEN.md`, or `.github/workflows/*` |
+| I3 | `init` (non-interactive / `--no-zen --no-twotink`) | Does **not** write `AGENTS.md`, `ZEN.md`, or `.github/workflows/*` |
 | I4 | `init` with `TINK_HOME` set | Creates inventory root + `layout.json` + `skills/by-project/` |
+| I5 | `init --with-zen` | Writes `ZEN.md` and an `AGENTS.md` that references it |
 
 ### Local add
 

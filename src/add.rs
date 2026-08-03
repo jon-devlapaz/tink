@@ -98,7 +98,7 @@ pub fn add_skill(
     source_value: &str,
     selected_name: Option<&str>,
 ) -> Result<AddOutcome, Error> {
-    init::init_project(project_root)?;
+    init::ensure_project_skills(project_root)?;
     let destination_root = project_root.join(".agents").join("skills");
     let local_source = Path::new(source_value);
     if local_source.exists() {

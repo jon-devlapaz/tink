@@ -44,6 +44,28 @@ pub fn check_project(root: &Path) -> Result<Vec<Skill>, Error> {
         read_provenance(&skill)?;
         skills.push(skill);
     }
+
+    let zen = root.join("ZEN.md");
+    if zen.exists() || zen.is_symlink() {
+        refuse_symlink(&zen)?;
+        if !zen.is_file() {
+            return Err(Error::msg("ZEN.md must be a regular file"));
+        }
+        let agents_file = root.join("AGENTS.md");
+        refuse_symlink(&agents_file)?;
+        if !agents_file.is_file() {
+            return Err(Error::msg("ZEN.md is not referenced by a regular AGENTS.md"));
+        }
+        let agents_text =
+            fs::read_to_string(&agents_file).map_err(|e| map_io(&agents_file, e))?;
+        if !agents_text.contains(crate::templates::ZEN_REFERENCE_MARKER) {
+            return Err(Error::msg(format!(
+                "AGENTS.md does not reference {}",
+                crate::templates::ZEN_REFERENCE_MARKER
+            )));
+        }
+    }
+
     Ok(skills)
 }
 

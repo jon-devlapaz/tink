@@ -137,7 +137,10 @@ fn i2_init_refuses_agents_symlink() {
 fn i3_init_does_not_write_product_bundles() {
     let ws = Workspace::new();
     let project = ws.project("app");
-    ws.cmd(&project).arg("init").assert().success();
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-twotink"])
+        .assert()
+        .success();
     assert!(!project.join("AGENTS.md").exists());
     assert!(!project.join("ZEN.md").exists());
     assert!(!project.join(".github").exists());
@@ -153,6 +156,20 @@ fn i4_init_ensures_inventory_root() {
     assert!(ws.inventory.join("skills").join("by-project").is_dir());
     let layout = fs::read_to_string(ws.inventory.join("layout.json")).unwrap();
     assert!(layout.contains("tink-skill-inventory"));
+}
+
+#[test]
+fn i5_init_with_zen_writes_agents_reference() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--with-zen", "--no-twotink"])
+        .assert()
+        .success();
+    assert!(project.join("ZEN.md").is_file());
+    let agents = fs::read_to_string(project.join("AGENTS.md")).unwrap();
+    assert!(agents.contains("[ZEN.md](ZEN.md)"));
+    ws.cmd(&project).arg("check").assert().success();
 }
 
 // --- A*: local add ---
