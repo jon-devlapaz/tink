@@ -26,6 +26,18 @@ From a checkout:
 cargo install --path . --root ~/.local --force
 ```
 
+### Uninstall
+
+```console
+cargo uninstall tink
+```
+
+If you installed with `--root ~/.local`:
+
+```console
+cargo uninstall --root ~/.local tink
+```
+
 ## Use
 
 ```console
