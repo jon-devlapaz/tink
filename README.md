@@ -6,7 +6,7 @@
 
 **One skill manager. Any harness. Just works.**
 
-Tink copies complete Agent Skills into a project's `.agents/skills/` directory.
+tink copies complete Agent Skills into a project's `.agents/skills/` directory.
 No registry, no daemon, no required `~/.agents`. Agents that already look for
 project skills find them where they live.
 
@@ -56,14 +56,14 @@ an isolated home. Successful installs also record skill **names** under
 `~/.tink/skills/by-project/<project>/meta.json` for offline inventory — not a
 second discovery root and not a skill-tree mirror.
 
-Tink does not init Git, stage files, commit, push, or overwrite a skill that
+tink does not init Git, stage files, commit, push, or overwrite a skill that
 diverged from what it would install.
 
 ## Model
 
 A skill is a directory with `SKILL.md` plus whatever it needs. GitHub imports
 get a small receipt so refresh can prove the install still matches its source.
-Tink does not execute skill code during add, check, or refresh.
+tink does not execute skill code during add, check, or refresh.
 
 ## Develop
 
