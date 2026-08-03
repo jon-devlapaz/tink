@@ -1,8 +1,37 @@
 //! Terminal styling for user-facing CLI output (`anstyle` + TTY / `NO_COLOR`).
+//!
+//! Brand palette sampled from the tink mark (deep indigo / mauve on cream),
+//! lifted for contrast on typical dark terminals while keeping the same hue.
 
 use std::io::IsTerminal;
 
-use anstyle::{AnsiColor, Effects, Style};
+use anstyle::{AnsiColor, Color, Effects, RgbColor, Style};
+use clap::builder::styling::Styles;
+
+/// Logo deep indigo `#381048`, brightened for dark terminals.
+const INDIGO: Color = Color::Rgb(RgbColor(0xB5, 0x7B, 0xC9));
+/// Logo mauve `#905098`, brightened for dark terminals.
+const MAUVE: Color = Color::Rgb(RgbColor(0xD4, 0xA8, 0xDC));
+/// Logo soft lavender-gray `#c8c0c8`.
+const LAVENDER: Color = Color::Rgb(RgbColor(0xC8, 0xC0, 0xC8));
+
+/// Clap help/error styles aligned with tink's success/error/warn/accent roles.
+pub const CLAP_STYLES: Styles = Styles::styled()
+    .header(Style::new().fg_color(Some(INDIGO)).effects(Effects::BOLD))
+    .usage(Style::new().fg_color(Some(INDIGO)).effects(Effects::BOLD))
+    .literal(Style::new().fg_color(Some(MAUVE)).effects(Effects::BOLD))
+    .placeholder(Style::new().fg_color(Some(LAVENDER)))
+    .error(
+        Style::new()
+            .fg_color(Some(Color::Ansi(AnsiColor::Red)))
+            .effects(Effects::BOLD),
+    )
+    .valid(
+        Style::new()
+            .fg_color(Some(Color::Ansi(AnsiColor::Green)))
+            .effects(Effects::BOLD),
+    )
+    .invalid(Style::new().fg_color(Some(MAUVE)).effects(Effects::BOLD));
 
 /// Whether ANSI styling is enabled for a given output stream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,20 +102,22 @@ fn color_enabled() -> bool {
 }
 
 const SUCCESS: Style = Style::new()
-    .fg_color(Some(anstyle::Color::Ansi(AnsiColor::Green)))
+    .fg_color(Some(Color::Ansi(AnsiColor::Green)))
     .effects(Effects::BOLD);
 
 const ERROR: Style = Style::new()
-    .fg_color(Some(anstyle::Color::Ansi(AnsiColor::Red)))
+    .fg_color(Some(Color::Ansi(AnsiColor::Red)))
     .effects(Effects::BOLD);
 
 const WARN: Style = Style::new()
-    .fg_color(Some(anstyle::Color::Ansi(AnsiColor::Yellow)))
+    .fg_color(Some(MAUVE))
     .effects(Effects::BOLD);
 
-const MUTED: Style = Style::new().effects(Effects::DIMMED);
+const MUTED: Style = Style::new()
+    .fg_color(Some(LAVENDER))
+    .effects(Effects::DIMMED);
 
-const ACCENT: Style = Style::new().fg_color(Some(anstyle::Color::Ansi(AnsiColor::Cyan)));
+const ACCENT: Style = Style::new().fg_color(Some(INDIGO));
 
 #[cfg(test)]
 mod tests {

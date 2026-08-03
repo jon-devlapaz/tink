@@ -26,7 +26,12 @@ use crate::init::InitOptions;
 use crate::style::CliStyle;
 
 #[derive(Debug, Parser)]
-#[command(name = "tink", version, about = "Install Agent Skills into .agents/skills/")]
+#[command(
+    name = "tink",
+    version,
+    about = "Install Agent Skills into .agents/skills/",
+    styles = crate::style::CLAP_STYLES
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
