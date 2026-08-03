@@ -42,6 +42,34 @@ impl Workspace {
     fn skill_path(project: &Path, name: &str) -> PathBuf {
         project.join(".agents").join("skills").join(name)
     }
+
+    fn catalog_meta(&self, project_name: &str) -> PathBuf {
+        self.inventory
+            .join("skills")
+            .join("by-project")
+            .join(project_name)
+            .join("meta.json")
+    }
+
+    fn assert_cataloged(&self, project_name: &str, skill: &str) {
+        let raw = fs::read_to_string(self.catalog_meta(project_name))
+            .unwrap_or_else(|_| panic!("missing catalog for {project_name}"));
+        assert!(
+            raw.contains(&format!("\"{skill}\"")),
+            "expected {skill} in catalog: {raw}"
+        );
+        assert!(
+            !self
+                .inventory
+                .join("skills")
+                .join("by-project")
+                .join(project_name)
+                .join("skills")
+                .join(skill)
+                .exists(),
+            "must not copy skill trees into by-project"
+        );
+    }
 }
 
 fn write_skill(path: &Path, name: &str, body: &str) {
@@ -147,6 +175,7 @@ fn i4_init_ensures_inventory_root() {
     assert!(ws.inventory.join("layout.json").is_file());
     let layout = fs::read_to_string(ws.inventory.join("layout.json")).unwrap();
     assert!(layout.contains("tink-skill-inventory"));
+    assert!(ws.inventory.join("skills").join("by-project").is_dir());
 }
 
 #[test]
@@ -161,6 +190,28 @@ fn i5_init_with_zen_writes_agents_reference() {
     let agents = fs::read_to_string(project.join("AGENTS.md")).unwrap();
     assert!(agents.contains("[ZEN.md](ZEN.md)"));
     ws.cmd(&project).arg("check").assert().success();
+}
+
+#[test]
+fn i6_init_installs_manage_tink_and_catalogs_name() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+    assert!(Workspace::skill_path(&project, "manage-tink")
+        .join("SKILL.md")
+        .is_file());
+    ws.assert_cataloged("app", "manage-tink");
+}
+
+#[test]
+fn i7_init_no_manage_tink_skips_embedded_skill() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-manage-tink"])
+        .assert()
+        .success();
+    assert!(!Workspace::skill_path(&project, "manage-tink").exists());
 }
 
 // --- A*: local add ---
@@ -178,7 +229,7 @@ fn a1_add_local_skill_installs() {
         .success();
     let installed = Workspace::skill_path(&project, "demo-skill");
     assert!(installed.join("SKILL.md").is_file());
-    assert!(!ws.inventory.join("skills").join("by-project").exists());
+    ws.assert_cataloged("app", "demo-skill");
 }
 
 #[test]
@@ -370,6 +421,61 @@ fn c3_check_refuses_agents_symlink() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("symlink").or(predicate::str::contains("Symlink")));
+}
+
+// --- L*: list ---
+
+#[test]
+fn l1_skill_list_after_init_includes_manage_tink() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+    ws.cmd(&project)
+        .args(["skill", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("manage-tink"));
+}
+
+#[test]
+fn l2_skill_list_fails_without_skills_dir() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["skill", "list"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(".agents/skills"));
+}
+
+// --- V*: CLI surface (skill nest + aliases) ---
+
+#[test]
+fn v1_skill_add_installs_like_top_level_add() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).args(["init", "--no-manage-tink"]).assert().success();
+    let source = ws.root.join("demo-skill");
+    write_skill(&source, "demo-skill", "via skill add");
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .success();
+    assert!(Workspace::skill_path(&project, "demo-skill")
+        .join("SKILL.md")
+        .is_file());
+}
+
+#[test]
+fn v2_skill_check_passes_valid_project() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+    ws.cmd(&project)
+        .args(["skill", "check"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("OK"));
 }
 
 // --- P*: refresh ---

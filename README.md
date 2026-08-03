@@ -1,33 +1,16 @@
+<p align="center">
+  <img src="assets/logo.png" alt="Tink" width="128" />
+</p>
+
 # Tink
 
-**Your agents work best simply. Your config should too.**
+**One skill manager. Any harness. Just works.**
 
 Tink copies complete Agent Skills into a project's `.agents/skills/` directory.
 No registry, no daemon, no required `~/.agents`. Agents that already look for
-project skills (Codex and friends) find them where they live.
+project skills find them where they live.
 
-## How it fits
-
-```mermaid
-flowchart LR
-  subgraph sources [Sources]
-    L[Local skill dir]
-    G[Public GitHub<br/>owner/repo]
-  end
-
-  subgraph project [Your repository]
-    S[".agents/skills/&lt;name&gt;/"]
-    R[".tink-source.json<br/>GitHub imports only"]
-  end
-
-  L -->|tink add| S
-  G -->|tink add| S
-  S -->|tink check| S
-  G -->|tink refresh| S
-```
-
-Live skills are only under `.agents/skills/`. `tink init` may create `~/.tink` as
-a home marker; it is not a skill discovery root and does not mirror project skills.
+If you are an agent, follow [`skills/manage-tink/SKILL.md`](skills/manage-tink/SKILL.md).
 
 ## Install
 
@@ -46,48 +29,41 @@ cargo install --path . --root ~/.local --force
 ## Use
 
 ```console
-# Create .agents/skills/ and ensure ~/.tink exists.
-# In a terminal, asks about ZEN.md and Twotink (skill-scout + skill-eval-loop).
 tink init
-
-# Same choices without prompts
-tink init --with-zen --with-twotink
-tink init --no-zen --no-twotink
-
-# Copy one local skill, or one skill from a public GitHub repo
-tink add ../my-skill
-tink add owner/repository --skill skill-name
-
-# Validate without network or writes
-tink check
-
-# Refresh clean GitHub imports; local edits are refused
-tink refresh
-tink refresh skill-name
+tink skill add ../my-skill
+tink skill list
+tink skill check
 ```
 
-Override the home root with `TINK_HOME` when you need an isolated home (tests,
-multiple machines, etc.).
+### More
+
+```console
+# Init options (non-interactive)
+tink init --with-zen --with-twotink
+tink init --no-zen --no-twotink --no-manage-tink
+
+# GitHub source; --skill when the repo has several skills
+tink skill add owner/repository --skill skill-name
+
+# Refresh clean GitHub imports; local edits are refused
+tink skill refresh
+tink skill refresh skill-name
+```
+
+`tink add`, `tink check`, and `tink refresh` are aliases of the matching
+`tink skill …` commands. Override the home root with `TINK_HOME` when you need
+an isolated home. Successful installs also record skill **names** under
+`~/.tink/skills/by-project/<project>/meta.json` for offline inventory — not a
+second discovery root and not a skill-tree mirror.
 
 Tink does not init Git, stage files, commit, push, or overwrite a skill that
 diverged from what it would install.
 
 ## Model
 
-Each skill is a directory with `SKILL.md` plus whatever it needs. A GitHub
-import also gets a tracked receipt:
-
-```json
-{
-  "source": "https://github.com/owner/repository.git",
-  "revision": "full-git-object-id",
-  "path": "skills/example"
-}
-```
-
-Those three fields are enough to prove whether the install still matches the
-recorded source before a refresh. Tink does not execute skill code during
-`add`, `check`, or `refresh`.
+A skill is a directory with `SKILL.md` plus whatever it needs. GitHub imports
+get a small receipt so refresh can prove the install still matches its source.
+Tink does not execute skill code during add, check, or refresh.
 
 ## Develop
 
@@ -96,7 +72,6 @@ cargo test
 cargo run -q -- init
 ```
 
-What “done” means for this tree is spelled out in [ACCEPTANCE.md](ACCEPTANCE.md).
 Maintainability notes live in [ZEN.md](ZEN.md).
 
 ## License

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use crate::error::Error;
 use crate::git;
 use crate::init;
+use crate::inventory;
 use crate::skills::{self, Provenance, Skill};
 use crate::sources::{self, RemoteSource};
 
@@ -17,11 +18,14 @@ pub struct AddOutcome {
 }
 
 fn place_skill(
+    project_root: &Path,
     skill: &Skill,
     destination_root: &Path,
     provenance: Option<&Provenance>,
 ) -> Result<AddOutcome, Error> {
     let (installed, created) = skills::install_local(skill, destination_root, provenance)?;
+    // Deposit even on identical noop so the home catalog can catch up.
+    inventory::deposit_skill(project_root, &skill.name)?;
     Ok(AddOutcome {
         name: skill.name.clone(),
         created,
@@ -44,7 +48,7 @@ fn select_one_skill(
     if candidates.len() != 1 {
         let commands = candidates
             .iter()
-            .map(|skill| format!("  tink add {source_display} --skill {}", skill.name))
+            .map(|skill| format!("  tink skill add {source_display} --skill {}", skill.name))
             .collect::<Vec<_>>()
             .join("\n");
         return Err(Error::msg(format!(
@@ -55,6 +59,7 @@ fn select_one_skill(
 }
 
 fn install_from_checkout(
+    project_root: &Path,
     source_root: &Path,
     source_display: &str,
     destination_root: &Path,
@@ -88,7 +93,7 @@ fn install_from_checkout(
         }
         _ => None,
     };
-    place_skill(&skill, destination_root, provenance.as_ref())
+    place_skill(project_root, &skill, destination_root, provenance.as_ref())
 }
 
 pub fn add_skill(
@@ -104,6 +109,7 @@ pub fn add_skill(
             .canonicalize()
             .map_err(|e| crate::paths::map_io(local_source, e))?;
         let outcome = install_from_checkout(
+            project_root,
             &source_root,
             &source_root.display().to_string(),
             &destination_root,
@@ -118,7 +124,7 @@ pub fn add_skill(
         return Err(Error::msg(format!("Path does not exist: {source_value}")));
     }
     let remote = sources::parse_remote(source_value)?;
-    let outcome = add_from_remote(&destination_root, &remote, selected_name)?;
+    let outcome = add_from_remote(project_root, &destination_root, &remote, selected_name)?;
     report_add(&outcome);
     Ok(outcome)
 }
@@ -145,12 +151,14 @@ fn report_add(outcome: &AddOutcome) {
 }
 
 fn add_from_remote(
+    project_root: &Path,
     destination_root: &Path,
     remote: &RemoteSource,
     selected_name: Option<&str>,
 ) -> Result<AddOutcome, Error> {
     let (_temp, source_root, revision) = git::checkout(remote)?;
     install_from_checkout(
+        project_root,
         &source_root,
         &remote.display,
         destination_root,

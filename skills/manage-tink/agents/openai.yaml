@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tink"
+  short_description: "Manage repository-owned agent skills simply"
+  default_prompt: "Use $manage-tink to set up or manage this project's agent skills with Tink."

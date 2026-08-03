@@ -8,6 +8,7 @@ mod error;
 mod git;
 mod init;
 mod inventory;
+mod manage_tink;
 mod paths;
 mod refresh;
 mod skills;
@@ -15,7 +16,7 @@ mod sources;
 mod templates;
 
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use crate::error::Error;
@@ -44,7 +45,37 @@ pub enum Command {
         /// Skip Twotink skills
         #[arg(long, group = "twotink")]
         no_twotink: bool,
+        /// Install the embedded manage-tink skill (default)
+        #[arg(long, group = "manage_tink")]
+        with_manage_tink: bool,
+        /// Skip the embedded manage-tink skill
+        #[arg(long, group = "manage_tink")]
+        no_manage_tink: bool,
     },
+    /// Manage project Agent Skills (canonical surface)
+    Skill {
+        #[command(subcommand)]
+        command: SkillCommand,
+    },
+    /// Alias of `tink skill add`
+    Add {
+        /// Local skill/repository path, `owner/repo`, or public GitHub HTTPS URL
+        source: String,
+        /// Skill name when the source contains several skills
+        #[arg(long)]
+        skill: Option<String>,
+    },
+    /// Alias of `tink skill check`
+    Check,
+    /// Alias of `tink skill refresh`
+    Refresh {
+        /// Optional skill name; default refreshes all imported skills
+        name: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SkillCommand {
     /// Copy one complete skill into the project
     Add {
         /// Local skill/repository path, `owner/repo`, or public GitHub HTTPS URL
@@ -53,6 +84,8 @@ pub enum Command {
         #[arg(long)]
         skill: Option<String>,
     },
+    /// List installed project skills
+    List,
     /// Validate project skills without changing anything
     Check,
     /// Refresh clean GitHub-imported skills; refuse local modifications
@@ -88,59 +121,111 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
             no_zen,
             with_twotink,
             no_twotink,
-        } => {
-            let report = init::init_project(
-                &cwd,
-                InitOptions {
-                    with_zen: flag_tri(with_zen, no_zen),
-                    with_twotink: flag_tri(with_twotink, no_twotink),
-                },
-            )?;
-            if report.skills_created {
-                println!("Created {}", report.skills_path.display());
-            } else {
-                println!("Ready {}", report.skills_path.display());
-            }
-            if report.zen_written {
-                println!("Added ZEN.md maintainability principles");
-            }
-            for name in &report.twotink_added {
-                println!("Added {name}");
-            }
-            if report.inventory_created {
-                println!("New home inventory at {}", report.inventory_home.display());
-            } else {
-                println!("Home inventory at {}", report.inventory_home.display());
-            }
-            Ok(())
-        }
+            with_manage_tink,
+            no_manage_tink,
+        } => dispatch_init(
+            &cwd,
+            flag_tri(with_zen, no_zen),
+            flag_tri(with_twotink, no_twotink),
+            flag_tri(with_manage_tink, no_manage_tink),
+        ),
+        Command::Skill { command } => dispatch_skill(&cwd, command),
         Command::Add { source, skill } => {
-            add::add_skill(&cwd, &source, skill.as_deref()).map(|_| ())
+            dispatch_skill_add(&cwd, &source, skill.as_deref())
         }
-        Command::Check => {
-            let skills = check::check_project(&cwd)?;
-            println!("OK {} skill(s)", skills.len());
+        Command::Check => dispatch_skill_check(&cwd),
+        Command::Refresh { name } => dispatch_skill_refresh(&cwd, name.as_deref()),
+    }
+}
+
+fn dispatch_skill(cwd: &Path, command: SkillCommand) -> Result<(), Error> {
+    match command {
+        SkillCommand::Add { source, skill } => {
+            dispatch_skill_add(cwd, &source, skill.as_deref())
+        }
+        SkillCommand::List => dispatch_skill_list(cwd),
+        SkillCommand::Check => dispatch_skill_check(cwd),
+        SkillCommand::Refresh { name } => dispatch_skill_refresh(cwd, name.as_deref()),
+    }
+}
+
+fn dispatch_init(
+    cwd: &Path,
+    with_zen: Option<bool>,
+    with_twotink: Option<bool>,
+    with_manage_tink: Option<bool>,
+) -> Result<(), Error> {
+    let report = init::init_project(
+        cwd,
+        InitOptions {
+            with_zen,
+            with_twotink,
+            with_manage_tink,
+        },
+    )?;
+    if report.skills_created {
+        println!("Created {}", report.skills_path.display());
+    } else {
+        println!("Ready {}", report.skills_path.display());
+    }
+    if report.zen_written {
+        println!("Added ZEN.md maintainability principles");
+    }
+    if let Some(name) = &report.manage_tink_added {
+        println!("Added {name}");
+    }
+    for name in &report.twotink_added {
+        println!("Added {name}");
+    }
+    if report.inventory_created {
+        println!("New home inventory at {}", report.inventory_home.display());
+    } else {
+        println!("Home inventory at {}", report.inventory_home.display());
+    }
+    Ok(())
+}
+
+fn dispatch_skill_add(cwd: &Path, source: &str, skill: Option<&str>) -> Result<(), Error> {
+    add::add_skill(cwd, source, skill).map(|_| ())
+}
+
+fn dispatch_skill_check(cwd: &Path) -> Result<(), Error> {
+    let skills = check::check_project(cwd)?;
+    println!("OK {} skill(s)", skills.len());
+    Ok(())
+}
+
+fn dispatch_skill_list(cwd: &Path) -> Result<(), Error> {
+    let skills = check::check_project(cwd)?;
+    if skills.is_empty() {
+        println!("(no skills)");
+    } else {
+        for skill in &skills {
+            println!("{}", skill.name);
+        }
+    }
+    Ok(())
+}
+
+fn dispatch_skill_refresh(cwd: &Path, name: Option<&str>) -> Result<(), Error> {
+    match name {
+        Some(name) => {
+            let changed = refresh::refresh_skill(cwd, name)?;
+            if changed {
+                println!("Refreshed {name}");
+            } else {
+                println!("Unchanged {name}");
+            }
             Ok(())
         }
-        Command::Refresh { name } => match name {
-            Some(name) => {
-                let changed = refresh::refresh_skill(&cwd, &name)?;
-                if changed {
-                    println!("Refreshed {name}");
-                } else {
-                    println!("Unchanged {name}");
-                }
-                Ok(())
+        None => {
+            let refreshed = refresh::refresh_all(cwd)?;
+            if refreshed.is_empty() {
+                println!("Unchanged (no imported skills updated)");
+            } else {
+                println!("Refreshed {}", refreshed.join(", "));
             }
-            None => {
-                let refreshed = refresh::refresh_all(&cwd)?;
-                if refreshed.is_empty() {
-                    println!("Unchanged (no imported skills updated)");
-                } else {
-                    println!("Refreshed {}", refreshed.join(", "));
-                }
-                Ok(())
-            }
-        },
+            Ok(())
+        }
     }
 }

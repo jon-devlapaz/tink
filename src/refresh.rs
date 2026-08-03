@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::check::{self, read_provenance};
 use crate::error::Error;
 use crate::git;
+use crate::inventory;
 use crate::skills::{self, Provenance, Skill};
 use crate::sources;
 
@@ -112,7 +113,10 @@ pub fn refresh_skill(root: &Path, name: &str) -> Result<bool, Error> {
         .ok_or_else(|| Error::msg(format!("Installed skill not found: {name}")))?;
     match refresh_one(installed)? {
         None => Err(Error::msg(format!("Local skill has no remote source: {name}"))),
-        Some(changed) => Ok(changed),
+        Some(changed) => {
+            inventory::deposit_skill(root, name)?;
+            Ok(changed)
+        }
     }
 }
 
@@ -120,8 +124,15 @@ pub fn refresh_all(root: &Path) -> Result<Vec<String>, Error> {
     let installed = check::check_project(root)?;
     let mut refreshed = Vec::new();
     for skill in &installed {
-        if let Some(true) = refresh_one(skill)? {
-            refreshed.push(skill.name.clone());
+        match refresh_one(skill)? {
+            Some(true) => {
+                inventory::deposit_skill(root, &skill.name)?;
+                refreshed.push(skill.name.clone());
+            }
+            Some(false) => {
+                inventory::deposit_skill(root, &skill.name)?;
+            }
+            None => {}
         }
     }
     Ok(refreshed)
