@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::Error;
 use crate::paths::{map_io, refuse_symlink};
+use crate::style::CliStyle;
 
 #[derive(Debug, Default)]
 pub struct DestroyReport {
@@ -60,12 +61,16 @@ fn confirm_destroy() -> Result<(), Error> {
             "Refusing to destroy without confirmation (pass --yes, or run in a terminal)",
         ));
     }
+    let style = CliStyle::auto_stdout();
     let mut stdout = io::stdout();
     write!(
         stdout,
-        "Delete .agents/, ZEN.md, and AGENTS.md in this project? [y/N] "
+        "{} {}",
+        style.warn("Delete .agents/, ZEN.md, and AGENTS.md in this project?"),
+        style.accent("[y/N]")
     )
     .map_err(|e| Error::msg(format!("prompt: {e}")))?;
+    write!(stdout, " ").map_err(|e| Error::msg(format!("prompt: {e}")))?;
     stdout
         .flush()
         .map_err(|e| Error::msg(format!("prompt: {e}")))?;

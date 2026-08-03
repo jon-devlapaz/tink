@@ -14,6 +14,7 @@ mod paths;
 mod refresh;
 mod skills;
 mod sources;
+mod style;
 mod templates;
 
 use clap::{Parser, Subcommand};
@@ -22,6 +23,7 @@ use std::process::ExitCode;
 
 use crate::error::Error;
 use crate::init::InitOptions;
+use crate::style::CliStyle;
 
 #[derive(Debug, Parser)]
 #[command(name = "tink", version, about = "Install Agent Skills into .agents/skills/")]
@@ -127,7 +129,8 @@ pub fn run(cli: Cli, cwd: PathBuf) -> ExitCode {
     match dispatch(cli, cwd) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            eprintln!("{err}");
+            let style = CliStyle::auto_stderr();
+            eprintln!("{}", style.error(&err));
             ExitCode::from(1)
         }
     }
@@ -155,12 +158,17 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
         Command::Check => dispatch_skill_check(&cwd),
         Command::Refresh { name } => dispatch_skill_refresh(&cwd, name.as_deref()),
         Command::Destroy { yes } => {
+            let style = CliStyle::auto_stdout();
             let report = destroy::destroy_project(&cwd, yes)?;
             if report.removed.is_empty() {
-                println!("Nothing to destroy");
+                println!("{}", style.muted("Nothing to destroy"));
             } else {
                 for path in &report.removed {
-                    println!("Removed {}", path.display());
+                    println!(
+                        "{} {}",
+                        style.success("Removed"),
+                        style.accent(path.display())
+                    );
                 }
             }
             Ok(())
@@ -191,6 +199,7 @@ fn dispatch_init(
     with_tink_skills: Option<bool>,
     with_manage_tink: Option<bool>,
 ) -> Result<(), Error> {
+    let style = CliStyle::auto_stdout();
     let report = init::init_project(
         cwd,
         InitOptions {
@@ -200,23 +209,43 @@ fn dispatch_init(
         },
     )?;
     if report.skills_created {
-        println!("Created {}", report.skills_path.display());
+        println!(
+            "{} {}",
+            style.success("Created"),
+            style.accent(report.skills_path.display())
+        );
     } else {
-        println!("Ready {}", report.skills_path.display());
+        println!(
+            "{} {}",
+            style.success("Ready"),
+            style.accent(report.skills_path.display())
+        );
     }
     if report.zen_written {
-        println!("Added ZEN.md maintainability principles");
+        println!(
+            "{} {}",
+            style.success("Added"),
+            style.accent("ZEN.md maintainability principles")
+        );
     }
     if let Some(name) = &report.manage_tink_added {
-        println!("Added {name}");
+        println!("{} {}", style.success("Added"), style.accent(name));
     }
     for name in &report.tink_skills_added {
-        println!("Added {name}");
+        println!("{} {}", style.success("Added"), style.accent(name));
     }
     if report.inventory_created {
-        println!("New home inventory at {}", report.inventory_home.display());
+        println!(
+            "{} {}",
+            style.success("New home inventory at"),
+            style.accent(report.inventory_home.display())
+        );
     } else {
-        println!("Home inventory at {}", report.inventory_home.display());
+        println!(
+            "{} {}",
+            style.muted("Home inventory at"),
+            style.accent(report.inventory_home.display())
+        );
     }
     Ok(())
 }
@@ -226,54 +255,76 @@ fn dispatch_skill_add(cwd: &Path, source: &str, skill: Option<&str>) -> Result<(
 }
 
 fn dispatch_skill_check(cwd: &Path) -> Result<(), Error> {
+    let style = CliStyle::auto_stdout();
     let skills = check::check_project(cwd)?;
-    println!("OK {} skill(s)", skills.len());
+    println!(
+        "{} {} skill(s)",
+        style.success("OK"),
+        style.accent(skills.len())
+    );
     Ok(())
 }
 
 fn dispatch_skill_list(cwd: &Path) -> Result<(), Error> {
+    let style = CliStyle::auto_stdout();
     let skills = check::check_project(cwd)?;
     if skills.is_empty() {
-        println!("(no skills)");
+        println!("{}", style.muted("(no skills)"));
     } else {
         for skill in &skills {
-            println!("{}", skill.name);
+            println!("{}", style.accent(&skill.name));
         }
     }
     Ok(())
 }
 
 fn dispatch_skill_list_home() -> Result<(), Error> {
+    let style = CliStyle::auto_stdout();
     let entries = inventory::list_catalog(None)?;
     if entries.is_empty() {
-        println!("(no catalog entries)");
+        println!("{}", style.muted("(no catalog entries)"));
     } else {
-        // Header + TSV rows: stable for agents, scannable for humans.
-        println!("project\troot\tskill");
+        // Header + TSV rows: plain when piped; lightly role-colored on a TTY.
+        println!(
+            "{}\t{}\t{}",
+            style.muted("project"),
+            style.muted("root"),
+            style.muted("skill")
+        );
         for entry in &entries {
-            println!("{}\t{}\t{}", entry.project, entry.root, entry.skill);
+            println!(
+                "{}\t{}\t{}",
+                style.muted(&entry.project),
+                style.muted(&entry.root),
+                style.accent(&entry.skill)
+            );
         }
     }
     Ok(())
 }
 
 fn dispatch_skill_refresh(cwd: &Path, name: Option<&str>) -> Result<(), Error> {
+    let style = CliStyle::auto_stdout();
     match name {
         Some(name) => {
             let changed = refresh::refresh_skill(cwd, name)?;
             if changed {
-                println!("Refreshed {name}");
+                println!("{} {}", style.success("Refreshed"), style.accent(name));
             } else {
-                println!("Unchanged {name}");
+                println!("{} {}", style.muted("Unchanged"), style.accent(name));
             }
             Ok(())
         }
         None => {
             let refreshed = refresh::refresh_all(cwd)?;
             if refreshed.is_empty() {
-                println!("Unchanged (no imported skills updated)");
+                println!("{}", style.muted("Unchanged (no imported skills updated)"));
             } else {
-                println!("Refreshed {}", refreshed.join(", "));
+                println!(
+                    "{} {}",
+                    style.success("Refreshed"),
+                    style.accent(refreshed.join(", "))
+                );
             }
             Ok(())
         }

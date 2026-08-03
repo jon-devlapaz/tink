@@ -8,6 +8,7 @@ use crate::error::Error;
 use crate::inventory;
 use crate::manage_tink;
 use crate::paths::{map_io, mkdir_p, require_directory, require_file};
+use crate::style::CliStyle;
 use crate::templates::{
     self, TINK_SKILLS, TINK_SKILLS_SOURCE, ZEN, ZEN_REFERENCE, ZEN_REFERENCE_MARKER,
 };
@@ -48,7 +49,8 @@ pub fn opt_in(explicit: Option<bool>, question: &str) -> Result<bool, Error> {
     if !io::stdin().is_terminal() {
         return Ok(false);
     }
-    print!("{question} [y/N] ");
+    let style = CliStyle::auto_stdout();
+    print!("{} {}", style.warn(question), style.accent("[y/N] "));
     io::stdout()
         .flush()
         .map_err(|e| Error::msg(format!("prompt: {e}")))?;

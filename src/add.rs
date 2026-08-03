@@ -8,6 +8,7 @@ use crate::init;
 use crate::inventory;
 use crate::skills::{self, Provenance, Skill};
 use crate::sources::{self, RemoteSource};
+use crate::style::CliStyle;
 
 #[derive(Debug)]
 #[allow(dead_code)] // Returned for callers / future CLI reporting.
@@ -139,14 +140,20 @@ fn looks_like_filesystem_path(value: &str) -> bool {
 }
 
 fn report_add(outcome: &AddOutcome) {
+    let style = CliStyle::auto_stdout();
     if outcome.created {
         println!(
-            "Installed {} → {}",
-            outcome.name,
-            outcome.project_path.display()
+            "{} {} → {}",
+            style.success("Installed"),
+            style.accent(&outcome.name),
+            style.accent(outcome.project_path.display())
         );
     } else {
-        println!("Unchanged {}", outcome.name);
+        println!(
+            "{} {}",
+            style.muted("Unchanged"),
+            style.accent(&outcome.name)
+        );
     }
 }
 
