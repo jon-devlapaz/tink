@@ -6,10 +6,6 @@ Tink copies complete Agent Skills into a project's `.agents/skills/` directory.
 No registry, no daemon, no required `~/.agents`. Agents that already look for
 project skills (Codex and friends) find them where they live.
 
-This is the Rust CLI. On disk it matches the older Python `tink-agents` layout,
-so you can share a repo across both. The verbs are shorter: `init`, `refresh`,
-`inventory` instead of `setup` / `pull` / `dump`.
-
 ## How it fits
 
 ```mermaid
@@ -40,7 +36,7 @@ you (and for `tink inventory list`). Agents should not load skills from there.
 
 ## Install
 
-Needs Rust (edition 2024 toolchain) and `git` on `PATH` for GitHub sources.
+Needs a current Rust toolchain and `git` on `PATH` for GitHub sources.
 
 ```console
 cargo install --git https://github.com/jon-devlapaz/tink.git --locked
@@ -51,8 +47,6 @@ From a checkout:
 ```console
 cargo install --path . --root ~/.local --force
 ```
-
-Put that install root's `bin` ahead of any older Python `tink` on your `PATH`.
 
 ## Use
 
@@ -75,8 +69,8 @@ tink refresh skill-name
 tink inventory list
 ```
 
-Override the inventory root with `TINK_HOME`. If you also use Python
-`tink-agents`, set `TINK_DUMP_DIR` to the same path so both tools share one tree.
+Override the inventory root with `TINK_HOME` when you need an isolated home
+(tests, multiple machines, etc.).
 
 Tink does not init Git, stage files, commit, push, or overwrite a skill that
 diverged from what it would install.

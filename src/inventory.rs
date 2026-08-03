@@ -1,6 +1,6 @@
 //! Offline home inventory (`~/.tink` or `TINK_HOME`).
 //!
-//! Not an agent discovery root. Compatible layout with Python tink-agents.
+//! Not an agent discovery root.
 
 use std::env;
 use std::fs;
@@ -13,8 +13,6 @@ use crate::paths::{map_io, mkdir_p, refuse_symlink, require_directory, require_f
 use crate::skills;
 
 pub const TINK_HOME_ENV: &str = "TINK_HOME";
-/// Python override; accepted so both tools can share a test inventory root.
-pub const TINK_DUMP_DIR_ENV: &str = "TINK_DUMP_DIR";
 pub const TINK_HOME_NAME: &str = ".tink";
 pub const LAYOUT_FILENAME: &str = "layout.json";
 pub const LAYOUT_KIND: &str = "tink-skill-inventory";
@@ -67,11 +65,6 @@ pub struct InventorySkill {
 /// Resolve the offline inventory root.
 pub fn resolve_home() -> Result<PathBuf, Error> {
     if let Ok(custom) = env::var(TINK_HOME_ENV) {
-        if !custom.is_empty() {
-            return Ok(PathBuf::from(custom));
-        }
-    }
-    if let Ok(custom) = env::var(TINK_DUMP_DIR_ENV) {
         if !custom.is_empty() {
             return Ok(PathBuf::from(custom));
         }

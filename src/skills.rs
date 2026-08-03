@@ -272,9 +272,8 @@ pub fn copy_skill_tree(
 }
 
 fn provenance_bytes(provenance: &Provenance) -> Result<Vec<u8>, Error> {
-    // Fixed key order matches Python tink-agents (`source`, `revision`, `path`).
-    // BTreeMap/`serde_json` alphabetical order would break byte-identical preflight
-    // against Python-written receipts.
+    // Stable key order (`source`, `revision`, `path`) so preflight byte-compares
+    // of `.tink-source.json` stay deterministic.
     for key in ["source", "revision", "path"] {
         if !provenance.contains_key(key) {
             return Err(Error::msg(format!(
@@ -406,7 +405,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn provenance_bytes_match_python_key_order() {
+    fn provenance_bytes_stable_key_order() {
         let mut provenance = Provenance::new();
         // Insert in alphabetical order to prove serialization ignores map order.
         provenance.insert("path".into(), "skills/remote-skill".into());

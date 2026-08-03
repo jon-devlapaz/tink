@@ -11,7 +11,6 @@ below has an automated test that passes on macOS with `git` on `PATH`.
 self-update, private GitHub auth, Windows, Linux CI as a gate.
 
 **Dogfood:** Prefer an installed `tink` from this repo, or `cargo run -q -- …`.
-If an older Python `tink` is still on `PATH`, put this binary ahead of it.
 
 ## Commands
 
@@ -23,7 +22,7 @@ If an older Python `tink` is still on `PATH`, put this binary ahead of it.
 | `tink refresh [name]` | Refresh clean GitHub imports; refuse local edits |
 | `tink inventory list` | List inventory skills for this project |
 
-## On-disk contracts (compatible with Python tink-agents)
+## On-disk contracts
 
 | Artifact | Contract |
 |---|---|

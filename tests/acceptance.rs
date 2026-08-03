@@ -36,7 +36,6 @@ impl Workspace {
         let mut cmd = cargo_bin_cmd!("tink");
         cmd.current_dir(cwd);
         cmd.env("TINK_HOME", &self.inventory);
-        cmd.env_remove("TINK_DUMP_DIR");
         cmd
     }
 
