@@ -91,6 +91,12 @@ fn install_from_checkout(
                 })?
                 .to_string_lossy()
                 .replace('\\', "/");
+            // Repo-root skills strip to ""; refresh already treats "." as root.
+            let rel = if rel.is_empty() {
+                ".".to_string()
+            } else {
+                rel
+            };
             let mut map = Provenance::new();
             map.insert("source".into(), url.to_string());
             map.insert("revision".into(), rev.to_string());

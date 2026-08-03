@@ -73,6 +73,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | R2 | `skill add` non-GitHub or non-HTTPS remote | Exit ≠ 0; refuse |
 | R3 | `skill add ./missing-skill` (path-like, absent) | Exit ≠ 0; "Path does not exist"; **no** GitHub network fetch |
 | R4 | `skill add /abs/missing` | Exit ≠ 0; "Path does not exist" |
+| R5 | `skill add owner/repo` when `SKILL.md` is at repo root | Receipt `path` is `"."` (non-empty); `skill check` passes; `skill refresh` updates from repo root |
 
 ### Check
 

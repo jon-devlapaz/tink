@@ -449,6 +449,65 @@ fn r4_add_absolute_missing_is_path_not_remote_shape() {
         .stderr(predicate::str::contains("Path does not exist"));
 }
 
+#[test]
+fn r5_add_root_level_skill_writes_dot_path_check_and_refresh() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("root-skill-repo");
+    init_repo(&remote);
+    write_skill(&remote, "root-skill", "v1");
+    commit_all(&remote, "v1");
+    let public = "https://github.com/example/root-skill.git";
+    let redirect = github_redirect(&remote, public);
+
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", "example/root-skill"]);
+    for (k, v) in &redirect {
+        add.env(k, v);
+    }
+    add.assert().success();
+
+    let receipt = fs::read_to_string(
+        Workspace::skill_path(&project, "root-skill").join(".tink-source.json"),
+    )
+    .unwrap();
+    assert!(
+        receipt.contains("\"path\": \".\"") || receipt.contains("\"path\":\".\""),
+        "expected path \".\": {receipt}"
+    );
+    assert!(!receipt.contains("\"path\": \"\""));
+
+    ws.cmd(&project)
+        .args(["skill", "check"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("OK"));
+
+    write_skill(&remote, "root-skill", "v2");
+    let new_rev = commit_all(&remote, "v2");
+    let mut refresh = ws.cmd(&project);
+    refresh.args(["skill", "refresh", "root-skill"]);
+    for (k, v) in &redirect {
+        refresh.env(k, v);
+    }
+    refresh.assert().success();
+
+    let skill_md =
+        fs::read_to_string(Workspace::skill_path(&project, "root-skill").join("SKILL.md")).unwrap();
+    assert!(skill_md.contains("v2"), "{skill_md}");
+    let receipt = fs::read_to_string(
+        Workspace::skill_path(&project, "root-skill").join(".tink-source.json"),
+    )
+    .unwrap();
+    assert!(receipt.contains(&new_rev));
+    assert!(receipt.contains("\"path\": \".\"") || receipt.contains("\"path\":\".\""));
+}
+
 // --- C*: check ---
 
 #[test]
