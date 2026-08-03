@@ -2,7 +2,7 @@
   <img src="assets/logo.png" alt="Tink" width="128" />
 </p>
 
-# Tink
+# tink
 
 **One skill manager. Any harness. Just works.**
 
