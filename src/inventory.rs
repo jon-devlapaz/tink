@@ -1,8 +1,9 @@
 //! Offline home inventory root (`~/.tink` or `TINK_HOME`).
 //!
 //! Not an agent discovery root. Live skills stay under the project's
-//! `.agents/skills/`. Home keeps a lean by-project **name catalog** so you can
-//! browse which skills a project has without opening it.
+//! `.agents/skills/`. Home keeps:
+//! - `skills/<name>/` — archive of skill trees from successful adds
+//! - `catalog/by-project/<project>/meta.json` — grow-only name index
 
 use std::collections::BTreeSet;
 use std::env;
@@ -13,6 +14,7 @@ use serde_json::{json, Value};
 
 use crate::error::Error;
 use crate::paths::{map_io, mkdir_p, refuse_symlink, require_directory, require_file};
+use crate::skills::{self, Provenance, Skill};
 
 pub const TINK_HOME_ENV: &str = "TINK_HOME";
 pub const TINK_HOME_NAME: &str = ".tink";
@@ -26,9 +28,9 @@ const INVENTORY_README: &str = "\
 Tink home directory. This is **not** an agent skill discovery root. Agents load
 skills only from a project's `.agents/skills/`.
 
-Successful installs record skill **names** under
-`skills/by-project/<project>/meta.json` for offline inventory. That catalog is
-not a second copy of skill trees.
+Successful installs:
+- archive skill trees under `skills/<name>/`
+- record skill **names** under `catalog/by-project/<project>/meta.json`
 
 Default location: `~/.tink` (override with `TINK_HOME`).
 ";
@@ -44,12 +46,17 @@ pub fn resolve_home() -> Result<PathBuf, Error> {
     Ok(PathBuf::from(home).join(TINK_HOME_NAME))
 }
 
-/// Path to `skills/by-project` under a home root.
+/// Path to `catalog/by-project` under a home root.
 pub fn by_project_path(home: &Path) -> PathBuf {
-    home.join("skills").join(BY_PROJECT)
+    home.join("catalog").join(BY_PROJECT)
 }
 
-/// Ensure inventory root + `skills/by-project` + layout marker.
+/// Path to the skill-tree archive root (`skills/`).
+pub fn skills_archive_path(home: &Path) -> PathBuf {
+    home.join("skills")
+}
+
+/// Ensure inventory root + archive dir + catalog + layout marker.
 ///
 /// Returns `(path, created)` where `created` is true only when the root
 /// directory did not exist before this call.
@@ -67,12 +74,52 @@ pub fn ensure_inventory_root(root: Option<&Path>) -> Result<(PathBuf, bool), Err
         )));
     }
     mkdir_p(&root)?;
-    let skills = root.join("skills");
-    mkdir_p(&skills)?;
-    let by_project = by_project_path(&root);
-    mkdir_p(&by_project)?;
+    mkdir_p(&skills_archive_path(&root))?;
+    migrate_catalog_if_needed(&root)?;
+    mkdir_p(&by_project_path(&root))?;
     write_layout_marker(&root)?;
     Ok((root, created))
+}
+
+/// True when `skills/by-project` looks like the old name catalog (not a skill tree).
+fn looks_like_legacy_catalog(path: &Path) -> bool {
+    path.is_dir() && !path.join("SKILL.md").is_file()
+}
+
+/// Older homes kept the name catalog at `skills/by-project/`; move it out so
+/// `skills/<name>/` can hold archived trees.
+fn migrate_catalog_if_needed(home: &Path) -> Result<(), Error> {
+    let old = home.join("skills").join(BY_PROJECT);
+    let new = by_project_path(home);
+    if !old.exists() {
+        return Ok(());
+    }
+    if old.is_symlink() {
+        return Err(Error::msg(format!(
+            "Refusing legacy catalog symlink {}: replace it with a real directory, then re-run",
+            old.display()
+        )));
+    }
+    if !old.is_dir() {
+        return Err(Error::msg(format!(
+            "Refusing non-directory legacy catalog {}: move or delete it, then re-run",
+            old.display()
+        )));
+    }
+    // A skill tree mistakenly archived as by-project has SKILL.md — leave it.
+    if !looks_like_legacy_catalog(&old) {
+        return Ok(());
+    }
+    if new.exists() {
+        return Err(Error::msg(format!(
+            "Catalog split across {} and {}: keep catalog/by-project, remove skills/by-project, then re-run",
+            old.display(),
+            new.display()
+        )));
+    }
+    mkdir_p(&home.join("catalog"))?;
+    fs::rename(&old, &new).map_err(|e| map_io(&old, e))?;
+    Ok(())
 }
 
 fn write_layout_marker(root: &Path) -> Result<(), Error> {
@@ -93,7 +140,13 @@ fn write_layout_marker(root: &Path) -> Result<(), Error> {
 
     let readme = root.join("README.md");
     require_file(&readme)?;
-    if !readme.exists() {
+    let refresh_readme = if readme.is_file() {
+        let existing = fs::read_to_string(&readme).map_err(|e| map_io(&readme, e))?;
+        existing.contains("skills/by-project") || !existing.contains("catalog/by-project")
+    } else {
+        true
+    };
+    if refresh_readme {
         fs::write(&readme, INVENTORY_README).map_err(|e| map_io(&readme, e))?;
     }
     Ok(())
@@ -124,7 +177,7 @@ fn project_catalog_dir(home: &Path, project_root: &Path) -> Result<PathBuf, Erro
 /// Record that `skill_name` is installed in `project_root` (grow-only name list).
 ///
 /// Last writer wins on `meta.json` `root` when two projects share a basename.
-/// Does **not** copy skill trees. Failure fails the caller.
+/// Failure fails the caller.
 pub fn deposit_skill(project_root: &Path, skill_name: &str) -> Result<PathBuf, Error> {
     deposit_skill_into(None, project_root, skill_name)
 }
@@ -181,6 +234,105 @@ fn deposit_skill_into(
     Ok(catalog)
 }
 
+/// Refuse if home archive would diverge; no-op if identical or missing.
+pub fn preflight_archive(skill: &Skill, provenance: Option<&Provenance>) -> Result<(), Error> {
+    let (home, _) = ensure_inventory_root(None)?;
+    let archive = skills_archive_path(&home);
+    mkdir_p(&archive)?;
+    skills::preflight_install(skill, &archive, provenance)?;
+    Ok(())
+}
+
+/// Copy skill tree into `~/.tink/skills/<name>/` (identical → noop).
+pub fn deposit_archive(skill: &Skill, provenance: Option<&Provenance>) -> Result<PathBuf, Error> {
+    let (home, _) = ensure_inventory_root(None)?;
+    let archive = skills_archive_path(&home);
+    mkdir_p(&archive)?;
+    let (path, _) = skills::install_local(skill, &archive, provenance)?;
+    Ok(path)
+}
+
+fn archive_tracks_project(home_skill: &Path, project_skill: &Path) -> Result<bool, Error> {
+    if skills::skill_contents_equal(home_skill, project_skill)? {
+        return Ok(true);
+    }
+    // Allow a missing/different receipt when the skill body still matches.
+    skills::skill_contents_equal_except(
+        home_skill,
+        project_skill,
+        &[".tink-source.json"],
+    )
+}
+
+/// Before refreshing a project skill, ensure the home archive can accept `new`
+/// (missing, already new, or still equal to the current project install).
+pub fn preflight_archive_refresh(
+    project_installed: &Path,
+    new_skill: &Skill,
+    new_provenance: &Provenance,
+) -> Result<(), Error> {
+    let (home, _) = ensure_inventory_root(None)?;
+    let archive = skills_archive_path(&home);
+    mkdir_p(&archive)?;
+    match skills::preflight_install(new_skill, &archive, Some(new_provenance)) {
+        Ok(_) => Ok(()),
+        Err(err) if err.to_string().contains("Refusing to overwrite") => {
+            let home_skill = archive.join(&new_skill.name);
+            if home_skill.is_dir() && archive_tracks_project(&home_skill, project_installed)? {
+                Ok(())
+            } else {
+                Err(Error::msg(format!(
+                    "Refusing to refresh {}: home archive diverges",
+                    new_skill.name
+                )))
+            }
+        }
+        Err(err) => Err(err),
+    }
+}
+
+/// Keep `$TINK_HOME/skills/<name>/` aligned with the installed project skill.
+///
+/// On same-revision refresh the project install is source of truth: backfill or
+/// repair a stale archive (including after a failed post-refresh deposit).
+pub fn sync_archive_from_installed(installed: &Skill) -> Result<(), Error> {
+    let (home, _) = ensure_inventory_root(None)?;
+    let archive = skills_archive_path(&home);
+    mkdir_p(&archive)?;
+    let target = archive.join(&installed.name);
+    if target.is_dir() && skills::skill_contents_equal(&target, &installed.path)? {
+        return Ok(());
+    }
+    if target.exists() || target.is_symlink() {
+        refuse_symlink(&target)?;
+        if target.is_dir() {
+            fs::remove_dir_all(&target).map_err(|e| map_io(&target, e))?;
+        } else {
+            fs::remove_file(&target).map_err(|e| map_io(&target, e))?;
+        }
+    }
+    skills::install_local(installed, &archive, None)?;
+    Ok(())
+}
+
+/// After a project refresh passed [`preflight_archive_refresh`], write the new
+/// tree into the home archive (replace if present, install if missing).
+pub fn deposit_archive_refresh(
+    new_skill: &Skill,
+    new_provenance: &Provenance,
+) -> Result<(), Error> {
+    let (home, _) = ensure_inventory_root(None)?;
+    let archive = skills_archive_path(&home);
+    mkdir_p(&archive)?;
+    let target = archive.join(&new_skill.name);
+    if target.is_dir() {
+        skills::replace_verified(new_skill, &archive, new_provenance)?;
+    } else {
+        skills::install_local(new_skill, &archive, Some(new_provenance))?;
+    }
+    Ok(())
+}
+
 /// One skill row from the offline by-project name catalog.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CatalogEntry {
@@ -190,10 +342,6 @@ pub struct CatalogEntry {
 }
 
 /// Read `$TINK_HOME` / `~/.tink` by-project catalogs (read-only; creates nothing).
-///
-/// Skips unreadable or invalid `meta.json` entries after recording them as errors
-/// only when the by-project root itself is unsafe; individual bad metas are skipped
-/// with no fatal error so one corrupt catalog does not hide the rest.
 pub fn list_catalog(home: Option<&Path>) -> Result<Vec<CatalogEntry>, Error> {
     let home = match home {
         Some(path) => path.to_path_buf(),
@@ -203,7 +351,25 @@ pub fn list_catalog(home: Option<&Path>) -> Result<Vec<CatalogEntry>, Error> {
         return Ok(Vec::new());
     }
     refuse_symlink(&home)?;
-    let by_project = by_project_path(&home);
+    let new = by_project_path(&home);
+    let legacy = home.join("skills").join(BY_PROJECT);
+    let legacy_catalog = looks_like_legacy_catalog(&legacy);
+    if new.exists() && legacy_catalog {
+        return Err(Error::msg(format!(
+            "Catalog split across {} and {}: keep catalog/by-project, remove skills/by-project, then re-run",
+            legacy.display(),
+            new.display()
+        )));
+    }
+    // Prefer new location; fall back to legacy catalog until migration runs.
+    // Ignore skills/by-project when it is a skill tree (has SKILL.md).
+    let by_project = if new.exists() {
+        new
+    } else if legacy_catalog {
+        legacy
+    } else {
+        new
+    };
     if !by_project.exists() {
         return Ok(Vec::new());
     }
@@ -275,14 +441,13 @@ pub fn list_catalog(home: Option<&Path>) -> Result<Vec<CatalogEntry>, Error> {
     Ok(entries)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
 
     #[test]
-    fn ensure_creates_layout_and_by_project() {
+    fn ensure_creates_layout_and_catalog() {
         let temp = TempDir::new().unwrap();
         let root = temp.path().join("inv");
         let (path, created) = ensure_inventory_root(Some(&root)).unwrap();
@@ -290,8 +455,87 @@ mod tests {
         assert_eq!(path, root);
         assert!(root.join("layout.json").is_file());
         assert!(by_project_path(&root).is_dir());
+        assert!(skills_archive_path(&root).is_dir());
+        assert!(!root.join("skills").join(BY_PROJECT).exists());
         let (_, created_again) = ensure_inventory_root(Some(&root)).unwrap();
         assert!(!created_again);
+    }
+
+    #[test]
+    fn migrate_moves_legacy_by_project() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("inv");
+        let legacy = root.join("skills").join(BY_PROJECT).join("app");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("meta.json"), "{\"name\":\"app\",\"root\":\"/tmp/app\",\"skills\":[\"x\"]}\n")
+            .unwrap();
+        ensure_inventory_root(Some(&root)).unwrap();
+        assert!(by_project_path(&root).join("app").join("meta.json").is_file());
+        assert!(!root.join("skills").join(BY_PROJECT).exists());
+    }
+
+    #[test]
+    fn migrate_refuses_when_both_catalog_paths_exist() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("inv");
+        fs::create_dir_all(root.join("skills").join(BY_PROJECT).join("old")).unwrap();
+        fs::create_dir_all(by_project_path(&root).join("new")).unwrap();
+        let err = ensure_inventory_root(Some(&root)).unwrap_err();
+        assert!(err.to_string().contains("Catalog split"), "{err}");
+    }
+
+    #[test]
+    fn migrate_refuses_legacy_file() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("inv");
+        fs::create_dir_all(root.join("skills")).unwrap();
+        fs::write(root.join("skills").join(BY_PROJECT), "not a dir\n").unwrap();
+        let err = ensure_inventory_root(Some(&root)).unwrap_err();
+        assert!(err.to_string().contains("non-directory legacy catalog"), "{err}");
+    }
+
+    #[test]
+    fn list_catalog_refuses_split_paths() {
+        let temp = TempDir::new().unwrap();
+        let home = temp.path().join("home");
+        fs::create_dir_all(home.join("skills").join(BY_PROJECT).join("app")).unwrap();
+        fs::create_dir_all(by_project_path(&home).join("app")).unwrap();
+        let err = list_catalog(Some(&home)).unwrap_err();
+        assert!(err.to_string().contains("Catalog split"), "{err}");
+    }
+
+    #[test]
+    fn skill_shaped_by_project_dir_is_not_legacy_catalog() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("inv");
+        let skill_shaped = root.join("skills").join(BY_PROJECT);
+        fs::create_dir_all(&skill_shaped).unwrap();
+        fs::write(skill_shaped.join("SKILL.md"), "---\nname: by-project\ndescription: x\n---\n").unwrap();
+        fs::create_dir_all(by_project_path(&root).join("app")).unwrap();
+        ensure_inventory_root(Some(&root)).unwrap();
+        assert!(skill_shaped.join("SKILL.md").is_file());
+        assert!(list_catalog(Some(&root)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn ensure_refreshes_stale_home_readme() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("inv");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("layout.json"),
+            format!("{{\n  \"kind\": \"{LAYOUT_KIND}\"\n}}\n"),
+        )
+        .unwrap();
+        fs::write(
+            root.join("README.md"),
+            "old text mentioning skills/by-project only\n",
+        )
+        .unwrap();
+        ensure_inventory_root(Some(&root)).unwrap();
+        let readme = fs::read_to_string(root.join("README.md")).unwrap();
+        assert!(readme.contains("catalog/by-project"));
+        assert!(!readme.contains("skills/by-project/<project>"));
     }
 
     #[test]
@@ -306,7 +550,7 @@ mod tests {
     }
 
     #[test]
-    fn deposit_records_name_not_tree() {
+    fn deposit_records_name_not_under_catalog_tree() {
         let temp = TempDir::new().unwrap();
         let home = temp.path().join("home");
         let project = temp.path().join("app");
@@ -320,7 +564,7 @@ mod tests {
             .unwrap()
             .iter()
             .any(|s| s == "grill-me"));
-        assert!(!catalog.join("skills").join("grill-me").exists());
+        assert!(!catalog.join("grill-me").exists());
     }
 
     #[test]

@@ -68,25 +68,10 @@ pub enum Command {
         #[arg(long, group = "manage_tink")]
         no_manage_tink: bool,
     },
-    /// Manage project Agent Skills (canonical surface)
+    /// Manage project Agent Skills
     Skill {
         #[command(subcommand)]
         command: SkillCommand,
-    },
-    /// Alias of `tink skill add`
-    Add {
-        /// Local skill/repository path, `owner/repo`, or public GitHub HTTPS URL
-        source: String,
-        /// Skill name when the source contains several skills
-        #[arg(long)]
-        skill: Option<String>,
-    },
-    /// Alias of `tink skill check`
-    Check,
-    /// Alias of `tink skill refresh`
-    Refresh {
-        /// Optional skill name; default refreshes all imported skills
-        name: Option<String>,
     },
     /// Remove `.agents/`, `ZEN.md`, and `AGENTS.md` from this project
     Destroy {
@@ -157,11 +142,6 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
             flag_tri(with_manage_tink, no_manage_tink),
         ),
         Command::Skill { command } => dispatch_skill(&cwd, command),
-        Command::Add { source, skill } => {
-            dispatch_skill_add(&cwd, &source, skill.as_deref())
-        }
-        Command::Check => dispatch_skill_check(&cwd),
-        Command::Refresh { name } => dispatch_skill_refresh(&cwd, name.as_deref()),
         Command::Destroy { yes } => {
             let style = CliStyle::auto_stdout();
             let report = destroy::destroy_project(&cwd, yes)?;
@@ -271,13 +251,17 @@ fn dispatch_skill_check(cwd: &Path) -> Result<(), Error> {
 }
 
 fn dispatch_skill_list(cwd: &Path) -> Result<(), Error> {
-    let style = CliStyle::auto_stdout();
-    let skills = check::check_project(cwd)?;
+    let out = CliStyle::auto_stdout();
+    let err = CliStyle::auto_stderr();
+    let skills = check::load_project_skills(cwd)?;
+    if let Err(zen_err) = check::check_zen_coupling(cwd) {
+        eprintln!("{}", err.warn(zen_err.to_string()));
+    }
     if skills.is_empty() {
-        println!("{}", style.muted("(no skills)"));
+        println!("{}", out.muted("(no skills)"));
     } else {
         for skill in &skills {
-            println!("{}", style.accent(&skill.name));
+            println!("{}", out.accent(&skill.name));
         }
     }
     Ok(())

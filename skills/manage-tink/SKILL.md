@@ -15,7 +15,7 @@ are hard stops — honor them; do not work around them.
    stop. Otherwise: use `tink skill check` for this project's live state; use
    `tink skill list` for live skill names; use `tink skill list --home` when the
    user asks what Tink has recorded across projects (do not hand-parse
-   `~/.tink/skills/by-project`).
+   `~/.tink/catalog/by-project`).
    - Done when: either install guidance was given, or the chosen inspect
      command's exit status and output are known.
 

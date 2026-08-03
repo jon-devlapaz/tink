@@ -1,4 +1,4 @@
-//! `tink add` — install one skill into `.agents/skills/`.
+//! `tink skill add` — install one skill into `.agents/skills/`.
 
 use std::path::{Path, PathBuf};
 
@@ -24,8 +24,13 @@ fn place_skill(
     destination_root: &Path,
     provenance: Option<&Provenance>,
 ) -> Result<AddOutcome, Error> {
+    // Preflight both, then archive before project so a project failure leaves a
+    // recoverable home archive (re-add completes the project install).
+    inventory::preflight_archive(skill, provenance)?;
+    skills::preflight_install(skill, destination_root, provenance)?;
+    inventory::deposit_archive(skill, provenance)?;
     let (installed, created) = skills::install_local(skill, destination_root, provenance)?;
-    // Deposit even on identical noop so the home catalog can catch up.
+    // Catalog even on identical noop so the name index can catch up.
     inventory::deposit_skill(project_root, &skill.name)?;
     Ok(AddOutcome {
         name: skill.name.clone(),

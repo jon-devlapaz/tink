@@ -21,6 +21,10 @@ fn valid_skill_name(name: &str) -> bool {
     if name.is_empty() || name.len() > 64 {
         return false;
     }
+    // Reserved: home used to store the name catalog at skills/by-project/.
+    if name == "by-project" {
+        return false;
+    }
     let mut parts = name.split('-');
     let Some(first) = parts.next() else {
         return false;
@@ -231,7 +235,30 @@ fn tree_contents(root: &Path) -> Result<Option<BTreeMap<String, EntryKind>>, Err
 }
 
 pub fn skill_contents_equal(left: &Path, right: &Path) -> Result<bool, Error> {
-    Ok(tree_contents(left)? == tree_contents(right)?)
+    match (tree_contents(left)?, tree_contents(right)?) {
+        (Some(a), Some(b)) => Ok(a == b),
+        // Unreadable trees (symlinks/specials) are never "equal".
+        _ => Ok(false),
+    }
+}
+
+/// Like [`skill_contents_equal`], but ignore relative paths (e.g. `.tink-source.json`).
+pub fn skill_contents_equal_except(
+    left: &Path,
+    right: &Path,
+    ignore: &[&str],
+) -> Result<bool, Error> {
+    let Some(mut a) = tree_contents(left)? else {
+        return Ok(false);
+    };
+    let Some(mut b) = tree_contents(right)? else {
+        return Ok(false);
+    };
+    for key in ignore {
+        a.remove(*key);
+        b.remove(*key);
+    }
+    Ok(a == b)
 }
 
 pub fn copy_skill_tree(

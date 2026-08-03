@@ -1,4 +1,4 @@
-//! `tink refresh` — update clean GitHub-imported skills.
+//! `tink skill refresh` — update clean GitHub-imported skills.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -30,7 +30,7 @@ fn skill_at(repository: &Path, source_path: &str) -> Result<PathBuf, Error> {
     Ok(path)
 }
 
-/// Returns whether the installed skill changed.
+/// Returns whether the installed skill tree changed (receipt-only bumps are false).
 fn refresh_one(installed: &Skill) -> Result<Option<bool>, Error> {
     let name = installed.name.clone();
     let Some(provenance) = read_provenance(installed)? else {
@@ -80,6 +80,8 @@ fn refresh_one(installed: &Skill) -> Result<Option<bool>, Error> {
     }
 
     if current_revision == provenance["revision"] {
+        // No upstream move — still keep the home archive honest.
+        inventory::sync_archive_from_installed(installed)?;
         return Ok(Some(false));
     }
 
@@ -93,13 +95,21 @@ fn refresh_one(installed: &Skill) -> Result<Option<bool>, Error> {
             new_skill.name
         )));
     }
-    if skills::skill_contents_equal(&old_skill.path, &new_skill.path)? {
-        return Ok(Some(false));
-    }
 
     let mut next: Provenance = provenance.clone();
     next.insert("revision".into(), current_revision);
+
+    if skills::skill_contents_equal(&old_skill.path, &new_skill.path)? {
+        // Tree unchanged; bump receipt + sync archive.
+        inventory::preflight_archive_refresh(&installed.path, &new_skill, &next)?;
+        let _installed = skills::replace_verified(&new_skill, &destination_root, &next)?;
+        inventory::deposit_archive_refresh(&new_skill, &next)?;
+        return Ok(Some(false));
+    }
+
+    inventory::preflight_archive_refresh(&installed.path, &new_skill, &next)?;
     let _installed = skills::replace_verified(&new_skill, &destination_root, &next)?;
+    inventory::deposit_archive_refresh(&new_skill, &next)?;
     Ok(Some(true))
 }
 

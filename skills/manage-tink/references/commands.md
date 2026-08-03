@@ -1,8 +1,7 @@
 # Tink commands
 
-Load when choosing or running a mutation (step 2). Prefer the `tink skill …`
-form; `tink add`, `tink check`, and `tink refresh` are aliases of the matching
-skill subcommands.
+Load when choosing or running a mutation (step 2). Use the `tink skill …`
+form for add, list, check, and refresh.
 
 | Intent | Command |
 |---|---|
@@ -23,8 +22,9 @@ skill subcommands.
 ## Layout facts
 
 - Live skills: `<project>/.agents/skills/<name>/` with `SKILL.md`.
-- Home (`$TINK_HOME` or `~/.tink`) is not an agent discovery root. Installs may
-  record skill **names** in `skills/by-project/<project>/meta.json` — a name
-  catalog, not a skill-tree mirror. List it with `tink skill list --home`
-  (TSV with header `project`, `root`, `skill`). Do not hand-parse `meta.json`
-  when the CLI is available. Destroy does not delete home or prune that catalog.
+- Home (`$TINK_HOME` or `~/.tink`) is not an agent discovery root. Installs
+  archive trees at `skills/<name>/` and record names in
+  `catalog/by-project/<project>/meta.json`. List the catalog with
+  `tink skill list --home` (TSV with header `project`, `root`, `skill`). Do not
+  hand-parse `meta.json` when the CLI is available. Destroy does not delete
+  home or prune that catalog.

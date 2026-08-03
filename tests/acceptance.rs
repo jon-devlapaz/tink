@@ -45,10 +45,14 @@ impl Workspace {
 
     fn catalog_meta(&self, project_name: &str) -> PathBuf {
         self.inventory
-            .join("skills")
+            .join("catalog")
             .join("by-project")
             .join(project_name)
             .join("meta.json")
+    }
+
+    fn archive_skill(&self, skill: &str) -> PathBuf {
+        self.inventory.join("skills").join(skill)
     }
 
     fn assert_cataloged(&self, project_name: &str, skill: &str) {
@@ -59,15 +63,18 @@ impl Workspace {
             "expected {skill} in catalog: {raw}"
         );
         assert!(
+            self.archive_skill(skill).join("SKILL.md").is_file(),
+            "expected home archive at skills/{skill}"
+        );
+        assert!(
             !self
                 .inventory
-                .join("skills")
+                .join("catalog")
                 .join("by-project")
                 .join(project_name)
-                .join("skills")
                 .join(skill)
                 .exists(),
-            "must not copy skill trees into by-project"
+            "must not copy skill trees into catalog/by-project"
         );
     }
 }
@@ -175,7 +182,9 @@ fn i4_init_ensures_inventory_root() {
     assert!(ws.inventory.join("layout.json").is_file());
     let layout = fs::read_to_string(ws.inventory.join("layout.json")).unwrap();
     assert!(layout.contains("tink-skill-inventory"));
-    assert!(ws.inventory.join("skills").join("by-project").is_dir());
+    assert!(ws.inventory.join("catalog").join("by-project").is_dir());
+    assert!(ws.inventory.join("skills").is_dir());
+    assert!(!ws.inventory.join("skills").join("by-project").exists());
 }
 
 #[test]
@@ -189,7 +198,7 @@ fn i5_init_with_zen_writes_agents_reference() {
     assert!(project.join("ZEN.md").is_file());
     let agents = fs::read_to_string(project.join("AGENTS.md")).unwrap();
     assert!(agents.contains("[ZEN.md](ZEN.md)"));
-    ws.cmd(&project).arg("check").assert().success();
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
 }
 
 #[test]
@@ -224,7 +233,7 @@ fn a1_add_local_skill_installs() {
     let source = ws.root.join("demo-skill");
     write_skill(&source, "demo-skill", "Do the work.");
     ws.cmd(&project)
-        .args(["add", source.to_str().unwrap()])
+        .args(["skill", "add", source.to_str().unwrap()])
         .assert()
         .success();
     let installed = Workspace::skill_path(&project, "demo-skill");
@@ -240,12 +249,12 @@ fn a2_add_identical_is_noop() {
     let source = ws.root.join("demo-skill");
     write_skill(&source, "demo-skill", "Do the work.");
     ws.cmd(&project)
-        .args(["add", source.to_str().unwrap()])
+        .args(["skill", "add", source.to_str().unwrap()])
         .assert()
         .success();
     let first = fs::read(Workspace::skill_path(&project, "demo-skill").join("SKILL.md")).unwrap();
     ws.cmd(&project)
-        .args(["add", source.to_str().unwrap()])
+        .args(["skill", "add", source.to_str().unwrap()])
         .assert()
         .success();
     let second = fs::read(Workspace::skill_path(&project, "demo-skill").join("SKILL.md")).unwrap();
@@ -260,12 +269,12 @@ fn a3_add_refuses_overwrite_when_diverged() {
     let source = ws.root.join("demo-skill");
     write_skill(&source, "demo-skill", "original");
     ws.cmd(&project)
-        .args(["add", source.to_str().unwrap()])
+        .args(["skill", "add", source.to_str().unwrap()])
         .assert()
         .success();
     write_skill(&source, "demo-skill", "changed");
     ws.cmd(&project)
-        .args(["add", source.to_str().unwrap()])
+        .args(["skill", "add", source.to_str().unwrap()])
         .assert()
         .failure()
         .stderr(predicate::str::contains("Refusing to overwrite"));
@@ -284,7 +293,7 @@ fn a4_add_refuses_symlink_in_skill_tree() {
     write_skill(&source, "linked-skill", "body");
     std::os::unix::fs::symlink(source.join("SKILL.md"), source.join("link")).unwrap();
     ws.cmd(&project)
-        .args(["add", source.to_str().unwrap()])
+        .args(["skill", "add", source.to_str().unwrap()])
         .assert()
         .failure()
         .stderr(predicate::str::contains("symlink").or(predicate::str::contains("Symlink")));
@@ -299,7 +308,7 @@ fn a5_add_multi_skill_requires_skill_flag() {
     write_skill(&repo.join("skills").join("alpha"), "alpha", "a");
     write_skill(&repo.join("skills").join("beta"), "beta", "b");
     ws.cmd(&project)
-        .args(["add", repo.to_str().unwrap()])
+        .args(["skill", "add", repo.to_str().unwrap()])
         .assert()
         .failure()
         .stderr(
@@ -307,6 +316,64 @@ fn a5_add_multi_skill_requires_skill_flag() {
                 .and(predicate::str::contains("beta"))
                 .and(predicate::str::contains("--skill").or(predicate::str::contains("skill"))),
         );
+}
+
+#[test]
+fn a7_add_refuses_reserved_by_project_name() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    let source = ws.root.join("by-project");
+    write_skill(&source, "by-project", "reserved path");
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("Invalid skill name")
+                .or(predicate::str::contains("by-project")),
+        );
+    assert!(!Workspace::skill_path(&project, "by-project").exists());
+    assert!(!ws.archive_skill("by-project").exists());
+}
+
+#[test]
+fn a6_add_refuses_when_home_archive_diverges() {
+    let ws = Workspace::new();
+    let app = ws.project("app");
+    let other = ws.project("other");
+    ws.cmd(&app)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    ws.cmd(&other)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let first = ws.root.join("demo-a");
+    let second = ws.root.join("demo-b");
+    write_skill(&first, "demo-skill", "from app");
+    write_skill(&second, "demo-skill", "from other");
+
+    ws.cmd(&app)
+        .args(["skill", "add", first.to_str().unwrap()])
+        .assert()
+        .success();
+    assert!(ws.archive_skill("demo-skill").join("SKILL.md").is_file());
+
+    ws.cmd(&other)
+        .args(["skill", "add", second.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Refusing to overwrite"));
+    assert!(!Workspace::skill_path(&other, "demo-skill").exists());
+    let archived = fs::read_to_string(ws.archive_skill("demo-skill").join("SKILL.md")).unwrap();
+    assert!(archived.contains("from app"));
+    assert!(!archived.contains("from other"));
 }
 
 // --- R*: remote add ---
@@ -327,7 +394,7 @@ fn r1_add_github_writes_receipt() {
     let revision = commit_all(&remote, "add skill");
     let public = "https://github.com/example/skills.git";
     let mut cmd = ws.cmd(&project);
-    cmd.args(["add", "example/skills", "--skill", "remote-skill"]);
+    cmd.args(["skill", "add", "example/skills", "--skill", "remote-skill"]);
     for (k, v) in github_redirect(&remote, public) {
         cmd.env(k, v);
     }
@@ -346,7 +413,7 @@ fn r2_add_rejects_non_github_remote() {
     let project = ws.project("app");
     ws.cmd(&project).arg("init").assert().success();
     ws.cmd(&project)
-        .args(["add", "https://gitlab.com/example/skills.git"])
+        .args(["skill", "add", "https://gitlab.com/example/skills.git"])
         .assert()
         .failure()
         .stderr(
@@ -362,7 +429,7 @@ fn r3_add_dot_slash_missing_is_path_not_github() {
     let project = ws.project("app");
     ws.cmd(&project).arg("init").assert().success();
     ws.cmd(&project)
-        .args(["add", "./relative-missing"])
+        .args(["skill", "add", "./relative-missing"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("Path does not exist"))
@@ -376,7 +443,7 @@ fn r4_add_absolute_missing_is_path_not_remote_shape() {
     ws.cmd(&project).arg("init").assert().success();
     let missing = ws.root.join("does-not-exist-skill");
     ws.cmd(&project)
-        .args(["add", missing.to_str().unwrap()])
+        .args(["skill", "add", missing.to_str().unwrap()])
         .assert()
         .failure()
         .stderr(predicate::str::contains("Path does not exist"));
@@ -392,10 +459,10 @@ fn c1_check_passes_valid_project() {
     let source = ws.root.join("demo-skill");
     write_skill(&source, "demo-skill", "ok");
     ws.cmd(&project)
-        .args(["add", source.to_str().unwrap()])
+        .args(["skill", "add", source.to_str().unwrap()])
         .assert()
         .success();
-    ws.cmd(&project).arg("check").assert().success();
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
 }
 
 #[test]
@@ -403,7 +470,7 @@ fn c2_check_fails_without_skills_dir() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .arg("check")
+        .args(["skill", "check"])
         .assert()
         .failure()
         .stderr(predicate::str::contains(".agents/skills"));
@@ -417,7 +484,7 @@ fn c3_check_refuses_agents_symlink() {
     fs::create_dir_all(real.join("skills")).unwrap();
     std::os::unix::fs::symlink(&real, project.join(".agents")).unwrap();
     ws.cmd(&project)
-        .arg("check")
+        .args(["skill", "check"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("symlink").or(predicate::str::contains("Symlink")));
@@ -456,7 +523,7 @@ fn l3_skill_list_home_prints_catalog_tsv() {
     let source = ws.root.join("demo-skill");
     write_skill(&source, "demo-skill", "cataloged");
     ws.cmd(&project)
-        .args(["add", source.to_str().unwrap()])
+        .args(["skill", "add", source.to_str().unwrap()])
         .assert()
         .success();
     let root = project.canonicalize().unwrap();
@@ -474,10 +541,43 @@ fn l3_skill_list_home_prints_catalog_tsv() {
         );
 }
 
-// --- V*: CLI surface (skill nest + aliases) ---
+#[test]
+fn l4_skill_list_warns_on_zen_without_agents_still_lists() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-manage-tink"])
+        .assert()
+        .success();
+    let source = ws.root.join("demo-skill");
+    write_skill(&source, "demo-skill", "listed despite zen warning");
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .success();
+    fs::write(project.join("ZEN.md"), "# Zen\n").unwrap();
+
+    ws.cmd(&project)
+        .args(["skill", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("demo-skill"))
+        .stderr(predicate::str::contains(
+            "ZEN.md is not referenced by a regular AGENTS.md",
+        ));
+    ws.cmd(&project)
+        .args(["skill", "check"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "ZEN.md is not referenced by a regular AGENTS.md",
+        ));
+}
+
+// --- V*: CLI surface (skill nest) ---
 
 #[test]
-fn v1_skill_add_installs_like_top_level_add() {
+fn v1_skill_add_installs_local_skill() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project).args(["init", "--no-manage-tink"]).assert().success();
@@ -524,7 +624,7 @@ fn p1_refresh_updates_clean_import() {
     let redirect = github_redirect(&remote, public);
 
     let mut add = ws.cmd(&project);
-    add.args(["add", "example/skills", "--skill", "remote-skill"]);
+    add.args(["skill", "add", "example/skills", "--skill", "remote-skill"]);
     for (k, v) in &redirect {
         add.env(k, v);
     }
@@ -538,7 +638,7 @@ fn p1_refresh_updates_clean_import() {
     let new_rev = commit_all(&remote, "v2");
 
     let mut refresh = ws.cmd(&project);
-    refresh.args(["refresh", "remote-skill"]);
+    refresh.args(["skill", "refresh", "remote-skill"]);
     for (k, v) in &redirect {
         refresh.env(k, v);
     }
@@ -573,7 +673,7 @@ fn p2_refresh_refuses_local_modifications() {
     let redirect = github_redirect(&remote, public);
 
     let mut add = ws.cmd(&project);
-    add.args(["add", "example/skills", "--skill", "remote-skill"]);
+    add.args(["skill", "add", "example/skills", "--skill", "remote-skill"]);
     for (k, v) in &redirect {
         add.env(k, v);
     }
@@ -585,7 +685,7 @@ fn p2_refresh_refuses_local_modifications() {
     fs::write(&skill_md, body).unwrap();
 
     let mut refresh = ws.cmd(&project);
-    refresh.args(["refresh", "remote-skill"]);
+    refresh.args(["skill", "refresh", "remote-skill"]);
     for (k, v) in &redirect {
         refresh.env(k, v);
     }
@@ -593,6 +693,241 @@ fn p2_refresh_refuses_local_modifications() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("local modifications"));
+}
+
+#[test]
+fn p3_refresh_backfills_missing_home_archive_on_noop() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+
+    let remote = ws.root.join("remote-repo");
+    init_repo(&remote);
+    write_skill(
+        &remote.join("skills").join("remote-skill"),
+        "remote-skill",
+        "v1",
+    );
+    commit_all(&remote, "v1");
+    let public = "https://github.com/example/skills.git";
+    let redirect = github_redirect(&remote, public);
+
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", "example/skills", "--skill", "remote-skill"]);
+    for (k, v) in &redirect {
+        add.env(k, v);
+    }
+    add.assert().success();
+    fs::remove_dir_all(ws.archive_skill("remote-skill")).unwrap();
+
+    let mut refresh = ws.cmd(&project);
+    refresh.args(["skill", "refresh", "remote-skill"]);
+    for (k, v) in &redirect {
+        refresh.env(k, v);
+    }
+    refresh.assert().success();
+    assert!(ws.archive_skill("remote-skill").join("SKILL.md").is_file());
+}
+
+#[test]
+fn p4_refresh_allows_archive_missing_only_receipt() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+
+    let remote = ws.root.join("remote-repo");
+    init_repo(&remote);
+    write_skill(
+        &remote.join("skills").join("remote-skill"),
+        "remote-skill",
+        "v1",
+    );
+    commit_all(&remote, "v1");
+    let public = "https://github.com/example/skills.git";
+    let redirect = github_redirect(&remote, public);
+
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", "example/skills", "--skill", "remote-skill"]);
+    for (k, v) in &redirect {
+        add.env(k, v);
+    }
+    add.assert().success();
+    fs::remove_file(ws.archive_skill("remote-skill").join(".tink-source.json")).unwrap();
+
+    write_skill(
+        &remote.join("skills").join("remote-skill"),
+        "remote-skill",
+        "v2",
+    );
+    commit_all(&remote, "v2");
+
+    let mut refresh = ws.cmd(&project);
+    refresh.args(["skill", "refresh", "remote-skill"]);
+    for (k, v) in &redirect {
+        refresh.env(k, v);
+    }
+    refresh.assert().success();
+    assert!(
+        fs::read_to_string(ws.archive_skill("remote-skill").join("SKILL.md"))
+            .unwrap()
+            .contains("v2")
+    );
+}
+
+#[test]
+fn p5_refresh_refuses_divergent_home_archive() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+
+    let remote = ws.root.join("remote-repo");
+    init_repo(&remote);
+    write_skill(
+        &remote.join("skills").join("remote-skill"),
+        "remote-skill",
+        "v1",
+    );
+    commit_all(&remote, "v1");
+    let public = "https://github.com/example/skills.git";
+    let redirect = github_redirect(&remote, public);
+
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", "example/skills", "--skill", "remote-skill"]);
+    for (k, v) in &redirect {
+        add.env(k, v);
+    }
+    add.assert().success();
+    write_skill(ws.archive_skill("remote-skill").as_path(), "remote-skill", "other");
+
+    write_skill(
+        &remote.join("skills").join("remote-skill"),
+        "remote-skill",
+        "v2",
+    );
+    commit_all(&remote, "v2");
+
+    let before =
+        fs::read_to_string(Workspace::skill_path(&project, "remote-skill").join("SKILL.md"))
+            .unwrap();
+    let mut refresh = ws.cmd(&project);
+    refresh.args(["skill", "refresh", "remote-skill"]);
+    for (k, v) in &redirect {
+        refresh.env(k, v);
+    }
+    refresh
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("home archive diverges"));
+    let after =
+        fs::read_to_string(Workspace::skill_path(&project, "remote-skill").join("SKILL.md"))
+            .unwrap();
+    assert_eq!(before, after);
+}
+
+#[test]
+fn p7_refresh_repairs_stale_archive_when_project_already_new() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+
+    let remote = ws.root.join("remote-repo");
+    init_repo(&remote);
+    write_skill(
+        &remote.join("skills").join("remote-skill"),
+        "remote-skill",
+        "v1",
+    );
+    commit_all(&remote, "v1");
+    let public = "https://github.com/example/skills.git";
+    let redirect = github_redirect(&remote, public);
+
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", "example/skills", "--skill", "remote-skill"]);
+    for (k, v) in &redirect {
+        add.env(k, v);
+    }
+    add.assert().success();
+
+    write_skill(
+        &remote.join("skills").join("remote-skill"),
+        "remote-skill",
+        "v2",
+    );
+    commit_all(&remote, "v2");
+
+    let mut refresh = ws.cmd(&project);
+    refresh.args(["skill", "refresh", "remote-skill"]);
+    for (k, v) in &redirect {
+        refresh.env(k, v);
+    }
+    refresh.assert().success();
+
+    // Simulate failed home deposit: project at v2, archive rolled back to v1.
+    write_skill(ws.archive_skill("remote-skill").as_path(), "remote-skill", "v1");
+
+    let mut repair = ws.cmd(&project);
+    repair.args(["skill", "refresh", "remote-skill"]);
+    for (k, v) in &redirect {
+        repair.env(k, v);
+    }
+    repair.assert().success();
+    assert!(
+        fs::read_to_string(ws.archive_skill("remote-skill").join("SKILL.md"))
+            .unwrap()
+            .contains("v2"),
+        "noop refresh must repair stale archive from project"
+    );
+}
+
+#[test]
+fn p6_refresh_identical_tree_new_revision_bumps_receipts() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+
+    let remote = ws.root.join("remote-repo");
+    init_repo(&remote);
+    write_skill(
+        &remote.join("skills").join("remote-skill"),
+        "remote-skill",
+        "v1",
+    );
+    commit_all(&remote, "v1");
+    let public = "https://github.com/example/skills.git";
+    let redirect = github_redirect(&remote, public);
+
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", "example/skills", "--skill", "remote-skill"]);
+    for (k, v) in &redirect {
+        add.env(k, v);
+    }
+    add.assert().success();
+
+    let new_rev = {
+        git(&remote, &["commit", "--allow-empty", "-qm", "empty"]);
+        let output = StdCommand::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(&remote)
+            .output()
+            .unwrap();
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
+    };
+
+    let mut refresh = ws.cmd(&project);
+    refresh.args(["skill", "refresh", "remote-skill"]);
+    for (k, v) in &redirect {
+        refresh.env(k, v);
+    }
+    refresh.assert().success();
+
+    let project_receipt = fs::read_to_string(
+        Workspace::skill_path(&project, "remote-skill").join(".tink-source.json"),
+    )
+    .unwrap();
+    assert!(project_receipt.contains(&new_rev));
+    let archive_receipt =
+        fs::read_to_string(ws.archive_skill("remote-skill").join(".tink-source.json")).unwrap();
+    assert!(archive_receipt.contains(&new_rev));
 }
 
 // --- D*: destroy ---

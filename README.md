@@ -66,11 +66,11 @@ tink skill refresh skill-name
 tink destroy --yes
 ```
 
-`tink add`, `tink check`, and `tink refresh` are aliases of the matching
-`tink skill …` commands. Override the home root with `TINK_HOME` when you need
-an isolated home. Successful installs also record skill **names** under
-`~/.tink/skills/by-project/<project>/meta.json` for offline inventory — not a
-second discovery root and not a skill-tree mirror.
+Override the home root with `TINK_HOME` when you need an isolated home.
+Successful installs archive skill trees under `~/.tink/skills/<name>/` and
+record skill **names** under `~/.tink/catalog/by-project/<project>/meta.json`.
+Home is not an agent discovery root; divergent same-name archives refuse the
+add.
 
 tink does not init Git, stage files, commit, push, or overwrite a skill that
 diverged from what it would install.

@@ -14,8 +14,8 @@ Windows, Linux CI as a gate, `skill remove`, pruning the home by-project catalog
 
 ## Commands
 
-Canonical skill verbs live under `tink skill`. Top-level `add` / `check` /
-`refresh` remain aliases that call the same domain ops.
+Skill verbs live only under `tink skill`. There are no top-level `add` /
+`check` / `refresh` aliases.
 
 | Command | Meaning |
 |---|---|
@@ -25,7 +25,6 @@ Canonical skill verbs live under `tink skill`. Top-level `add` / `check` /
 | `tink skill list --home` | List offline by-project catalog (`project`, `root`, `skill` TSV) |
 | `tink skill check` | Validate project skills; no network; no writes |
 | `tink skill refresh [name]` | Refresh clean GitHub imports; refuse local edits |
-| `tink add` / `tink check` / `tink refresh` | Aliases of the matching `tink skill …` commands |
 | `tink destroy [--yes]` | Remove `.agents/`, `ZEN.md`, and `AGENTS.md` (not `~/.tink`) |
 
 ## On-disk contracts
@@ -35,7 +34,8 @@ Canonical skill verbs live under `tink skill`. Top-level `add` / `check` /
 | Live skills | `<project>/.agents/skills/<name>/` with `SKILL.md` |
 | Receipt | `.tink-source.json` with exactly `source`, `revision`, `path` (non-empty strings) |
 | Home root | `$TINK_HOME` or `~/.tink`, with `layout.json` (`kind`: `tink-skill-inventory`) |
-| Offline catalog | `skills/by-project/<project>/meta.json` with `name`, `root`, grow-only `skills` name list (not skill trees) |
+| Home archive | `skills/<name>/` skill trees copied on successful add (identical → noop; divergent same name → refuse entire add) |
+| Offline catalog | `catalog/by-project/<project>/meta.json` with `name`, `root`, grow-only `skills` name list (not skill trees) |
 
 ## Rows
 
@@ -48,38 +48,40 @@ Ids are stable. Tests must name or comment the id they prove.
 | I1 | `init` in empty project | Creates `.agents/skills/` as real directories (not symlinks) |
 | I2 | `init` when `.agents` is a symlink | Exit ≠ 0; mentions symlink; creates nothing unsafe |
 | I3 | `init` (non-interactive / `--no-zen --no-tink-skills`) | Does **not** write `AGENTS.md`, `ZEN.md`, or `.github/workflows/*` (may still install `manage-tink`) |
-| I4 | `init` with `TINK_HOME` set | Creates home root + `layout.json` + `skills/by-project/` |
+| I4 | `init` with `TINK_HOME` set | Creates home root + `layout.json` + `catalog/by-project/` + `skills/` |
 | I5 | `init --with-zen` | Writes `ZEN.md` and an `AGENTS.md` that references it |
-| I6 | `init` (default) | Installs `.agents/skills/manage-tink/`; catalogs `manage-tink` in by-project meta; does **not** copy skill trees into home |
+| I6 | `init` (default) | Installs `.agents/skills/manage-tink/`; catalogs `manage-tink`; archives tree at `skills/manage-tink/` |
 | I7 | `init --no-manage-tink` | Does **not** install `manage-tink` |
 
 ### Local add
 
 | Id | Action | Expect |
 |---|---|---|
-| A1 | `add` valid local skill dir | Installs under `.agents/skills/<name>/`; records name in by-project `meta.json`; no home skill **tree** |
-| A2 | `add` same skill again (byte-identical) | Success noop; tree unchanged |
-| A3 | `add` when target exists and differs | Exit ≠ 0; "Refusing to overwrite"; target unchanged |
-| A4 | `add` skill tree containing a symlink | Exit ≠ 0; refuse |
-| A5 | `add` multi-skill source without `--skill` | Exit ≠ 0; lists choices |
+| A1 | `skill add` valid local skill dir | Installs under `.agents/skills/<name>/`; records name in catalog; archives tree at `$TINK_HOME/skills/<name>/` |
+| A2 | `skill add` same skill again (byte-identical) | Success noop; project + home archive unchanged |
+| A3 | `skill add` when project target exists and differs | Exit ≠ 0; "Refusing to overwrite"; project target unchanged |
+| A4 | `skill add` skill tree containing a symlink | Exit ≠ 0; refuse |
+| A5 | `skill add` multi-skill source without `--skill` | Exit ≠ 0; lists choices |
+| A6 | `skill add` when home archive has same name but different tree | Exit ≠ 0; refuse; project unchanged |
+| A7 | `skill add` skill named `by-project` | Exit ≠ 0; reserved name; no project/archive write |
 
 ### Remote add
 
 | Id | Action | Expect |
 |---|---|---|
-| R1 | `add owner/repo --skill <name>` (public HTTPS via test redirect) | Installs skill + `.tink-source.json` with canonical `https://github.com/owner/repo.git`, full revision, relative `path` |
-| R2 | `add` non-GitHub or non-HTTPS remote | Exit ≠ 0; refuse |
-| R3 | `add ./missing-skill` (path-like, absent) | Exit ≠ 0; "Path does not exist"; **no** GitHub network fetch |
-| R4 | `add /abs/missing` | Exit ≠ 0; "Path does not exist" |
+| R1 | `skill add owner/repo --skill <name>` (public HTTPS via test redirect) | Installs skill + `.tink-source.json` with canonical `https://github.com/owner/repo.git`, full revision, relative `path` |
+| R2 | `skill add` non-GitHub or non-HTTPS remote | Exit ≠ 0; refuse |
+| R3 | `skill add ./missing-skill` (path-like, absent) | Exit ≠ 0; "Path does not exist"; **no** GitHub network fetch |
+| R4 | `skill add /abs/missing` | Exit ≠ 0; "Path does not exist" |
 
 ### Check
 
 | Id | Action | Expect |
 |---|---|---|
-| C1 | `check` after valid `init` + `add` | Exit 0 |
-| C2 | `check` without `.agents/skills` | Exit ≠ 0 |
-| C3 | `check` when `.agents` is a symlink | Exit ≠ 0; refuse |
-| C4 | `check` | Performs no network I/O and no filesystem writes (manual / future instrumentation; not automated in v1 harness) |
+| C1 | `skill check` after valid `init` + `skill add` | Exit 0 |
+| C2 | `skill check` without `.agents/skills` | Exit ≠ 0 |
+| C3 | `skill check` when `.agents` is a symlink | Exit ≠ 0; refuse |
+| C4 | `skill check` | Performs no network I/O and no filesystem writes (manual / future instrumentation; not automated in v1 harness) |
 
 ### List
 
@@ -88,20 +90,26 @@ Ids are stable. Tests must name or comment the id they prove.
 | L1 | `skill list` after `init` | Exit 0; stdout includes `manage-tink` |
 | L2 | `skill list` without `.agents/skills` | Exit ≠ 0 |
 | L3 | `skill list --home` after init+add | Exit 0; header `project\\troot\\tskill` plus TSV rows for cataloged skills |
+| L4 | `skill list` when `ZEN.md` exists without `AGENTS.md` reference | Exit 0; lists skills; warns on stderr about ZEN/AGENTS; `skill check` still fails |
 
 ### CLI surface
 
 | Id | Action | Expect |
 |---|---|---|
-| V1 | `skill add` local skill | Same install outcome as top-level `add` (skill present under `.agents/skills/`) |
-| V2 | `skill check` after valid project | Exit 0 (same domain op as `check`) |
+| V1 | `skill add` local skill | Installs under `.agents/skills/<name>/` |
+| V2 | `skill check` after valid project | Exit 0; stdout includes `OK` |
 
 ### Refresh
 
 | Id | Action | Expect |
 |---|---|---|
-| P1 | `refresh` clean GitHub-imported skill after upstream change | Updates skill + receipt |
-| P2 | `refresh` when installed skill has local modifications | Exit ≠ 0; mentions local modifications; tree unchanged |
+| P1 | `skill refresh` clean GitHub-imported skill after upstream change | Updates project skill + receipt **and** `$TINK_HOME/skills/<name>/` |
+| P2 | `skill refresh` when installed skill has local modifications | Exit ≠ 0; mentions local modifications; tree unchanged |
+| P3 | `skill refresh` when upstream unchanged but home archive missing | Exit 0; backfills `$TINK_HOME/skills/<name>/` from project |
+| P4 | `skill refresh` when home archive lacks only `.tink-source.json` | Exit 0; updates project + archive |
+| P5 | `skill refresh` when home archive body diverges from project | Exit ≠ 0; "home archive diverges"; project unchanged |
+| P6 | `skill refresh` when upstream revision moves but skill tree bytes match | Exit 0; bumps project + archive receipts |
+| P7 | `skill refresh` when project already at HEAD but home archive is stale | Exit 0; repairs archive from project |
 
 ### Destroy
 
