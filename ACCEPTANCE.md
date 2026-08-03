@@ -7,8 +7,8 @@ imports, and ensures a home root at `~/.tink` (override: `TINK_HOME`).
 **Authority:** This file is the evaluator. Implementation stops when every row
 below has an automated test that passes on macOS with `git` on `PATH`.
 
-**Out of v1:** `wipe`, weekly GitHub update workflows, self-update, private
-GitHub auth, Windows, Linux CI as a gate, `skill remove`.
+**Out of v1:** weekly GitHub update workflows, self-update, private GitHub auth,
+Windows, Linux CI as a gate, `skill remove`, pruning the home by-project catalog.
 
 **Dogfood:** Prefer an installed `tink` from this repo, or `cargo run -q -- …`.
 
@@ -25,6 +25,7 @@ Canonical skill verbs live under `tink skill`. Top-level `add` / `check` /
 | `tink skill check` | Validate project skills; no network; no writes |
 | `tink skill refresh [name]` | Refresh clean GitHub imports; refuse local edits |
 | `tink add` / `tink check` / `tink refresh` | Aliases of the matching `tink skill …` commands |
+| `tink destroy [--yes]` | Remove `.agents/`, `ZEN.md`, and `AGENTS.md` (not `~/.tink`) |
 
 ## On-disk contracts
 
@@ -99,6 +100,14 @@ Ids are stable. Tests must name or comment the id they prove.
 |---|---|---|
 | P1 | `refresh` clean GitHub-imported skill after upstream change | Updates skill + receipt |
 | P2 | `refresh` when installed skill has local modifications | Exit ≠ 0; mentions local modifications; tree unchanged |
+
+### Destroy
+
+| Id | Action | Expect |
+|---|---|---|
+| D1 | `destroy --yes` after `init --with-zen` | Removes `.agents/`, `ZEN.md`, `AGENTS.md`; leaves `~/.tink` intact |
+| D2 | `destroy` without `--yes` (non-TTY) | Exit ≠ 0; refuses without confirmation; project files unchanged |
+| D3 | `destroy --yes` when `.agents` is a symlink | Exit ≠ 0; mentions symlink |
 
 ### Safety (cross-cutting)
 

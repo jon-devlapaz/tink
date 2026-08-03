@@ -197,9 +197,9 @@ fn i6_init_installs_manage_tink_and_catalogs_name() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project).arg("init").assert().success();
-    assert!(Workspace::skill_path(&project, "manage-tink")
-        .join("SKILL.md")
-        .is_file());
+    let skill = Workspace::skill_path(&project, "manage-tink");
+    assert!(skill.join("SKILL.md").is_file());
+    assert!(skill.join("references").join("commands.md").is_file());
     ws.assert_cataloged("app", "manage-tink");
 }
 
@@ -567,6 +567,60 @@ fn p2_refresh_refuses_local_modifications() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("local modifications"));
+}
+
+// --- D*: destroy ---
+
+#[test]
+fn d1_destroy_yes_removes_agents_zen_agents_md() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--with-zen", "--no-twotink"])
+        .assert()
+        .success();
+    assert!(project.join(".agents").is_dir());
+    assert!(project.join("ZEN.md").is_file());
+    assert!(project.join("AGENTS.md").is_file());
+    assert!(ws.inventory.join("layout.json").is_file());
+
+    ws.cmd(&project)
+        .args(["destroy", "--yes"])
+        .assert()
+        .success();
+
+    assert!(!project.join(".agents").exists());
+    assert!(!project.join("ZEN.md").exists());
+    assert!(!project.join("AGENTS.md").exists());
+    assert!(ws.inventory.join("layout.json").is_file());
+}
+
+#[test]
+fn d2_destroy_without_yes_refuses_non_tty() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+    ws.cmd(&project)
+        .arg("destroy")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("confirmation").or(predicate::str::contains("--yes")));
+    assert!(project.join(".agents").is_dir());
+}
+
+#[test]
+fn d3_destroy_refuses_agents_symlink() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    let real = ws.root.join("real-agents");
+    fs::create_dir_all(real.join("skills")).unwrap();
+    std::os::unix::fs::symlink(&real, project.join(".agents")).unwrap();
+    ws.cmd(&project)
+        .args(["destroy", "--yes"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("symlink").or(predicate::str::contains("Symlink")));
+    assert!(project.join(".agents").is_symlink());
 }
 
 // --- S*: safety ---

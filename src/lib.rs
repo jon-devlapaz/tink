@@ -4,6 +4,7 @@
 
 mod add;
 mod check;
+mod destroy;
 mod error;
 mod git;
 mod init;
@@ -72,6 +73,12 @@ pub enum Command {
         /// Optional skill name; default refreshes all imported skills
         name: Option<String>,
     },
+    /// Remove `.agents/`, `ZEN.md`, and `AGENTS.md` from this project
+    Destroy {
+        /// Skip the confirmation prompt
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -135,6 +142,17 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
         }
         Command::Check => dispatch_skill_check(&cwd),
         Command::Refresh { name } => dispatch_skill_refresh(&cwd, name.as_deref()),
+        Command::Destroy { yes } => {
+            let report = destroy::destroy_project(&cwd, yes)?;
+            if report.removed.is_empty() {
+                println!("Nothing to destroy");
+            } else {
+                for path in &report.removed {
+                    println!("Removed {}", path.display());
+                }
+            }
+            Ok(())
+        }
     }
 }
 

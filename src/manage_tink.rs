@@ -8,6 +8,7 @@ use crate::paths::map_io;
 
 const SKILL_MD: &str = include_str!("../skills/manage-tink/SKILL.md");
 const OPENAI_YAML: &str = include_str!("../skills/manage-tink/agents/openai.yaml");
+const COMMANDS_MD: &str = include_str!("../skills/manage-tink/references/commands.md");
 
 /// Stage the embedded skill and install it into the project via `add`.
 ///
@@ -19,11 +20,15 @@ pub fn install_manage_tink(project_root: &Path) -> Result<AddOutcome, Error> {
         .map_err(|e| Error::msg(format!("manage-tink staging: {e}")))?;
     let skill_root = staging.path().join("manage-tink");
     let agents = skill_root.join("agents");
+    let references = skill_root.join("references");
     std::fs::create_dir_all(&agents).map_err(|e| map_io(&agents, e))?;
+    std::fs::create_dir_all(&references).map_err(|e| map_io(&references, e))?;
     std::fs::write(skill_root.join("SKILL.md"), SKILL_MD)
         .map_err(|e| map_io(&skill_root.join("SKILL.md"), e))?;
     std::fs::write(agents.join("openai.yaml"), OPENAI_YAML)
         .map_err(|e| map_io(&agents.join("openai.yaml"), e))?;
+    std::fs::write(references.join("commands.md"), COMMANDS_MD)
+        .map_err(|e| map_io(&references.join("commands.md"), e))?;
     add::add_skill(
         project_root,
         skill_root

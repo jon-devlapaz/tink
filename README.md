@@ -60,6 +60,9 @@ tink skill add owner/repository --skill skill-name
 # Refresh clean GitHub imports; local edits are refused
 tink skill refresh
 tink skill refresh skill-name
+
+# Remove project agent scaffolding (not ~/.tink)
+tink destroy --yes
 ```
 
 `tink add`, `tink check`, and `tink refresh` are aliases of the matching
