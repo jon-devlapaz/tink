@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use crate::error::Error;
 use crate::git;
 use crate::init;
-use crate::inventory;
 use crate::skills::{self, Provenance, Skill};
 use crate::sources::{self, RemoteSource};
 
@@ -23,7 +22,6 @@ fn place_skill(
     provenance: Option<&Provenance>,
 ) -> Result<AddOutcome, Error> {
     let (installed, created) = skills::install_local(skill, destination_root, provenance)?;
-    inventory::deposit_skill(destination_root, &installed)?;
     Ok(AddOutcome {
         name: skill.name.clone(),
         created,

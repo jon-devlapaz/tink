@@ -20,19 +20,14 @@ flowchart LR
     R[".tink-source.json<br/>GitHub imports only"]
   end
 
-  subgraph home ["~/.tink inventory"]
-    I["skills/by-project/…<br/>offline copy — not discovery"]
-  end
-
   L -->|tink add| S
   G -->|tink add| S
-  S -->|deposit| I
   S -->|tink check| S
   G -->|tink refresh| S
 ```
 
-Live skills are only under `.agents/skills/`. `~/.tink` is a backup inventory for
-you (and for `tink inventory list`). Agents should not load skills from there.
+Live skills are only under `.agents/skills/`. `tink init` may create `~/.tink` as
+a home marker; it is not a skill discovery root and does not mirror project skills.
 
 ## Install
 
@@ -69,13 +64,10 @@ tink check
 # Refresh clean GitHub imports; local edits are refused
 tink refresh
 tink refresh skill-name
-
-# List this project's offline inventory copies
-tink inventory list
 ```
 
-Override the inventory root with `TINK_HOME` when you need an isolated home
-(tests, multiple machines, etc.).
+Override the home root with `TINK_HOME` when you need an isolated home (tests,
+multiple machines, etc.).
 
 Tink does not init Git, stage files, commit, push, or overwrite a skill that
 diverged from what it would install.

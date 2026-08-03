@@ -42,14 +42,6 @@ impl Workspace {
     fn skill_path(project: &Path, name: &str) -> PathBuf {
         project.join(".agents").join("skills").join(name)
     }
-
-    fn catalog_skills(&self, project: &Path) -> PathBuf {
-        self.inventory
-            .join("skills")
-            .join("by-project")
-            .join(project.file_name().unwrap())
-            .join("skills")
-    }
 }
 
 fn write_skill(path: &Path, name: &str, body: &str) {
@@ -153,7 +145,6 @@ fn i4_init_ensures_inventory_root() {
     ws.cmd(&project).arg("init").assert().success();
     assert!(ws.inventory.is_dir());
     assert!(ws.inventory.join("layout.json").is_file());
-    assert!(ws.inventory.join("skills").join("by-project").is_dir());
     let layout = fs::read_to_string(ws.inventory.join("layout.json")).unwrap();
     assert!(layout.contains("tink-skill-inventory"));
 }
@@ -175,7 +166,7 @@ fn i5_init_with_zen_writes_agents_reference() {
 // --- A*: local add ---
 
 #[test]
-fn a1_add_local_skill_installs_and_deposits() {
+fn a1_add_local_skill_installs() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project).arg("init").assert().success();
@@ -187,12 +178,7 @@ fn a1_add_local_skill_installs_and_deposits() {
         .success();
     let installed = Workspace::skill_path(&project, "demo-skill");
     assert!(installed.join("SKILL.md").is_file());
-    assert!(
-        ws.catalog_skills(&project)
-            .join("demo-skill")
-            .join("SKILL.md")
-            .is_file()
-    );
+    assert!(!ws.inventory.join("skills").join("by-project").exists());
 }
 
 #[test]
@@ -475,37 +461,6 @@ fn p2_refresh_refuses_local_modifications() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("local modifications"));
-}
-
-// --- V*: inventory ---
-
-#[test]
-fn v1_inventory_list_empty() {
-    let ws = Workspace::new();
-    let project = ws.project("app");
-    ws.cmd(&project).arg("init").assert().success();
-    ws.cmd(&project)
-        .args(["inventory", "list"])
-        .assert()
-        .success();
-}
-
-#[test]
-fn v2_inventory_list_after_add() {
-    let ws = Workspace::new();
-    let project = ws.project("app");
-    ws.cmd(&project).arg("init").assert().success();
-    let source = ws.root.join("demo-skill");
-    write_skill(&source, "demo-skill", "ok");
-    ws.cmd(&project)
-        .args(["add", source.to_str().unwrap()])
-        .assert()
-        .success();
-    ws.cmd(&project)
-        .args(["inventory", "list"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("demo-skill"));
 }
 
 // --- S*: safety ---

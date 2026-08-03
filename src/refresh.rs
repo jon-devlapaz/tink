@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use crate::check::{self, read_provenance};
 use crate::error::Error;
 use crate::git;
-use crate::inventory;
 use crate::skills::{self, Provenance, Skill};
 use crate::sources;
 
@@ -99,8 +98,7 @@ fn refresh_one(installed: &Skill) -> Result<Option<bool>, Error> {
 
     let mut next: Provenance = provenance.clone();
     next.insert("revision".into(), current_revision);
-    let installed_path = skills::replace_verified(&new_skill, &destination_root, &next)?;
-    inventory::deposit_skill(&destination_root, &installed_path)?;
+    let _installed = skills::replace_verified(&new_skill, &destination_root, &next)?;
     Ok(Some(true))
 }
 

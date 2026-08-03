@@ -60,17 +60,6 @@ pub enum Command {
         /// Optional skill name; default refreshes all imported skills
         name: Option<String>,
     },
-    /// Inspect the offline home inventory (not agent discovery)
-    Inventory {
-        #[command(subcommand)]
-        command: InventoryCommand,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-pub enum InventoryCommand {
-    /// List inventory skills for this project
-    List,
 }
 
 fn flag_tri(yes: bool, no: bool) -> Option<bool> {
@@ -153,20 +142,5 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
                 Ok(())
             }
         },
-        Command::Inventory {
-            command: InventoryCommand::List,
-        } => inventory_list(&cwd),
     }
-}
-
-fn inventory_list(cwd: &std::path::Path) -> Result<(), Error> {
-    let (_catalog, skills) = inventory::list_project_skills(cwd)?;
-    if skills.is_empty() {
-        println!("(no inventory skills for this project)");
-        return Ok(());
-    }
-    for skill in skills {
-        println!("{}", skill.name);
-    }
-    Ok(())
 }
