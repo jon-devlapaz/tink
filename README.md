@@ -44,6 +44,7 @@ cargo uninstall --root ~/.local tink
 tink init
 tink skill add ../my-skill
 tink skill list
+tink skill list --home
 tink skill check
 ```
 
@@ -51,8 +52,8 @@ tink skill check
 
 ```console
 # Init options (non-interactive)
-tink init --with-zen --with-twotink
-tink init --no-zen --no-twotink --no-manage-tink
+tink init --with-zen --with-tink-skills
+tink init --no-zen --no-tink-skills --no-manage-tink
 
 # GitHub source; --skill when the repo has several skills
 tink skill add owner/repository --skill skill-name

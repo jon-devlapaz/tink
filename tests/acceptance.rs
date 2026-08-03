@@ -158,7 +158,7 @@ fn i3_init_does_not_write_product_bundles() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-twotink"])
+        .args(["init", "--no-zen", "--no-tink-skills"])
         .assert()
         .success();
     assert!(!project.join("AGENTS.md").exists());
@@ -183,7 +183,7 @@ fn i5_init_with_zen_writes_agents_reference() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--with-zen", "--no-twotink"])
+        .args(["init", "--with-zen", "--no-tink-skills"])
         .assert()
         .success();
     assert!(project.join("ZEN.md").is_file());
@@ -448,6 +448,32 @@ fn l2_skill_list_fails_without_skills_dir() {
         .stderr(predicate::str::contains(".agents/skills"));
 }
 
+#[test]
+fn l3_skill_list_home_prints_catalog_tsv() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+    let source = ws.root.join("demo-skill");
+    write_skill(&source, "demo-skill", "cataloged");
+    ws.cmd(&project)
+        .args(["add", source.to_str().unwrap()])
+        .assert()
+        .success();
+    let root = project.canonicalize().unwrap();
+    let root_s = root.to_str().unwrap();
+    ws.cmd(&project)
+        .args(["skill", "list", "--home"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::starts_with("project\troot\tskill\n")
+                .and(predicate::str::contains("app\t"))
+                .and(predicate::str::contains(root_s))
+                .and(predicate::str::contains("demo-skill"))
+                .and(predicate::str::contains("manage-tink")),
+        );
+}
+
 // --- V*: CLI surface (skill nest + aliases) ---
 
 #[test]
@@ -576,7 +602,7 @@ fn d1_destroy_yes_removes_agents_zen_agents_md() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--with-zen", "--no-twotink"])
+        .args(["init", "--with-zen", "--no-tink-skills"])
         .assert()
         .success();
     assert!(project.join(".agents").is_dir());

@@ -1,7 +1,7 @@
 //! `tink destroy` — remove project agent scaffolding.
 
 use std::fs;
-use std::io::{self, BufRead, IsTerminal, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use crate::error::Error;

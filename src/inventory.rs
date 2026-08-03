@@ -181,6 +181,101 @@ fn deposit_skill_into(
     Ok(catalog)
 }
 
+/// One skill row from the offline by-project name catalog.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CatalogEntry {
+    pub project: String,
+    pub root: String,
+    pub skill: String,
+}
+
+/// Read `$TINK_HOME` / `~/.tink` by-project catalogs (read-only; creates nothing).
+///
+/// Skips unreadable or invalid `meta.json` entries after recording them as errors
+/// only when the by-project root itself is unsafe; individual bad metas are skipped
+/// with no fatal error so one corrupt catalog does not hide the rest.
+pub fn list_catalog(home: Option<&Path>) -> Result<Vec<CatalogEntry>, Error> {
+    let home = match home {
+        Some(path) => path.to_path_buf(),
+        None => resolve_home()?,
+    };
+    if !home.exists() {
+        return Ok(Vec::new());
+    }
+    refuse_symlink(&home)?;
+    let by_project = by_project_path(&home);
+    if !by_project.exists() {
+        return Ok(Vec::new());
+    }
+    refuse_symlink(&by_project)?;
+    if !by_project.is_dir() {
+        return Err(Error::msg(format!(
+            "Refusing to read non-directory catalog: {}",
+            by_project.display()
+        )));
+    }
+
+    let mut entries = Vec::new();
+    let mut dirs: Vec<_> = fs::read_dir(&by_project)
+        .map_err(|e| map_io(&by_project, e))?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .collect();
+    dirs.sort();
+
+    for dir in dirs {
+        let name = dir
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        if name.is_empty() || name.starts_with('.') {
+            continue;
+        }
+        if dir.is_symlink() || !dir.is_dir() {
+            continue;
+        }
+        let meta_path = dir.join("meta.json");
+        if meta_path.is_symlink() || !meta_path.is_file() {
+            continue;
+        }
+        let Ok(raw) = fs::read_to_string(&meta_path) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+            continue;
+        };
+        let project = value
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&name)
+            .to_string();
+        let root = value
+            .get("root")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let Some(skills) = value.get("skills").and_then(|v| v.as_array()) else {
+            continue;
+        };
+        for skill in skills {
+            if let Some(skill_name) = skill.as_str() {
+                if !skill_name.is_empty() {
+                    entries.push(CatalogEntry {
+                        project: project.clone(),
+                        root: root.clone(),
+                        skill: skill_name.to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    entries.sort();
+    Ok(entries)
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,5 +321,26 @@ mod tests {
             .iter()
             .any(|s| s == "grill-me"));
         assert!(!catalog.join("skills").join("grill-me").exists());
+    }
+
+    #[test]
+    fn list_catalog_returns_sorted_rows() {
+        let temp = TempDir::new().unwrap();
+        let home = temp.path().join("home");
+        let app = temp.path().join("app");
+        let other = temp.path().join("other");
+        fs::create_dir_all(&app).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        deposit_skill_into(Some(&home), &app, "zebra").unwrap();
+        deposit_skill_into(Some(&home), &app, "alpha").unwrap();
+        deposit_skill_into(Some(&home), &other, "beta").unwrap();
+        let rows = list_catalog(Some(&home)).unwrap();
+        assert_eq!(
+            rows
+                .iter()
+                .map(|e| (e.project.as_str(), e.skill.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("app", "alpha"), ("app", "zebra"), ("other", "beta")]
+        );
     }
 }

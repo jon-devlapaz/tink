@@ -6,14 +6,15 @@ skill subcommands.
 
 | Intent | Command |
 |---|---|
-| Safe init | `tink init --no-zen --no-twotink` |
-| Init + ZEN | `tink init --with-zen --no-twotink` |
-| Init + Twotink | `tink init --no-zen --with-twotink` |
-| Init + both | `tink init --with-zen --with-twotink` |
+| Safe init | `tink init --no-zen --no-tink-skills` |
+| Init + ZEN | `tink init --with-zen --no-tink-skills` |
+| Init + tink-skills | `tink init --no-zen --with-tink-skills` |
+| Init + both | `tink init --with-zen --with-tink-skills` |
 | Init without embedded manage-tink | add `--no-manage-tink` |
 | Add one skill | `tink skill add SOURCE` |
 | Add from multi-skill repo | `tink skill add SOURCE --skill NAME` |
-| List | `tink skill list` |
+| List (this project) | `tink skill list` |
+| List (home catalog) | `tink skill list --home` |
 | Check | `tink skill check` |
 | Refresh all clean imports | `tink skill refresh` |
 | Refresh one | `tink skill refresh NAME` |
@@ -24,5 +25,6 @@ skill subcommands.
 - Live skills: `<project>/.agents/skills/<name>/` with `SKILL.md`.
 - Home (`$TINK_HOME` or `~/.tink`) is not an agent discovery root. Installs may
   record skill **names** in `skills/by-project/<project>/meta.json` — a name
-  catalog, not a skill-tree mirror. Destroy does not delete home or prune that
-  catalog.
+  catalog, not a skill-tree mirror. List it with `tink skill list --home`
+  (TSV with header `project`, `root`, `skill`). Do not hand-parse `meta.json`
+  when the CLI is available. Destroy does not delete home or prune that catalog.

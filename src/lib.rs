@@ -40,12 +40,20 @@ pub enum Command {
         /// Skip ZEN.md
         #[arg(long, group = "zen")]
         no_zen: bool,
-        /// Add Twotink skill-scout and skill-eval-loop from GitHub
-        #[arg(long, group = "twotink")]
-        with_twotink: bool,
-        /// Skip Twotink skills
-        #[arg(long, group = "twotink")]
-        no_twotink: bool,
+        /// Add skill-scout and skill-eval-loop from GitHub (tink-skills)
+        #[arg(
+            long = "with-tink-skills",
+            visible_alias = "with-twotink",
+            group = "tink_skills"
+        )]
+        with_tink_skills: bool,
+        /// Skip tink-skills bundle
+        #[arg(
+            long = "no-tink-skills",
+            visible_alias = "no-twotink",
+            group = "tink_skills"
+        )]
+        no_tink_skills: bool,
         /// Install the embedded manage-tink skill (default)
         #[arg(long, group = "manage_tink")]
         with_manage_tink: bool,
@@ -91,8 +99,12 @@ pub enum SkillCommand {
         #[arg(long)]
         skill: Option<String>,
     },
-    /// List installed project skills
-    List,
+    /// List installed project skills, or the home by-project catalog
+    List {
+        /// List offline catalog under `$TINK_HOME` / `~/.tink` as `project\\troot\\tskill` TSV
+        #[arg(long)]
+        home: bool,
+    },
     /// Validate project skills without changing anything
     Check,
     /// Refresh clean GitHub-imported skills; refuse local modifications
@@ -126,14 +138,14 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
         Command::Init {
             with_zen,
             no_zen,
-            with_twotink,
-            no_twotink,
+            with_tink_skills,
+            no_tink_skills,
             with_manage_tink,
             no_manage_tink,
         } => dispatch_init(
             &cwd,
             flag_tri(with_zen, no_zen),
-            flag_tri(with_twotink, no_twotink),
+            flag_tri(with_tink_skills, no_tink_skills),
             flag_tri(with_manage_tink, no_manage_tink),
         ),
         Command::Skill { command } => dispatch_skill(&cwd, command),
@@ -161,7 +173,13 @@ fn dispatch_skill(cwd: &Path, command: SkillCommand) -> Result<(), Error> {
         SkillCommand::Add { source, skill } => {
             dispatch_skill_add(cwd, &source, skill.as_deref())
         }
-        SkillCommand::List => dispatch_skill_list(cwd),
+        SkillCommand::List { home } => {
+            if home {
+                dispatch_skill_list_home()
+            } else {
+                dispatch_skill_list(cwd)
+            }
+        }
         SkillCommand::Check => dispatch_skill_check(cwd),
         SkillCommand::Refresh { name } => dispatch_skill_refresh(cwd, name.as_deref()),
     }
@@ -170,14 +188,14 @@ fn dispatch_skill(cwd: &Path, command: SkillCommand) -> Result<(), Error> {
 fn dispatch_init(
     cwd: &Path,
     with_zen: Option<bool>,
-    with_twotink: Option<bool>,
+    with_tink_skills: Option<bool>,
     with_manage_tink: Option<bool>,
 ) -> Result<(), Error> {
     let report = init::init_project(
         cwd,
         InitOptions {
             with_zen,
-            with_twotink,
+            with_tink_skills,
             with_manage_tink,
         },
     )?;
@@ -192,7 +210,7 @@ fn dispatch_init(
     if let Some(name) = &report.manage_tink_added {
         println!("Added {name}");
     }
-    for name in &report.twotink_added {
+    for name in &report.tink_skills_added {
         println!("Added {name}");
     }
     if report.inventory_created {
@@ -220,6 +238,20 @@ fn dispatch_skill_list(cwd: &Path) -> Result<(), Error> {
     } else {
         for skill in &skills {
             println!("{}", skill.name);
+        }
+    }
+    Ok(())
+}
+
+fn dispatch_skill_list_home() -> Result<(), Error> {
+    let entries = inventory::list_catalog(None)?;
+    if entries.is_empty() {
+        println!("(no catalog entries)");
+    } else {
+        // Header + TSV rows: stable for agents, scannable for humans.
+        println!("project\troot\tskill");
+        for entry in &entries {
+            println!("{}\t{}\t{}", entry.project, entry.root, entry.skill);
         }
     }
     Ok(())

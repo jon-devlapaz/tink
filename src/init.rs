@@ -1,4 +1,4 @@
-//! Minimal project skill home: `.agents/skills/` (+ optional ZEN / Twotink / manage-tink).
+//! Minimal project skill home: `.agents/skills/` (+ optional ZEN / tink-skills / manage-tink).
 
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -9,7 +9,7 @@ use crate::inventory;
 use crate::manage_tink;
 use crate::paths::{map_io, mkdir_p, require_directory, require_file};
 use crate::templates::{
-    self, TWOTINK_SKILLS, TWOTINK_SOURCE, ZEN, ZEN_REFERENCE, ZEN_REFERENCE_MARKER,
+    self, TINK_SKILLS, TINK_SKILLS_SOURCE, ZEN, ZEN_REFERENCE, ZEN_REFERENCE_MARKER,
 };
 
 const SKILLS_README: &str = "\
@@ -23,7 +23,7 @@ directory containing a `SKILL.md` file and any resources it needs.
 pub struct InitOptions {
     /// `None` = ask when interactive; default no when non-interactive.
     pub with_zen: Option<bool>,
-    pub with_twotink: Option<bool>,
+    pub with_tink_skills: Option<bool>,
     /// `None` = install manage-tink (default on).
     pub with_manage_tink: Option<bool>,
 }
@@ -35,7 +35,7 @@ pub struct InitReport {
     pub inventory_home: PathBuf,
     pub inventory_created: bool,
     pub zen_written: bool,
-    pub twotink_added: Vec<String>,
+    pub tink_skills_added: Vec<String>,
     pub manage_tink_added: Option<String>,
 }
 
@@ -94,7 +94,7 @@ fn write_zen(project_root: &Path) -> Result<bool, Error> {
     Ok(wrote)
 }
 
-/// Create `.agents/skills/`, optionally ZEN/Twotink/manage-tink, and ensure home root.
+/// Create `.agents/skills/`, optionally ZEN/tink-skills/manage-tink, and ensure home root.
 pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitReport, Error> {
     let agents = project_root.join(".agents");
     let skills = agents.join("skills");
@@ -108,9 +108,9 @@ pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitRep
         options.with_zen,
         "Add Tink's maintainability principles (ZEN.md)?",
     )?;
-    let with_twotink = opt_in(
-        options.with_twotink,
-        "Add Twotink's skill-scout and skill-eval-loop?",
+    let with_tink_skills = opt_in(
+        options.with_tink_skills,
+        "Add skill-scout and skill-eval-loop from tink-skills?",
     )?;
     let with_manage_tink = options.with_manage_tink.unwrap_or(true);
 
@@ -139,11 +139,11 @@ pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitRep
         None
     };
 
-    let mut twotink_added = Vec::new();
-    if with_twotink {
-        for name in TWOTINK_SKILLS {
-            let outcome = add::add_skill(project_root, TWOTINK_SOURCE, Some(name))?;
-            twotink_added.push(outcome.name);
+    let mut tink_skills_added = Vec::new();
+    if with_tink_skills {
+        for name in TINK_SKILLS {
+            let outcome = add::add_skill(project_root, TINK_SKILLS_SOURCE, Some(name))?;
+            tink_skills_added.push(outcome.name);
         }
     }
 
@@ -154,7 +154,7 @@ pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitRep
         inventory_home: home,
         inventory_created: home_created,
         zen_written,
-        twotink_added,
+        tink_skills_added,
         manage_tink_added,
     })
 }
@@ -165,7 +165,7 @@ pub fn ensure_project_skills(project_root: &Path) -> Result<(), Error> {
         project_root,
         InitOptions {
             with_zen: Some(false),
-            with_twotink: Some(false),
+            with_tink_skills: Some(false),
             with_manage_tink: Some(false),
         },
     )?;

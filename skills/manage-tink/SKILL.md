@@ -1,6 +1,6 @@
 ---
 name: manage-tink
-description: "Tink CLI for repository-owned Agent Skills. Use when the user asks to set up or init Tink, add or refresh a project skill, list or check .agents/skills, or destroy project agent scaffolding."
+description: "Tink CLI for repository-owned Agent Skills. Use when the user asks to set up or init Tink, add or refresh a project skill, list or check .agents/skills, list the home by-project catalog, or destroy project agent scaffolding."
 ---
 
 # Manage Tink
@@ -12,10 +12,12 @@ are hard stops — honor them; do not work around them.
 
 1. **Inspect** — If `tink` is missing, report that it must be installed
    (`cargo install --git https://github.com/jon-devlapaz/tink.git --locked`) and
-   stop. Otherwise run `tink skill check` (alias `tink check`) when you need the
-   current state.
-   - Done when: either install guidance was given, or check's exit status and
-     skill count are known.
+   stop. Otherwise: use `tink skill check` for this project's live state; use
+   `tink skill list` for live skill names; use `tink skill list --home` when the
+   user asks what Tink has recorded across projects (do not hand-parse
+   `~/.tink/skills/by-project`).
+   - Done when: either install guidance was given, or the chosen inspect
+     command's exit status and output are known.
 
 2. **Mutate only on explicit ask** — Map the user's request to exactly one
    command from [references/commands.md](references/commands.md). Run that
@@ -32,12 +34,12 @@ are hard stops — honor them; do not work around them.
 
 | User said… | Authorizes… |
 |---|---|
-| Set up / init Tink (no extras) | `tink init --no-zen --no-twotink` (embeds `manage-tink`) |
-| …and ZEN / Twotink / skip manage-tink | Only the matching `--with-*` / `--no-*` flags |
-| Add / list / check / refresh … | The matching `tink skill …` command |
+| Set up / init Tink (no extras) | `tink init --no-zen --no-tink-skills` (embeds `manage-tink`) |
+| …and ZEN / tink-skills / skip manage-tink | Only the matching `--with-*` / `--no-*` flags |
+| Add / list / check / refresh … | The matching `tink skill …` command (`list --home` for the offline catalog) |
 | Remove scaffolding / destroy Tink setup | `tink destroy` (TTY) or `tink destroy --yes` (scripts) |
 
-"Set up Tink" does **not** authorize ZEN, Twotink, or destroy.
+"Set up Tink" does **not** authorize ZEN, tink-skills, or destroy.
 
 ## Ownership (always)
 

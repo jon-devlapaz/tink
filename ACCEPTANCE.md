@@ -19,9 +19,10 @@ Canonical skill verbs live under `tink skill`. Top-level `add` / `check` /
 
 | Command | Meaning |
 |---|---|
-| `tink init` | Create `.agents/skills/`; install `manage-tink` by default; optional ZEN + Twotink; ensure `~/.tink` |
+| `tink init` | Create `.agents/skills/`; install `manage-tink` by default; optional ZEN + tink-skills; ensure `~/.tink` |
 | `tink skill add <source> [--skill <name>]` | Install one local or public GitHub skill |
 | `tink skill list` | List project skills under `.agents/skills/` (read-only) |
+| `tink skill list --home` | List offline by-project catalog (`project`, `root`, `skill` TSV) |
 | `tink skill check` | Validate project skills; no network; no writes |
 | `tink skill refresh [name]` | Refresh clean GitHub imports; refuse local edits |
 | `tink add` / `tink check` / `tink refresh` | Aliases of the matching `tink skill …` commands |
@@ -46,7 +47,7 @@ Ids are stable. Tests must name or comment the id they prove.
 |---|---|---|
 | I1 | `init` in empty project | Creates `.agents/skills/` as real directories (not symlinks) |
 | I2 | `init` when `.agents` is a symlink | Exit ≠ 0; mentions symlink; creates nothing unsafe |
-| I3 | `init` (non-interactive / `--no-zen --no-twotink`) | Does **not** write `AGENTS.md`, `ZEN.md`, or `.github/workflows/*` (may still install `manage-tink`) |
+| I3 | `init` (non-interactive / `--no-zen --no-tink-skills`) | Does **not** write `AGENTS.md`, `ZEN.md`, or `.github/workflows/*` (may still install `manage-tink`) |
 | I4 | `init` with `TINK_HOME` set | Creates home root + `layout.json` + `skills/by-project/` |
 | I5 | `init --with-zen` | Writes `ZEN.md` and an `AGENTS.md` that references it |
 | I6 | `init` (default) | Installs `.agents/skills/manage-tink/`; catalogs `manage-tink` in by-project meta; does **not** copy skill trees into home |
@@ -86,6 +87,7 @@ Ids are stable. Tests must name or comment the id they prove.
 |---|---|---|
 | L1 | `skill list` after `init` | Exit 0; stdout includes `manage-tink` |
 | L2 | `skill list` without `.agents/skills` | Exit ≠ 0 |
+| L3 | `skill list --home` after init+add | Exit 0; header `project\\troot\\tskill` plus TSV rows for cataloged skills |
 
 ### CLI surface
 
