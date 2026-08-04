@@ -8,6 +8,7 @@ mod check;
 mod destroy;
 mod error;
 mod git;
+mod harvest;
 mod home;
 mod init;
 mod manage_tink;
@@ -114,6 +115,8 @@ pub enum SkillCommand {
         /// Skill directory name under `.agents/skills/`
         name: String,
     },
+    /// Copy harness skill trees into the home stash (create-only)
+    Harvest,
 }
 
 fn flag_tri(yes: bool, no: bool) -> Option<bool> {
@@ -206,6 +209,7 @@ fn dispatch_skill(cwd: &Path, command: SkillCommand) -> Result<(), Error> {
         SkillCommand::Check => dispatch_skill_check(cwd),
         SkillCommand::Refresh { name } => dispatch_skill_refresh(cwd, name.as_deref()),
         SkillCommand::Remove { name } => dispatch_skill_remove(cwd, &name),
+        SkillCommand::Harvest => dispatch_skill_harvest(cwd),
     }
 }
 
@@ -347,6 +351,50 @@ fn dispatch_skill_remove(cwd: &Path, name: &str) -> Result<(), Error> {
         "{} {}",
         style.success("Removed"),
         style.accent(report.removed.display())
+    );
+    Ok(())
+}
+
+fn dispatch_skill_harvest(cwd: &Path) -> Result<(), Error> {
+    let out = CliStyle::auto_stdout();
+    let err = CliStyle::auto_stderr();
+    let report = harvest::harvest(cwd)?;
+    for event in &report.events {
+        match event.action {
+            harvest::HarvestAction::Created => {
+                println!(
+                    "{} {} {}",
+                    out.success("created"),
+                    out.accent(&event.name),
+                    out.muted(event.source.display())
+                );
+            }
+            harvest::HarvestAction::Unchanged => {
+                println!(
+                    "{} {} {}",
+                    out.muted("unchanged"),
+                    out.accent(&event.name),
+                    out.muted(event.source.display())
+                );
+            }
+            harvest::HarvestAction::Skipped => {
+                let detail = event.detail.as_deref().unwrap_or("skipped");
+                eprintln!(
+                    "{} {} {} ({})",
+                    err.warn("skipped"),
+                    err.accent(&event.name),
+                    err.muted(event.source.display()),
+                    detail
+                );
+            }
+        }
+    }
+    println!(
+        "{} created={} unchanged={} skipped={}",
+        out.success("Harvest"),
+        out.accent(report.created),
+        out.accent(report.unchanged),
+        out.accent(report.skipped)
     );
     Ok(())
 }

@@ -118,6 +118,7 @@ Stash, catalog, init flags, and destroy:
 ```console
 tink skill list --stash
 tink skill add --stash skill-name
+tink skill harvest
 tink skill list --home
 
 tink init --with-zen --with-tink-skills

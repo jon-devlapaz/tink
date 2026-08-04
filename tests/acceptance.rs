@@ -801,6 +801,149 @@ fn h4_skill_add_stash_refuses_overwrite_when_diverged() {
     assert!(body.contains("project local body"));
 }
 
+#[test]
+fn h5_skill_harvest_copies_harness_skills_into_stash() {
+    let ws = Workspace::new();
+    let home = ws.root.join("home");
+    let project = ws.project("app");
+    write_skill(
+        &home.join(".agents").join("skills").join("agents-skill"),
+        "agents-skill",
+        "from agents",
+    );
+    write_skill(
+        &home.join(".claude").join("skills").join("claude-skill"),
+        "claude-skill",
+        "from claude",
+    );
+    // Nested under codex (recursive).
+    write_skill(
+        &home
+            .join(".codex")
+            .join("skills")
+            .join("workflows")
+            .join("nested-skill"),
+        "nested-skill",
+        "from codex nest",
+    );
+
+    ws.cmd(&project)
+        .env("HOME", &home)
+        .args(["skill", "harvest"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("created")
+                .and(predicate::str::contains("agents-skill"))
+                .and(predicate::str::contains("claude-skill"))
+                .and(predicate::str::contains("nested-skill")),
+        );
+
+    assert!(ws.stash_skill("agents-skill").join("SKILL.md").is_file());
+    assert!(ws.stash_skill("claude-skill").join("SKILL.md").is_file());
+    assert!(ws.stash_skill("nested-skill").join("SKILL.md").is_file());
+    assert!(
+        !project.join(".agents").exists(),
+        "harvest must not create project .agents"
+    );
+}
+
+#[test]
+fn h6_skill_harvest_identical_is_unchanged() {
+    let ws = Workspace::new();
+    let home = ws.root.join("home");
+    let project = ws.project("app");
+    let skill = home.join(".agents").join("skills").join("same-skill");
+    write_skill(&skill, "same-skill", "body");
+    ws.cmd(&project)
+        .env("HOME", &home)
+        .args(["skill", "harvest"])
+        .assert()
+        .success();
+    ws.cmd(&project)
+        .env("HOME", &home)
+        .args(["skill", "harvest"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("unchanged").and(predicate::str::contains("same-skill")));
+}
+
+#[test]
+fn h7_skill_harvest_divergent_skips_without_repair() {
+    let ws = Workspace::new();
+    let home = ws.root.join("home");
+    let project = ws.project("app");
+    write_skill(
+        &home.join(".agents").join("skills").join("demo-skill"),
+        "demo-skill",
+        "harness body",
+    );
+    // Pre-seed divergent stash.
+    write_skill(ws.stash_skill("demo-skill").as_path(), "demo-skill", "stash body");
+    let before = fs::read_to_string(ws.stash_skill("demo-skill").join("SKILL.md")).unwrap();
+
+    ws.cmd(&project)
+        .env("HOME", &home)
+        .args(["skill", "harvest"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("skipped").and(predicate::str::contains("demo-skill")));
+
+    let after = fs::read_to_string(ws.stash_skill("demo-skill").join("SKILL.md")).unwrap();
+    assert_eq!(before, after, "create-only must not repair divergent stash");
+    assert!(after.contains("stash body"));
+}
+
+#[test]
+fn h8_skill_harvest_skips_tink_home_and_unsafe_trees() {
+    let ws = Workspace::new();
+    let home = ws.root.join("home");
+    let project = ws.project("app");
+    write_skill(
+        &home.join(".agents").join("skills").join("good-skill"),
+        "good-skill",
+        "ok",
+    );
+    // Unsafe: symlink inside skill tree.
+    let bad = home.join(".claude").join("skills").join("bad-skill");
+    write_skill(&bad, "bad-skill", "has link");
+    std::os::unix::fs::symlink("/tmp", bad.join("link-out")).unwrap();
+
+    ws.cmd(&project)
+        .env("HOME", &home)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    write_skill(
+        ws.stash_skill("from-home").as_path(),
+        "from-home",
+        "stash resident",
+    );
+    // Harness entry that realpaths into TINK_HOME — must be skipped as a source.
+    fs::create_dir_all(home.join(".cursor").join("skills")).unwrap();
+    std::os::unix::fs::symlink(
+        ws.stash_skill("from-home"),
+        home.join(".cursor").join("skills").join("from-home"),
+    )
+    .unwrap();
+
+    ws.cmd(&project)
+        .env("HOME", &home)
+        .args(["skill", "harvest"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("good-skill"))
+        .stderr(
+            predicate::str::contains("bad-skill")
+                .and(predicate::str::contains("from-home")),
+        );
+
+    assert!(ws.stash_skill("good-skill").join("SKILL.md").is_file());
+    assert!(!ws.stash_skill("bad-skill").exists());
+    let home_body = fs::read_to_string(ws.stash_skill("from-home").join("SKILL.md")).unwrap();
+    assert!(home_body.contains("stash resident"));
+}
+
 // --- V*: CLI surface (skill nest) ---
 
 #[test]

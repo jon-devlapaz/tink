@@ -4,8 +4,9 @@
 a project's `.agents/skills/`, proves them offline, refreshes clean GitHub
 imports, removes a project skill on request, ensures a home root at `~/.tink`
 (override: `TINK_HOME`), can list or promote skills from the home stash
-(`skills/<name>/`) into a project, and can update the CLI binary from GitHub
-Releases via `tink update`.
+(`skills/<name>/`) into a project, can harvest complete skill trees from known
+harness locations into that stash (create-only), and can update the CLI binary
+from GitHub Releases via `tink update`.
 
 **Authority:** This file is the evaluator. Implementation stops when every row
 below has an automated test that passes on macOS with `git` on `PATH`.
@@ -29,6 +30,7 @@ Skill verbs live only under `tink skill`. There are no top-level `add` /
 | `tink skill list` | List project skills under `.agents/skills/` (read-only) |
 | `tink skill list --home` | List offline by-project catalog (`project`, `root`, `skill` TSV) |
 | `tink skill list --stash` | List skill names in the home stash (`skills/<name>/` with `SKILL.md`) |
+| `tink skill harvest` | Copy complete skill trees from known harness roots into the home stash (create-only; no project writes) |
 | `tink skill check` | Validate project skills; no network; no writes |
 | `tink skill refresh [name]` | Refresh clean GitHub imports; refuse local edits |
 | `tink skill remove <name>` | Delete one project skill under `.agents/skills/<name>/` (not home stash or catalog) |
@@ -110,6 +112,10 @@ Ids are stable. Tests must name or comment the id they prove.
 | H2 | `skill add --stash <name>` when stash has that skill and project lacks it | Exit 0; installs under `.agents/skills/<name>/`; catalogs name; **no** network; stdout notes stash |
 | H3 | `skill add --stash <missing>` | Exit ≠ 0; mentions not found / missing; **no** GitHub network fetch |
 | H4 | `skill add --stash <name>` when project skill exists and differs | Exit ≠ 0; "Refusing to overwrite"; project target unchanged |
+| H5 | `skill harvest` with fixture `$HOME/.agents/skills` + `$HOME/.claude/skills` + `TINK_HOME` | Copies complete skill trees into `$TINK_HOME/skills/`; no project `.agents` skill writes from harvest |
+| H6 | `skill harvest` when stash already identical | Exit 0; unchanged |
+| H7 | `skill harvest` when stash diverges | Exit 0; stash unchanged; stderr skip warn |
+| H8 | `skill harvest` skips `$TINK_HOME` and unsafe (symlink-inside) skill trees | Those omitted; others still deposited |
 
 ### CLI surface
 
