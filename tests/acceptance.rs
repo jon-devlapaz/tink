@@ -1312,3 +1312,161 @@ fn s1_init_does_not_create_git_repo() {
     ws.cmd(&project).arg("init").assert().success();
     assert!(!project.join(".git").exists());
 }
+
+// --- U*: tink update ---
+
+fn host_release_target() -> &'static str {
+    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        "aarch64-apple-darwin"
+    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        "x86_64-apple-darwin"
+    } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+        "aarch64-unknown-linux-gnu"
+    } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        "x86_64-unknown-linux-gnu"
+    } else {
+        "unsupported"
+    }
+}
+
+fn package_version() -> String {
+    let output = cargo_bin_cmd!("tink")
+        .arg("--version")
+        .output()
+        .expect("tink --version");
+    assert!(output.status.success());
+    let text = String::from_utf8_lossy(&output.stdout);
+    // "tink 0.2.0"
+    text.split_whitespace()
+        .nth(1)
+        .expect("version")
+        .trim()
+        .to_string()
+}
+
+fn write_release_fixture(dir: &Path, version: &str, binary_src: &Path) -> PathBuf {
+    let target = host_release_target();
+    assert_ne!(target, "unsupported", "update fixtures need a supported host");
+    let asset = format!("tink-{version}-{target}.tar.gz");
+    let stage = dir.join("stage");
+    fs::create_dir_all(&stage).unwrap();
+    let staged_bin = stage.join("tink");
+    fs::copy(binary_src, &staged_bin).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&staged_bin, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let archive = dir.join(&asset);
+    let status = StdCommand::new("tar")
+        .args(["-czf"])
+        .arg(&archive)
+        .arg("-C")
+        .arg(&stage)
+        .arg("tink")
+        .status()
+        .expect("tar");
+    assert!(status.success());
+
+    let archive_url = format!("file://{}", archive.display());
+    let meta = dir.join("release.json");
+    let body = format!(
+        r#"{{
+  "tag_name": "v{version}",
+  "assets": [
+    {{
+      "name": "{asset}",
+      "browser_download_url": "{archive_url}"
+    }}
+  ]
+}}"#
+    );
+    fs::write(&meta, body).unwrap();
+    meta
+}
+
+#[test]
+fn u1_update_fails_closed_on_bad_releases_api() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .arg("update")
+        .env(
+            "TINK_RELEASES_API",
+            "http://127.0.0.1:1/tink-update-missing",
+        )
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("could not download"));
+}
+
+#[test]
+fn u2_update_reports_up_to_date_for_current_version() {
+    let ws = Workspace::new();
+    let fixture = ws.root.join("release-fixture");
+    fs::create_dir_all(&fixture).unwrap();
+    let version = package_version();
+    let bin = assert_cmd::cargo::cargo_bin!("tink");
+    let meta = write_release_fixture(&fixture, &version, &bin);
+    let api = format!("file://{}", meta.display());
+
+    let install_dir = ws.root.join("install");
+    fs::create_dir_all(&install_dir).unwrap();
+    let installed = install_dir.join("tink");
+    fs::copy(&bin, &installed).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&installed, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    Command::new(&installed)
+        .arg("update")
+        .env("TINK_RELEASES_API", &api)
+        .env("TINK_HOME", &ws.inventory)
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Up to date")
+                .and(predicate::str::contains(format!("v{version}"))),
+        );
+}
+
+#[test]
+fn u3_update_replaces_binary_when_newer_release_exists() {
+    let ws = Workspace::new();
+    let fixture = ws.root.join("release-fixture");
+    fs::create_dir_all(&fixture).unwrap();
+    let bin = assert_cmd::cargo::cargo_bin!("tink");
+    let meta = write_release_fixture(&fixture, "99.0.0", &bin);
+    let api = format!("file://{}", meta.display());
+
+    let install_dir = ws.root.join("install");
+    fs::create_dir_all(&install_dir).unwrap();
+    let installed = install_dir.join("tink");
+    fs::copy(&bin, &installed).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&installed, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let before = fs::metadata(&installed).unwrap().modified().unwrap();
+
+    // Ensure mtime can advance.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+
+    Command::new(&installed)
+        .arg("update")
+        .env("TINK_RELEASES_API", &api)
+        .env("TINK_HOME", &ws.inventory)
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Updated")
+                .and(predicate::str::contains("v99.0.0")),
+        );
+
+    assert!(installed.is_file());
+    let after = fs::metadata(&installed).unwrap().modified().unwrap();
+    assert!(after >= before);
+}

@@ -20,6 +20,7 @@ mod sources;
 mod stash;
 mod style;
 mod templates;
+mod update;
 
 use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
@@ -75,6 +76,8 @@ pub enum Command {
         #[arg(long)]
         yes: bool,
     },
+    /// Replace this binary with the latest GitHub Release
+    Update,
 }
 
 #[derive(Debug, Subcommand)]
@@ -163,6 +166,11 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
                     );
                 }
             }
+            Ok(())
+        }
+        Command::Update => {
+            let report = update::update_binary()?;
+            update::print_report(&report);
             Ok(())
         }
     }

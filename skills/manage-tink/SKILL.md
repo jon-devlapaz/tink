@@ -1,6 +1,6 @@
 ---
 name: manage-tink
-description: "Tink CLI for repository-owned Agent Skills. Use when the user asks to set up or init Tink, add or refresh a project skill, remove a project skill, list or check .agents/skills, list the home by-project catalog or home stash, promote a stash skill into the project, or destroy project agent scaffolding."
+description: "Tink CLI for repository-owned Agent Skills. Use when the user asks to set up or init Tink, add or refresh a project skill, remove a project skill, update the tink CLI, list or check .agents/skills, list the home by-project catalog or home stash, promote a stash skill into the project, or destroy project agent scaffolding."
 ---
 
 # Manage Tink
@@ -11,8 +11,8 @@ are hard stops — honor them; do not work around them.
 ## Steps
 
 1. **Inspect** — If `tink` is missing, report that it must be installed
-   (`cargo install --git https://github.com/jon-devlapaz/tink.git --locked`) and
-   stop. Otherwise: use `tink skill check` for this project's live state; use
+   (`curl -fsSL https://raw.githubusercontent.com/jon-devlapaz/tink/main/install.sh | sh`)
+   and stop. Otherwise: use `tink skill check` for this project's live state; use
    `tink skill list` for live skill names; use `tink skill list --home` when the
    user asks what Tink has recorded across projects; use `tink skill list --stash`
    when the user asks what skill trees sit in the home dump (do not hand-parse
@@ -26,7 +26,8 @@ are hard stops — honor them; do not work around them.
    paths (no symlinks, manual copies, or private registries). To promote from
    the home stash into the project, use `tink skill add --stash NAME` only.
    To remove a live project skill, use `tink skill remove NAME` only (does not
-   prune home stash or catalog).
+   prune home stash or catalog). To update the tink CLI binary, use
+   `tink update` only.
    - Done when: the chosen command has finished and its stdout/stderr is known.
 
 3. **Prove** — After every successful mutation except `destroy` and
@@ -46,6 +47,7 @@ are hard stops — honor them; do not work around them.
 | List home catalog | `tink skill list --home` |
 | List home stash / promote from stash | `tink skill list --stash` / `tink skill add --stash NAME` |
 | Remove one project skill | `tink skill remove NAME` |
+| Update the tink CLI | `tink update` |
 | Remove scaffolding / destroy Tink setup | `tink destroy` (TTY) or `tink destroy --yes` (scripts) |
 
 "Set up Tink" does **not** authorize ZEN, tink-skills, or destroy.

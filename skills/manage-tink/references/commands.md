@@ -20,6 +20,7 @@ form for add, list, check, refresh, and remove.
 | Refresh all clean imports | `tink skill refresh` |
 | Refresh one | `tink skill refresh NAME` |
 | Remove one project skill | `tink skill remove NAME` |
+| Update the tink CLI binary | `tink update` |
 | Destroy scaffolding | `tink destroy --yes` (non-TTY/scripts) or `tink destroy` (TTY, confirm `y`) |
 
 ## Layout facts

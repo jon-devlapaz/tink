@@ -12,7 +12,24 @@ there.
 
 ## Install
 
-You need a current Rust toolchain. For GitHub sources, `git` must be on `PATH`.
+```console
+curl -fsSL https://raw.githubusercontent.com/jon-devlapaz/tink/main/install.sh | sh
+```
+
+That installs a release binary into `~/.local/bin/tink` (override with
+`TINK_INSTALL_DIR`). Requires `curl` and `tar`. Supported hosts: macOS and
+Linux on x86_64/arm64.
+
+Update later with:
+
+```console
+tink update
+```
+
+### From source
+
+You need a current Rust toolchain. For GitHub skill sources, `git` must be on
+`PATH`.
 
 ```console
 cargo install --git https://github.com/jon-devlapaz/tink.git --locked
@@ -107,6 +124,7 @@ tink init --with-zen --with-tink-skills
 tink init --no-zen --no-tink-skills --no-manage-tink
 
 tink destroy --yes
+tink update
 ```
 
 If the GitHub tip is already in the stash and matches the tip byte-for-byte,
@@ -117,9 +135,9 @@ or catalog.
 ### Uninstall the CLI
 
 ```console
+rm -f ~/.local/bin/tink
+# or, if installed via cargo:
 cargo uninstall tink
-# or, if installed with --root ~/.local:
-cargo uninstall --root ~/.local tink
 ```
 
 ## Layout

@@ -3,14 +3,15 @@
 **Outcome:** A smaller Tink core in Rust that installs complete Agent Skills into
 a project's `.agents/skills/`, proves them offline, refreshes clean GitHub
 imports, removes a project skill on request, ensures a home root at `~/.tink`
-(override: `TINK_HOME`), and can list or promote skills from the home stash
-(`skills/<name>/`) into a project.
+(override: `TINK_HOME`), can list or promote skills from the home stash
+(`skills/<name>/`) into a project, and can update the CLI binary from GitHub
+Releases via `tink update`.
 
 **Authority:** This file is the evaluator. Implementation stops when every row
 below has an automated test that passes on macOS with `git` on `PATH`.
 
-**Out of v1:** weekly GitHub update workflows, self-update, private GitHub auth,
-Windows, Linux CI as a gate, pruning the home by-project catalog or home stash,
+**Out of v1:** weekly GitHub update workflows, private GitHub auth, Windows,
+Linux CI as a gate, pruning the home by-project catalog or home stash,
 bare-name stash promote without `--stash`.
 
 **Dogfood:** Prefer an installed `tink` from this repo, or `cargo run -q -- …`.
@@ -18,7 +19,7 @@ bare-name stash promote without `--stash`.
 ## Commands
 
 Skill verbs live only under `tink skill`. There are no top-level `add` /
-`check` / `refresh` aliases.
+`check` / `refresh` aliases. CLI binary updates use top-level `tink update`.
 
 | Command | Meaning |
 |---|---|
@@ -31,6 +32,7 @@ Skill verbs live only under `tink skill`. There are no top-level `add` /
 | `tink skill check` | Validate project skills; no network; no writes |
 | `tink skill refresh [name]` | Refresh clean GitHub imports; refuse local edits |
 | `tink skill remove <name>` | Delete one project skill under `.agents/skills/<name>/` (not home stash or catalog) |
+| `tink update` | Replace this binary with the latest public GitHub Release (requires `curl` + `tar`) |
 | `tink destroy [--yes]` | Remove `.agents/`, `ZEN.md`, and `AGENTS.md` (not `~/.tink`) |
 
 ## On-disk contracts
@@ -144,6 +146,14 @@ Ids are stable. Tests must name or comment the id they prove.
 | D1 | `destroy --yes` after `init --with-zen` | Removes `.agents/`, `ZEN.md`, `AGENTS.md`; leaves `~/.tink` intact |
 | D2 | `destroy` without `--yes` (non-TTY) | Exit ≠ 0; refuses without confirmation; project files unchanged |
 | D3 | `destroy --yes` when `.agents` is a symlink | Exit ≠ 0; mentions symlink |
+
+### Update (CLI binary)
+
+| Id | Action | Expect |
+|---|---|---|
+| U1 | `update` when releases API is unreachable | Exit ≠ 0; clear download/metadata failure; binary unchanged |
+| U2 | `update` when latest release version matches this binary | Exit 0; stdout notes up to date; binary unchanged |
+| U3 | `update` when a newer release asset exists for this host | Exit 0; replaces the running binary; stdout notes updated version |
 
 ### Safety (cross-cutting)
 
