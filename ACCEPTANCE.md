@@ -115,7 +115,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | H5 | `skill harvest` with fixture `$HOME/.agents/skills` + `$HOME/.claude/skills` + `TINK_HOME` | Copies complete skill trees into `$TINK_HOME/skills/`; no project `.agents` skill writes from harvest |
 | H6 | `skill harvest` when stash already identical | Exit 0; unchanged |
 | H7 | `skill harvest` when stash diverges | Exit 0; stash unchanged; stderr skip warn |
-| H8 | `skill harvest` skips `$TINK_HOME` and unsafe (symlink-inside) skill trees | Those omitted; others still deposited |
+| H8 | `skill harvest` skips home stash sources and unsafe (symlink-inside) skill trees; still harvests cwd skills under `TINK_HOME` outside `skills/` | Stash/unsafe omitted; non-stash path under home deposited |
 
 ### CLI surface
 

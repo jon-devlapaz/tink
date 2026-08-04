@@ -256,9 +256,7 @@ fn create_only_deposit(
 pub fn harvest(cwd: &Path) -> Result<HarvestReport, Error> {
     let (tink_home, _) = ensure_inventory_root(None)?;
     let stash = skills_stash_path(&tink_home);
-    let tink_home_canon = tink_home
-        .canonicalize()
-        .unwrap_or_else(|_| tink_home.clone());
+    let stash_canon = stash.canonicalize().unwrap_or_else(|_| stash.clone());
 
     let mut skill_paths = Vec::new();
     for root in candidate_roots(cwd)? {
@@ -272,7 +270,9 @@ pub fn harvest(cwd: &Path) -> Result<HarvestReport, Error> {
     let mut report = HarvestReport::default();
 
     for path in skill_paths {
-        if is_under(&path, &tink_home_canon) || is_under(&path, &tink_home) {
+        // Skip only the stash inventory — not the whole TINK_HOME tree
+        // (a workspace nested under TINK_HOME remains harvestable).
+        if is_under(&path, &stash_canon) || is_under(&path, &stash) {
             report.events.push(HarvestEvent {
                 name: path
                     .file_name()
@@ -280,7 +280,7 @@ pub fn harvest(cwd: &Path) -> Result<HarvestReport, Error> {
                     .unwrap_or_else(|| path.display().to_string()),
                 source: path,
                 action: HarvestAction::Skipped,
-                detail: Some("under TINK_HOME".into()),
+                detail: Some("under home stash".into()),
             });
             report.skipped += 1;
             continue;

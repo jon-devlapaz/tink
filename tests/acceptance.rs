@@ -898,11 +898,18 @@ fn h7_skill_harvest_divergent_skips_without_repair() {
 fn h8_skill_harvest_skips_tink_home_and_unsafe_trees() {
     let ws = Workspace::new();
     let home = ws.root.join("home");
-    let project = ws.project("app");
+    // Project lives under TINK_HOME but outside skills/ — must still harvest.
+    let project = ws.inventory.join("workspace");
+    fs::create_dir_all(&project).unwrap();
     write_skill(
         &home.join(".agents").join("skills").join("good-skill"),
         "good-skill",
         "ok",
+    );
+    write_skill(
+        &project.join(".agents").join("skills").join("nested-home-skill"),
+        "nested-home-skill",
+        "under tink home workspace",
     );
     // Unsafe: symlink inside skill tree.
     let bad = home.join(".claude").join("skills").join("bad-skill");
@@ -919,7 +926,7 @@ fn h8_skill_harvest_skips_tink_home_and_unsafe_trees() {
         "from-home",
         "stash resident",
     );
-    // Harness entry that realpaths into TINK_HOME — must be skipped as a source.
+    // Harness entry that realpaths into the stash — must be skipped as a source.
     fs::create_dir_all(home.join(".cursor").join("skills")).unwrap();
     std::os::unix::fs::symlink(
         ws.stash_skill("from-home"),
@@ -932,13 +939,17 @@ fn h8_skill_harvest_skips_tink_home_and_unsafe_trees() {
         .args(["skill", "harvest"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("good-skill"))
+        .stdout(
+            predicate::str::contains("good-skill")
+                .and(predicate::str::contains("nested-home-skill")),
+        )
         .stderr(
             predicate::str::contains("bad-skill")
                 .and(predicate::str::contains("from-home")),
         );
 
     assert!(ws.stash_skill("good-skill").join("SKILL.md").is_file());
+    assert!(ws.stash_skill("nested-home-skill").join("SKILL.md").is_file());
     assert!(!ws.stash_skill("bad-skill").exists());
     let home_body = fs::read_to_string(ws.stash_skill("from-home").join("SKILL.md")).unwrap();
     assert!(home_body.contains("stash resident"));
