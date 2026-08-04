@@ -38,7 +38,9 @@ are hard stops — honor them; do not work around them.
 |---|---|
 | Set up / init Tink (no extras) | `tink init --no-zen --no-tink-skills` (embeds `manage-tink`) |
 | …and ZEN / tink-skills / skip manage-tink | Only the matching `--with-*` / `--no-*` flags |
-| Add / list / check / refresh … | The matching `tink skill …` command (`list --home` for the offline catalog; `list --stash` / `add --stash` for the home skill dump) |
+| Add / list / check / refresh … | The matching `tink skill …` command |
+| List home catalog | `tink skill list --home` |
+| List home stash / promote from stash | `tink skill list --stash` / `tink skill add --stash NAME` |
 | Remove scaffolding / destroy Tink setup | `tink destroy` (TTY) or `tink destroy --yes` (scripts) |
 
 "Set up Tink" does **not** authorize ZEN, tink-skills, or destroy.
@@ -50,3 +52,7 @@ are hard stops — honor them; do not work around them.
   only `.agents/`, `ZEN.md`, and `AGENTS.md`.
 - Treat local skills as non-refreshable unless they carry a valid receipt.
 - Never execute code from a skill while adding, checking, refreshing, or destroying.
+- Home stash (`~/.tink/skills/`) is **not** an agent discovery root; do not
+  symlink or copy from it by hand — use `tink skill add --stash NAME`.
+- Do not prune the home stash or by-project catalog unless the user explicitly
+  asks and a supporting command exists (prune is out of v1).

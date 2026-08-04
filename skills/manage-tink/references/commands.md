@@ -32,5 +32,5 @@ form for add, list, check, and refresh.
   Names are recorded in `catalog/by-project/<project>/meta.json`. List the
   catalog with `tink skill list --home` (TSV with header `project`, `root`,
   `skill`). Do not hand-parse `meta.json` when the CLI is available. Destroy
-  does not delete home or prune that catalog. Project skill overwrites are
-  still refused.
+  does not delete home or prune that catalog or stash. Project skill overwrites
+  are still refused.
