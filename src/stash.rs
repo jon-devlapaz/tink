@@ -23,6 +23,17 @@ pub enum StashWrite {
     Repaired,
 }
 
+/// Result of a create-only stash write (never repairs).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CreateOnlyWrite {
+    /// Stash entry was missing; tree was created.
+    Created,
+    /// Stash already matched (exact, or body equal except receipt).
+    Unchanged,
+    /// Divergent or unreadable; no write. Optional reason for the caller.
+    Skipped(Option<String>),
+}
+
 fn clear_path(target: &Path) -> Result<(), Error> {
     refuse_symlink(target)?;
     if target.is_dir() {
@@ -92,6 +103,40 @@ pub fn deposit(
             clear_path(&stash.join(&skill.name))?;
             let (path, _) = skills::install_local(skill, &stash, provenance)?;
             Ok((path, StashWrite::Repaired))
+        }
+    }
+}
+
+/// Copy skill tree into the home stash only when missing or identical.
+///
+/// Divergent trees are skipped (no repair). Unreadable/unsafe trees surface as
+/// [`CreateOnlyWrite::Skipped`] with the error detail — same create-only
+/// contract harvest used before this lived in `stash`.
+pub fn deposit_create_only(skill: &Skill) -> Result<(PathBuf, CreateOnlyWrite), Error> {
+    let stash = stash_root(None)?;
+    let target = stash.join(&skill.name);
+    match skills::preflight_install(skill, &stash, None) {
+        Err(err) => Ok((target, CreateOnlyWrite::Skipped(Some(err.to_string())))),
+        Ok(PreflightOutcome::Ready) => {
+            let (path, _) = skills::install_local(skill, &stash, None)?;
+            Ok((path, CreateOnlyWrite::Created))
+        }
+        Ok(PreflightOutcome::Identical) => Ok((target, CreateOnlyWrite::Unchanged)),
+        Ok(PreflightOutcome::Divergent) => {
+            if target.is_dir()
+                && skills::skill_contents_equal_except(
+                    &target,
+                    &skill.path,
+                    &[".tink-source.json"],
+                )?
+            {
+                Ok((target, CreateOnlyWrite::Unchanged))
+            } else {
+                Ok((
+                    target,
+                    CreateOnlyWrite::Skipped(Some("stash differs; create-only".into())),
+                ))
+            }
         }
     }
 }

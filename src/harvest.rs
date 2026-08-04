@@ -18,7 +18,8 @@ use std::path::{Path, PathBuf};
 use crate::error::Error;
 use crate::home::{ensure_inventory_root, skills_stash_path};
 use crate::paths::{map_io, refuse_symlink};
-use crate::skills::{self, PreflightOutcome, Skill};
+use crate::skills;
+use crate::stash::{self, CreateOnlyWrite};
 
 /// Relative skill roots under `$HOME` (user/global harness locations).
 ///
@@ -220,35 +221,11 @@ fn candidate_roots(cwd: &Path) -> Result<Vec<PathBuf>, Error> {
     Ok(roots)
 }
 
-fn create_only_deposit(
-    skill: &Skill,
-    stash: &Path,
-) -> Result<(HarvestAction, Option<String>), Error> {
-    // Validate the tree is copyable before touching the stash.
-    match skills::preflight_install(skill, stash, None) {
-        Err(err) => Ok((HarvestAction::Skipped, Some(err.to_string()))),
-        Ok(PreflightOutcome::Ready) => {
-            skills::install_local(skill, stash, None)?;
-            Ok((HarvestAction::Created, None))
-        }
-        Ok(PreflightOutcome::Identical) => Ok((HarvestAction::Unchanged, None)),
-        Ok(PreflightOutcome::Divergent) => {
-            let target = stash.join(&skill.name);
-            if target.is_dir()
-                && skills::skill_contents_equal_except(
-                    &target,
-                    &skill.path,
-                    &[".tink-source.json"],
-                )?
-            {
-                Ok((HarvestAction::Unchanged, None))
-            } else {
-                Ok((
-                    HarvestAction::Skipped,
-                    Some("stash differs; create-only".into()),
-                ))
-            }
-        }
+fn map_create_only(write: CreateOnlyWrite) -> (HarvestAction, Option<String>) {
+    match write {
+        CreateOnlyWrite::Created => (HarvestAction::Created, None),
+        CreateOnlyWrite::Unchanged => (HarvestAction::Unchanged, None),
+        CreateOnlyWrite::Skipped(detail) => (HarvestAction::Skipped, detail),
     }
 }
 
@@ -328,7 +305,8 @@ pub fn harvest(cwd: &Path) -> Result<HarvestReport, Error> {
             continue;
         }
 
-        let (action, detail) = create_only_deposit(&skill, &stash)?;
+        let (_, write) = stash::deposit_create_only(&skill)?;
+        let (action, detail) = map_create_only(write);
         match action {
             HarvestAction::Created => {
                 claimed_names.insert(skill.name.clone());
