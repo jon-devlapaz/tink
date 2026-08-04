@@ -278,3 +278,178 @@ pub fn sync_from_installed(installed: &Skill) -> Result<(), Error> {
 pub fn deposit_refresh(new_skill: &Skill, new_provenance: &Provenance) -> Result<(), Error> {
     deposit(new_skill, Some(new_provenance)).map(|_| ())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::home::TINK_HOME_ENV;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+    use tempfile::TempDir;
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    /// Isolates `TINK_HOME` for in-process stash writes (serialized).
+    struct TempHome {
+        home: PathBuf,
+        root: PathBuf,
+        _temp: TempDir,
+        prev: Option<std::ffi::OsString>,
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl TempHome {
+        fn new() -> Self {
+            let guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+            let temp = TempDir::new().unwrap();
+            let root = temp.path().to_path_buf();
+            let home = root.join("tink-home");
+            let prev = std::env::var_os(TINK_HOME_ENV);
+            // SAFETY: exclusive via env_lock for all tests in this module.
+            unsafe { std::env::set_var(TINK_HOME_ENV, &home) };
+            Self {
+                home,
+                root,
+                _temp: temp,
+                prev,
+                _guard: guard,
+            }
+        }
+
+        fn stash_skill(&self, name: &str) -> PathBuf {
+            skills_stash_path(&self.home).join(name)
+        }
+    }
+
+    impl Drop for TempHome {
+        fn drop(&mut self) {
+            // SAFETY: still holding env_lock via `_guard`.
+            unsafe {
+                match &self.prev {
+                    Some(value) => std::env::set_var(TINK_HOME_ENV, value),
+                    None => std::env::remove_var(TINK_HOME_ENV),
+                }
+            }
+        }
+    }
+
+    fn write_skill(dir: &Path, name: &str, body: &str) -> Skill {
+        fs::create_dir_all(dir).unwrap();
+        let text = format!(
+            "---\nname: {name}\ndescription: Unit fixture {name}.\n---\n\n# {name}\n\n{body}\n"
+        );
+        fs::write(dir.join("SKILL.md"), text).unwrap();
+        skills::read_skill(dir, true).unwrap()
+    }
+
+    fn skill_md(path: &Path) -> String {
+        fs::read_to_string(path.join("SKILL.md")).unwrap()
+    }
+
+    fn sample_provenance() -> Provenance {
+        let mut provenance = Provenance::new();
+        provenance.insert(
+            "source".into(),
+            "https://github.com/example/repo.git".into(),
+        );
+        provenance.insert(
+            "revision".into(),
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+        );
+        provenance.insert("path".into(), "skills/demo-skill".into());
+        provenance
+    }
+
+    #[test]
+    fn create_only_missing_creates() {
+        let home = TempHome::new();
+        let src = home.root.join("src").join("demo-skill");
+        let skill = write_skill(&src, "demo-skill", "fresh body");
+
+        let (path, write) = deposit_create_only(&skill).unwrap();
+        assert_eq!(write, CreateOnlyWrite::Created);
+        assert_eq!(path, home.stash_skill("demo-skill"));
+        assert!(skill_md(&path).contains("fresh body"));
+    }
+
+    #[test]
+    fn create_only_identical_unchanged() {
+        let home = TempHome::new();
+        let src = home.root.join("src").join("demo-skill");
+        let skill = write_skill(&src, "demo-skill", "same body");
+
+        assert_eq!(
+            deposit_create_only(&skill).unwrap().1,
+            CreateOnlyWrite::Created
+        );
+        let before = skill_md(&home.stash_skill("demo-skill"));
+
+        let (path, write) = deposit_create_only(&skill).unwrap();
+        assert_eq!(write, CreateOnlyWrite::Unchanged);
+        assert_eq!(skill_md(&path), before);
+    }
+
+    #[test]
+    fn create_only_diverge_skips() {
+        let home = TempHome::new();
+        let first = home.root.join("first").join("demo-skill");
+        let second = home.root.join("second").join("demo-skill");
+        let original = write_skill(&first, "demo-skill", "original body");
+        let incoming = write_skill(&second, "demo-skill", "incoming body");
+
+        assert_eq!(
+            deposit_create_only(&original).unwrap().1,
+            CreateOnlyWrite::Created
+        );
+        let before = skill_md(&home.stash_skill("demo-skill"));
+
+        let (path, write) = deposit_create_only(&incoming).unwrap();
+        assert!(
+            matches!(write, CreateOnlyWrite::Skipped(Some(ref detail)) if detail.contains("create-only")),
+            "{write:?}"
+        );
+        assert_eq!(skill_md(&path), before);
+        assert!(before.contains("original body"));
+    }
+
+    #[test]
+    fn deposit_diverge_repairs() {
+        let home = TempHome::new();
+        let first = home.root.join("first").join("demo-skill");
+        let second = home.root.join("second").join("demo-skill");
+        let original = write_skill(&first, "demo-skill", "original body");
+        let incoming = write_skill(&second, "demo-skill", "incoming body");
+
+        assert_eq!(deposit(&original, None).unwrap().1, StashWrite::Created);
+
+        let (path, write) = deposit(&incoming, None).unwrap();
+        assert_eq!(write, StashWrite::Repaired);
+        assert!(skill_md(&path).contains("incoming body"));
+        assert!(!skill_md(&path).contains("original body"));
+    }
+
+    #[test]
+    fn create_only_receipt_only_diff_unchanged() {
+        let home = TempHome::new();
+        let src = home.root.join("src").join("demo-skill");
+        let skill = write_skill(&src, "demo-skill", "shared body");
+        let provenance = sample_provenance();
+
+        assert_eq!(
+            deposit(&skill, Some(&provenance)).unwrap().1,
+            StashWrite::Created
+        );
+        let stash = home.stash_skill("demo-skill");
+        assert!(stash.join(".tink-source.json").is_file());
+        let before = skill_md(&stash);
+
+        // Incoming tree matches body but has no receipt — create-only must not rewrite.
+        let (path, write) = deposit_create_only(&skill).unwrap();
+        assert_eq!(write, CreateOnlyWrite::Unchanged);
+        assert_eq!(skill_md(&path), before);
+        assert!(path.join(".tink-source.json").is_file());
+    }
+}
+
