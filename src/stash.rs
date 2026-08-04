@@ -270,27 +270,11 @@ pub fn preflight_refresh(
 
 /// Keep `$TINK_HOME/skills/<name>/` aligned with the installed project skill.
 pub fn sync_from_installed(installed: &Skill) -> Result<(), Error> {
-    let stash = stash_root(None)?;
-    let target = stash.join(&installed.name);
-    if target.is_dir() && skills::skill_contents_equal(&target, &installed.path)? {
-        return Ok(());
-    }
-    if target.exists() || target.is_symlink() {
-        clear_path(&target)?;
-    }
-    skills::install_local(installed, &stash, None)?;
-    Ok(())
+    deposit(installed, None).map(|_| ())
 }
 
 /// After a project refresh passed [`preflight_refresh`], write the new tree
-/// into the stash (replace if present, install if missing).
+/// into the stash (create, noop, or repair — same rules as [`deposit`]).
 pub fn deposit_refresh(new_skill: &Skill, new_provenance: &Provenance) -> Result<(), Error> {
-    let stash = stash_root(None)?;
-    let target = stash.join(&new_skill.name);
-    if target.is_dir() {
-        skills::replace_verified(new_skill, &stash, new_provenance)?;
-    } else {
-        skills::install_local(new_skill, &stash, Some(new_provenance))?;
-    }
-    Ok(())
+    deposit(new_skill, Some(new_provenance)).map(|_| ())
 }
