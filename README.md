@@ -69,8 +69,9 @@ tink destroy --yes
 Override the home root with `TINK_HOME` when you need an isolated home.
 Successful installs archive skill trees under `~/.tink/skills/<name>/` and
 record skill **names** under `~/.tink/catalog/by-project/<project>/meta.json`.
-Home is not an agent discovery root; divergent same-name archives refuse the
-add.
+Home is not an agent discovery root. When a GitHub tip is already archived
+byte-for-byte, add installs the project copy from home. Divergent archives are
+repaired with a warning (project skill overwrites are still refused).
 
 tink does not init Git, stage files, commit, push, or overwrite a skill that
 diverged from what it would install.

@@ -34,7 +34,7 @@ Skill verbs live only under `tink skill`. There are no top-level `add` /
 | Live skills | `<project>/.agents/skills/<name>/` with `SKILL.md` |
 | Receipt | `.tink-source.json` with exactly `source`, `revision`, `path` (non-empty strings) |
 | Home root | `$TINK_HOME` or `~/.tink`, with `layout.json` (`kind`: `tink-skill-inventory`) |
-| Home archive | `skills/<name>/` skill trees copied on successful add (identical → noop; divergent same name → refuse entire add) |
+| Home archive | `skills/<name>/` skill trees copied on successful add (identical → install project from home; divergent → repair archive + warn; project overwrite still refused) |
 | Offline catalog | `catalog/by-project/<project>/meta.json` with `name`, `root`, grow-only `skills` name list (not skill trees) |
 
 ## Rows
@@ -62,8 +62,9 @@ Ids are stable. Tests must name or comment the id they prove.
 | A3 | `skill add` when project target exists and differs | Exit ≠ 0; "Refusing to overwrite"; project target unchanged |
 | A4 | `skill add` skill tree containing a symlink | Exit ≠ 0; refuse |
 | A5 | `skill add` multi-skill source without `--skill` | Exit ≠ 0; lists choices |
-| A6 | `skill add` when home archive has same name but different tree | Exit ≠ 0; refuse; project unchanged |
+| A6 | `skill add` when home archive has same name but different tree (project missing) | Exit 0; installs project; repairs archive; warns on stderr |
 | A7 | `skill add` skill named `by-project` | Exit ≠ 0; reserved name; no project/archive write |
+| A8 | `skill add` same GitHub tip already archived at home | Exit 0; installs project from home archive (no clone); stdout notes home archive |
 
 ### Remote add
 

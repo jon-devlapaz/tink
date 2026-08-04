@@ -2,20 +2,22 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::archive::{self, ArchiveWrite};
+use crate::catalog;
 use crate::error::Error;
 use crate::git;
 use crate::init;
-use crate::inventory;
-use crate::skills::{self, Provenance, Skill};
+use crate::provenance::Provenance;
+use crate::skills::{self, Skill};
 use crate::sources::{self, RemoteSource};
 use crate::style::CliStyle;
 
 #[derive(Debug)]
-#[allow(dead_code)] // Returned for callers / future CLI reporting.
-pub struct AddOutcome {
+pub(crate) struct AddOutcome {
     pub name: String,
-    pub created: bool,
-    pub project_path: PathBuf,
+    created: bool,
+    project_path: PathBuf,
+    from_home_archive: bool,
 }
 
 fn place_skill(
@@ -24,18 +26,47 @@ fn place_skill(
     destination_root: &Path,
     provenance: Option<&Provenance>,
 ) -> Result<AddOutcome, Error> {
-    // Preflight both, then archive before project so a project failure leaves a
-    // recoverable home archive (re-add completes the project install).
-    inventory::preflight_archive(skill, provenance)?;
-    skills::preflight_install(skill, destination_root, provenance)?;
-    inventory::deposit_archive(skill, provenance)?;
+    // Protect the project tree first. Home archive is a rebuildable cache:
+    // repair on diverge, then install project (re-add recovers if that fails).
+    skills::preflight_install(skill, destination_root, provenance)?
+        .require_compatible(&skill.name, destination_root)?;
+    let (_, archive_write) = archive::deposit_archive(skill, provenance)?;
+    if archive_write == ArchiveWrite::Repaired {
+        let err = CliStyle::auto_stderr();
+        eprintln!(
+            "{}",
+            err.warn(format!(
+                "Repaired divergent home archive for {}",
+                skill.name
+            ))
+        );
+    }
     let (installed, created) = skills::install_local(skill, destination_root, provenance)?;
     // Catalog even on identical noop so the name index can catch up.
-    inventory::deposit_skill(project_root, &skill.name)?;
+    catalog::deposit_skill(project_root, &skill.name)?;
     Ok(AddOutcome {
         name: skill.name.clone(),
         created,
         project_path: installed,
+        from_home_archive: false,
+    })
+}
+
+/// Install into the project from an already-complete home archive tree (receipt included).
+fn place_from_home_archive(
+    project_root: &Path,
+    archived: &Skill,
+    destination_root: &Path,
+) -> Result<AddOutcome, Error> {
+    skills::preflight_install(archived, destination_root, None)?
+        .require_compatible(&archived.name, destination_root)?;
+    let (installed, created) = skills::install_local(archived, destination_root, None)?;
+    catalog::deposit_skill(project_root, &archived.name)?;
+    Ok(AddOutcome {
+        name: archived.name.clone(),
+        created,
+        project_path: installed,
+        from_home_archive: true,
     })
 }
 
@@ -105,6 +136,9 @@ fn install_from_checkout(
         }
         _ => None,
     };
+    if let Some(cached) = archive::matching_archive(&skill, provenance.as_ref())? {
+        return place_from_home_archive(project_root, &cached, destination_root);
+    }
     place_skill(project_root, &skill, destination_root, provenance.as_ref())
 }
 
@@ -113,7 +147,7 @@ pub fn add_skill(
     source_value: &str,
     selected_name: Option<&str>,
 ) -> Result<AddOutcome, Error> {
-    init::ensure_project_skills(project_root)?;
+    init::ensure_project_layout(project_root)?;
     let destination_root = project_root.join(".agents").join("skills");
     let local_source = Path::new(source_value);
     if local_source.exists() {
@@ -152,7 +186,15 @@ fn looks_like_filesystem_path(value: &str) -> bool {
 
 fn report_add(outcome: &AddOutcome) {
     let style = CliStyle::auto_stdout();
-    if outcome.created {
+    if outcome.from_home_archive && outcome.created {
+        println!(
+            "{} {} → {} {}",
+            style.success("Installed"),
+            style.accent(&outcome.name),
+            style.accent(outcome.project_path.display()),
+            style.muted("(from home archive)")
+        );
+    } else if outcome.created {
         println!(
             "{} {} → {}",
             style.success("Installed"),
@@ -174,6 +216,13 @@ fn add_from_remote(
     remote: &RemoteSource,
     selected_name: Option<&str>,
 ) -> Result<AddOutcome, Error> {
+    // Cheap tip check: if home already has this exact remote revision, copy it.
+    let tip = git::remote_head(remote)?;
+    if let Some(cached) =
+        archive::archive_for_remote_tip(&remote.url, &tip, selected_name)?
+    {
+        return place_from_home_archive(project_root, &cached, destination_root);
+    }
     let (_temp, source_root, revision) = git::checkout(remote)?;
     install_from_checkout(
         project_root,

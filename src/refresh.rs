@@ -3,11 +3,13 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use crate::check::{self, read_provenance};
+use crate::archive;
+use crate::catalog;
+use crate::check;
 use crate::error::Error;
 use crate::git;
-use crate::inventory;
-use crate::skills::{self, Provenance, Skill};
+use crate::provenance::{self, Provenance};
+use crate::skills::{self, Skill};
 use crate::sources;
 
 fn skill_at(repository: &Path, source_path: &str) -> Result<PathBuf, Error> {
@@ -33,7 +35,7 @@ fn skill_at(repository: &Path, source_path: &str) -> Result<PathBuf, Error> {
 /// Returns whether the installed skill tree changed (receipt-only bumps are false).
 fn refresh_one(installed: &Skill) -> Result<Option<bool>, Error> {
     let name = installed.name.clone();
-    let Some(provenance) = read_provenance(installed)? else {
+    let Some(provenance) = provenance::read(installed)? else {
         return Ok(None);
     };
     let remote = sources::parse_remote(&provenance["source"])?;
@@ -64,24 +66,23 @@ fn refresh_one(installed: &Skill) -> Result<Option<bool>, Error> {
         !source_is_repository_root,
     )?;
 
-    match skills::preflight_install(&old_skill, &destination_root, Some(&provenance)) {
-        Ok(true) => {
+    match skills::preflight_install(&old_skill, &destination_root, Some(&provenance))? {
+        skills::PreflightOutcome::Ready => {
             return Err(Error::msg(format!(
                 "Refusing to update missing installed skill: {name}"
             )));
         }
-        Ok(false) => {}
-        Err(err) if err.to_string().contains("Refusing to overwrite") => {
+        skills::PreflightOutcome::Identical => {}
+        skills::PreflightOutcome::Divergent => {
             return Err(Error::msg(format!(
                 "Refusing to update {name}: local modifications are present"
             )));
         }
-        Err(err) => return Err(err),
     }
 
     if current_revision == provenance["revision"] {
         // No upstream move — still keep the home archive honest.
-        inventory::sync_archive_from_installed(installed)?;
+        archive::sync_archive_from_installed(installed)?;
         return Ok(Some(false));
     }
 
@@ -99,18 +100,11 @@ fn refresh_one(installed: &Skill) -> Result<Option<bool>, Error> {
     let mut next: Provenance = provenance.clone();
     next.insert("revision".into(), current_revision);
 
-    if skills::skill_contents_equal(&old_skill.path, &new_skill.path)? {
-        // Tree unchanged; bump receipt + sync archive.
-        inventory::preflight_archive_refresh(&installed.path, &new_skill, &next)?;
-        let _installed = skills::replace_verified(&new_skill, &destination_root, &next)?;
-        inventory::deposit_archive_refresh(&new_skill, &next)?;
-        return Ok(Some(false));
-    }
-
-    inventory::preflight_archive_refresh(&installed.path, &new_skill, &next)?;
+    let tree_changed = !skills::skill_contents_equal(&old_skill.path, &new_skill.path)?;
+    archive::preflight_archive_refresh(&installed.path, &new_skill, &next)?;
     let _installed = skills::replace_verified(&new_skill, &destination_root, &next)?;
-    inventory::deposit_archive_refresh(&new_skill, &next)?;
-    Ok(Some(true))
+    archive::deposit_archive_refresh(&new_skill, &next)?;
+    Ok(Some(tree_changed))
 }
 
 pub fn refresh_skill(root: &Path, name: &str) -> Result<bool, Error> {
@@ -124,7 +118,7 @@ pub fn refresh_skill(root: &Path, name: &str) -> Result<bool, Error> {
     match refresh_one(installed)? {
         None => Err(Error::msg(format!("Local skill has no remote source: {name}"))),
         Some(changed) => {
-            inventory::deposit_skill(root, name)?;
+            catalog::deposit_skill(root, name)?;
             Ok(changed)
         }
     }
@@ -136,11 +130,11 @@ pub fn refresh_all(root: &Path) -> Result<Vec<String>, Error> {
     for skill in &installed {
         match refresh_one(skill)? {
             Some(true) => {
-                inventory::deposit_skill(root, &skill.name)?;
+                catalog::deposit_skill(root, &skill.name)?;
                 refreshed.push(skill.name.clone());
             }
             Some(false) => {
-                inventory::deposit_skill(root, &skill.name)?;
+                catalog::deposit_skill(root, &skill.name)?;
             }
             None => {}
         }

@@ -6,16 +6,13 @@ use std::path::{Path, PathBuf};
 
 use crate::error::Error;
 use crate::paths::{map_io, refuse_symlink};
+use crate::provenance::{self, Provenance};
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // description validated at read; used by future listing.
 pub struct Skill {
     pub name: String,
-    pub description: String,
     pub path: PathBuf,
 }
-
-pub type Provenance = BTreeMap<String, String>;
 
 fn valid_skill_name(name: &str) -> bool {
     if name.is_empty() || name.len() > 64 {
@@ -125,7 +122,6 @@ pub fn read_skill(path: &Path, require_directory_name: bool) -> Result<Skill, Er
     }
     Ok(Skill {
         name,
-        description,
         path: path.to_path_buf(),
     })
 }
@@ -159,46 +155,25 @@ pub fn discover(source: &Path) -> Result<Vec<Skill>, Error> {
     Ok(skills)
 }
 
-fn reject_unsafe_entries(source: &Path) -> Result<(), Error> {
-    fn walk(dir: &Path, is_root: bool) -> Result<(), Error> {
-        for entry in fs::read_dir(dir).map_err(|e| map_io(dir, e))? {
-            let entry = entry.map_err(|e| map_io(dir, e))?;
-            let path = entry.path();
-            let name = entry.file_name();
-            if is_root && name == *".git" {
-                continue;
-            }
-            if path.is_symlink() {
-                return Err(Error::msg(format!("Refusing to copy symlink: {}", path.display())));
-            }
-            let ft = entry.file_type().map_err(|e| map_io(&path, e))?;
-            if ft.is_dir() {
-                walk(&path, false)?;
-            } else if !ft.is_file() {
-                return Err(Error::msg(format!(
-                    "Refusing to copy special file: {}",
-                    path.display()
-                )));
-            }
-        }
-        Ok(())
-    }
-    walk(source, true)
-}
-
 #[derive(Debug, PartialEq, Eq)]
 enum EntryKind {
     Dir,
     File(Vec<u8>),
 }
 
-fn tree_contents(root: &Path) -> Result<Option<BTreeMap<String, EntryKind>>, Error> {
+/// One skill-tree walk: skip `.git`, refuse symlinks/specials, optionally load bytes.
+enum Collected {
+    Tree(BTreeMap<String, EntryKind>),
+    Unsupported { path: PathBuf, what: &'static str },
+}
+
+fn collect_tree(root: &Path) -> Result<Collected, Error> {
     let mut contents = BTreeMap::new();
     fn walk(
         root: &Path,
         dir: &Path,
         contents: &mut BTreeMap<String, EntryKind>,
-    ) -> Result<bool, Error> {
+    ) -> Result<Option<(PathBuf, &'static str)>, Error> {
         for entry in fs::read_dir(dir).map_err(|e| map_io(dir, e))? {
             let entry = entry.map_err(|e| map_io(dir, e))?;
             let path = entry.path();
@@ -211,27 +186,63 @@ fn tree_contents(root: &Path) -> Result<Option<BTreeMap<String, EntryKind>>, Err
                 continue;
             }
             if path.is_symlink() {
-                return Ok(false);
+                return Ok(Some((path, "symlink")));
             }
             let ft = entry.file_type().map_err(|e| map_io(&path, e))?;
             if ft.is_dir() {
                 contents.insert(relative, EntryKind::Dir);
-                if !walk(root, &path, contents)? {
-                    return Ok(false);
+                if let Some(bad) = walk(root, &path, contents)? {
+                    return Ok(Some(bad));
                 }
             } else if ft.is_file() {
                 let bytes = fs::read(&path).map_err(|e| map_io(&path, e))?;
                 contents.insert(relative, EntryKind::File(bytes));
             } else {
-                return Ok(false);
+                return Ok(Some((path, "special file")));
             }
         }
-        Ok(true)
+        Ok(None)
     }
-    if !walk(root, root, &mut contents)? {
-        return Ok(None);
+    match walk(root, root, &mut contents)? {
+        None => Ok(Collected::Tree(contents)),
+        Some((path, what)) => Ok(Collected::Unsupported { path, what }),
     }
-    Ok(Some(contents))
+}
+
+fn require_safe_tree(root: &Path) -> Result<BTreeMap<String, EntryKind>, Error> {
+    match collect_tree(root)? {
+        Collected::Tree(tree) => Ok(tree),
+        Collected::Unsupported { path, what } => Err(Error::msg(format!(
+            "Refusing to copy {what}: {}",
+            path.display()
+        ))),
+    }
+}
+
+fn tree_contents(root: &Path) -> Result<Option<BTreeMap<String, EntryKind>>, Error> {
+    match collect_tree(root)? {
+        Collected::Tree(tree) => Ok(Some(tree)),
+        Collected::Unsupported { .. } => Ok(None),
+    }
+}
+
+fn materialize_tree(tree: &BTreeMap<String, EntryKind>, destination: &Path) -> Result<(), Error> {
+    fs::create_dir_all(destination).map_err(|e| map_io(destination, e))?;
+    for (relative, kind) in tree {
+        let to = destination.join(relative);
+        match kind {
+            EntryKind::Dir => {
+                fs::create_dir_all(&to).map_err(|e| map_io(&to, e))?;
+            }
+            EntryKind::File(bytes) => {
+                if let Some(parent) = to.parent() {
+                    fs::create_dir_all(parent).map_err(|e| map_io(parent, e))?;
+                }
+                fs::write(&to, bytes).map_err(|e| map_io(&to, e))?;
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn skill_contents_equal(left: &Path, right: &Path) -> Result<bool, Error> {
@@ -266,71 +277,46 @@ pub fn copy_skill_tree(
     destination: &Path,
     root_ignore: &[&str],
 ) -> Result<(), Error> {
-    reject_unsafe_entries(source)?;
-    fn copy_dir(source: &Path, destination: &Path, root: &Path, root_ignore: &[&str]) -> Result<(), Error> {
-        fs::create_dir_all(destination).map_err(|e| map_io(destination, e))?;
-        for entry in fs::read_dir(source).map_err(|e| map_io(source, e))? {
-            let entry = entry.map_err(|e| map_io(source, e))?;
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            if source == root && root_ignore.iter().any(|i| *i == name_str) {
-                continue;
-            }
-            let from = entry.path();
-            let to = destination.join(&name);
-            if from.is_symlink() {
-                return Err(Error::msg(format!("Refusing to copy symlink: {}", from.display())));
-            }
-            let ft = entry.file_type().map_err(|e| map_io(&from, e))?;
-            if ft.is_dir() {
-                copy_dir(&from, &to, root, root_ignore)?;
-            } else if ft.is_file() {
-                fs::copy(&from, &to).map_err(|e| map_io(&from, e))?;
-            } else {
-                return Err(Error::msg(format!(
-                    "Refusing to copy special file: {}",
-                    from.display()
-                )));
-            }
-        }
-        Ok(())
+    let mut tree = require_safe_tree(source)?;
+    for name in root_ignore {
+        tree.remove(*name);
+        let prefix = format!("{name}/");
+        tree.retain(|key, _| !key.starts_with(&prefix));
     }
-    copy_dir(source, destination, source, root_ignore)
+    materialize_tree(&tree, destination)
 }
 
-fn provenance_bytes(provenance: &Provenance) -> Result<Vec<u8>, Error> {
-    // Stable key order (`source`, `revision`, `path`) so preflight byte-compares
-    // of `.tink-source.json` stay deterministic.
-    for key in ["source", "revision", "path"] {
-        if !provenance.contains_key(key) {
-            return Err(Error::msg(format!(
-                "provenance missing required field: {key}"
-            )));
-        }
-    }
-    if provenance.len() != 3 {
-        return Err(Error::msg(
-            "provenance must contain exactly source, revision, and path",
-        ));
-    }
-    let body = format!(
-        "{{\n  \"source\": {},\n  \"revision\": {},\n  \"path\": {}\n}}\n",
-        serde_json::to_string(&provenance["source"]).map_err(|e| Error::msg(e.to_string()))?,
-        serde_json::to_string(&provenance["revision"]).map_err(|e| Error::msg(e.to_string()))?,
-        serde_json::to_string(&provenance["path"]).map_err(|e| Error::msg(e.to_string()))?,
-    );
-    Ok(body.into_bytes())
+/// Result of comparing a candidate skill tree to an install target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreflightOutcome {
+    /// Target missing — install may proceed.
+    Ready,
+    /// Target already matches (including optional receipt) — noop.
+    Identical,
+    /// Target exists and differs — caller decides refuse vs repair.
+    Divergent,
 }
 
-/// Returns `true` if install should proceed; `false` if identical noop.
+impl PreflightOutcome {
+    /// Project installs refuse divergence; keep the historical error text.
+    pub fn require_compatible(self, skill_name: &str, destination_root: &Path) -> Result<Self, Error> {
+        match self {
+            Self::Divergent => Err(Error::msg(format!(
+                "Refusing to overwrite existing skill: {}",
+                destination_root.join(skill_name).display()
+            ))),
+            other => Ok(other),
+        }
+    }
+}
+
+/// Compare candidate skill to `destination_root/<name>` without writing.
 pub fn preflight_install(
     skill: &Skill,
     destination_root: &Path,
     provenance: Option<&Provenance>,
-) -> Result<bool, Error> {
-    reject_unsafe_entries(&skill.path)?;
-    let mut expected = tree_contents(&skill.path)?
-        .ok_or_else(|| Error::msg(format!("Skill contains unsupported entries: {}", skill.path.display())))?;
+) -> Result<PreflightOutcome, Error> {
+    let mut expected = require_safe_tree(&skill.path)?;
     if let Some(provenance) = provenance {
         if expected.contains_key(".tink-source.json") {
             return Err(Error::msg(format!(
@@ -340,24 +326,21 @@ pub fn preflight_install(
         }
         expected.insert(
             ".tink-source.json".into(),
-            EntryKind::File(provenance_bytes(provenance)?),
+            EntryKind::File(provenance::to_bytes(provenance)?),
         );
     }
     let target = destination_root.join(&skill.name);
     if !target.exists() && !target.is_symlink() {
-        return Ok(true);
+        return Ok(PreflightOutcome::Ready);
     }
     if target.is_dir() {
         if let Some(existing) = tree_contents(&target)? {
             if existing == expected {
-                return Ok(false);
+                return Ok(PreflightOutcome::Identical);
             }
         }
     }
-    Err(Error::msg(format!(
-        "Refusing to overwrite existing skill: {}",
-        target.display()
-    )))
+    Ok(PreflightOutcome::Divergent)
 }
 
 /// Install skill; returns `(installed_path, created)`.
@@ -366,9 +349,10 @@ pub fn install_local(
     destination_root: &Path,
     provenance: Option<&Provenance>,
 ) -> Result<(PathBuf, bool), Error> {
-    let created = preflight_install(skill, destination_root, provenance)?;
+    let outcome = preflight_install(skill, destination_root, provenance)?
+        .require_compatible(&skill.name, destination_root)?;
     let target = destination_root.join(&skill.name);
-    if !created {
+    if outcome == PreflightOutcome::Identical {
         return Ok((target, false));
     }
     let staging = tempfile::Builder::new()
@@ -378,8 +362,7 @@ pub fn install_local(
     let staged = staging.path().join(&skill.name);
     copy_skill_tree(&skill.path, &staged, &[".git"])?;
     if let Some(provenance) = provenance {
-        let receipt = staged.join(".tink-source.json");
-        fs::write(&receipt, provenance_bytes(provenance)?).map_err(|e| map_io(&receipt, e))?;
+        provenance::write_file(&staged.join(".tink-source.json"), provenance)?;
     }
     fs::rename(&staged, &target).map_err(|e| map_io(&target, e))?;
     Ok((target, true))
@@ -391,7 +374,7 @@ pub fn replace_verified(
     destination_root: &Path,
     provenance: &Provenance,
 ) -> Result<PathBuf, Error> {
-    reject_unsafe_entries(&skill.path)?;
+    require_safe_tree(&skill.path)?;
     let target = destination_root.join(&skill.name);
     refuse_symlink(&target)?;
     if !target.is_dir() {
@@ -413,11 +396,7 @@ pub fn replace_verified(
             skill.path.display()
         )));
     }
-    fs::write(
-        staged.join(".tink-source.json"),
-        provenance_bytes(provenance)?,
-    )
-    .map_err(|e| map_io(&staged, e))?;
+    provenance::write_file(&staged.join(".tink-source.json"), provenance)?;
     fs::rename(&target, &backup).map_err(|e| map_io(&target, e))?;
     if let Err(err) = fs::rename(&staged, &target) {
         let _ = fs::rename(&backup, &target);
@@ -425,27 +404,4 @@ pub fn replace_verified(
     }
     let _ = fs::remove_dir_all(&backup);
     Ok(target)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn provenance_bytes_stable_key_order() {
-        let mut provenance = Provenance::new();
-        // Insert in alphabetical order to prove serialization ignores map order.
-        provenance.insert("path".into(), "skills/remote-skill".into());
-        provenance.insert("revision".into(), "abc".repeat(10).chars().take(40).collect());
-        provenance.insert(
-            "source".into(),
-            "https://github.com/example/skills.git".into(),
-        );
-        let bytes = provenance_bytes(&provenance).unwrap();
-        let text = String::from_utf8(bytes).unwrap();
-        let source_at = text.find("\"source\"").unwrap();
-        let revision_at = text.find("\"revision\"").unwrap();
-        let path_at = text.find("\"path\"").unwrap();
-        assert!(source_at < revision_at && revision_at < path_at, "{text}");
-    }
 }

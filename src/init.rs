@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::add;
 use crate::error::Error;
-use crate::inventory;
+use crate::home;
 use crate::manage_tink;
 use crate::paths::{map_io, mkdir_p, require_directory, require_file};
 use crate::style::CliStyle;
@@ -135,8 +135,7 @@ pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitRep
     };
 
     let manage_tink_added = if with_manage_tink {
-        let outcome = manage_tink::install_manage_tink(project_root)?;
-        Some(outcome.name)
+        Some(manage_tink::install_manage_tink(project_root)?)
     } else {
         None
     };
@@ -149,7 +148,7 @@ pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitRep
         }
     }
 
-    let (home, home_created) = inventory::ensure_inventory_root(None)?;
+    let (home, home_created) = home::ensure_inventory_root(None)?;
     Ok(InitReport {
         skills_path: skills,
         skills_created,
@@ -162,14 +161,20 @@ pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitRep
 }
 
 /// Bootstrap used by `add` — skills dir + home only, no prompts or bundled skills.
-pub fn ensure_project_skills(project_root: &Path) -> Result<(), Error> {
-    let _ = init_project(
-        project_root,
-        InitOptions {
-            with_zen: Some(false),
-            with_tink_skills: Some(false),
-            with_manage_tink: Some(false),
-        },
-    )?;
+pub fn ensure_project_layout(project_root: &Path) -> Result<(), Error> {
+    let agents = project_root.join(".agents");
+    let skills = agents.join("skills");
+    let readme = skills.join("README.md");
+
+    require_directory(&agents)?;
+    require_directory(&skills)?;
+    require_file(&readme)?;
+
+    mkdir_p(&agents)?;
+    mkdir_p(&skills)?;
+    if !readme.exists() {
+        std::fs::write(&readme, SKILLS_README).map_err(|e| map_io(&readme, e))?;
+    }
+    let _ = home::ensure_inventory_root(None)?;
     Ok(())
 }
