@@ -2,13 +2,15 @@
 
 **Outcome:** A smaller Tink core in Rust that installs complete Agent Skills into
 a project's `.agents/skills/`, proves them offline, refreshes clean GitHub
-imports, and ensures a home root at `~/.tink` (override: `TINK_HOME`).
+imports, ensures a home root at `~/.tink` (override: `TINK_HOME`), and can list
+or promote skills from the home stash (`skills/<name>/`) into a project.
 
 **Authority:** This file is the evaluator. Implementation stops when every row
 below has an automated test that passes on macOS with `git` on `PATH`.
 
 **Out of v1:** weekly GitHub update workflows, self-update, private GitHub auth,
-Windows, Linux CI as a gate, `skill remove`, pruning the home by-project catalog.
+Windows, Linux CI as a gate, `skill remove`, pruning the home by-project catalog
+or home stash, bare-name stash promote without `--stash`.
 
 **Dogfood:** Prefer an installed `tink` from this repo, or `cargo run -q -- …`.
 
@@ -21,8 +23,10 @@ Skill verbs live only under `tink skill`. There are no top-level `add` /
 |---|---|
 | `tink init` | Create `.agents/skills/`; install `manage-tink` by default; optional ZEN + tink-skills; ensure `~/.tink` |
 | `tink skill add <source> [--skill <name>]` | Install one local or public GitHub skill |
+| `tink skill add --stash <name>` | Install one skill from the home stash (`$TINK_HOME/skills/<name>/`) |
 | `tink skill list` | List project skills under `.agents/skills/` (read-only) |
 | `tink skill list --home` | List offline by-project catalog (`project`, `root`, `skill` TSV) |
+| `tink skill list --stash` | List skill names in the home stash (`skills/<name>/` with `SKILL.md`) |
 | `tink skill check` | Validate project skills; no network; no writes |
 | `tink skill refresh [name]` | Refresh clean GitHub imports; refuse local edits |
 | `tink destroy [--yes]` | Remove `.agents/`, `ZEN.md`, and `AGENTS.md` (not `~/.tink`) |
@@ -34,7 +38,7 @@ Skill verbs live only under `tink skill`. There are no top-level `add` /
 | Live skills | `<project>/.agents/skills/<name>/` with `SKILL.md` |
 | Receipt | `.tink-source.json` with exactly `source`, `revision`, `path` (non-empty strings) |
 | Home root | `$TINK_HOME` or `~/.tink`, with `layout.json` (`kind`: `tink-skill-inventory`) |
-| Home archive | `skills/<name>/` skill trees copied on successful add (identical → install project from home; divergent → repair archive + warn; project overwrite still refused) |
+| Home stash | `skills/<name>/` skill trees copied on successful add (rebuildable dump; identical tip may install project from stash; divergent → repair + warn; project overwrite still refused; not an agent discovery root) |
 | Offline catalog | `catalog/by-project/<project>/meta.json` with `name`, `root`, grow-only `skills` name list (not skill trees) |
 
 ## Rows
@@ -50,21 +54,21 @@ Ids are stable. Tests must name or comment the id they prove.
 | I3 | `init` (non-interactive / `--no-zen --no-tink-skills`) | Does **not** write `AGENTS.md`, `ZEN.md`, or `.github/workflows/*` (may still install `manage-tink`) |
 | I4 | `init` with `TINK_HOME` set | Creates home root + `layout.json` + `catalog/by-project/` + `skills/` |
 | I5 | `init --with-zen` | Writes `ZEN.md` and an `AGENTS.md` that references it |
-| I6 | `init` (default) | Installs `.agents/skills/manage-tink/`; catalogs `manage-tink`; archives tree at `skills/manage-tink/` |
+| I6 | `init` (default) | Installs `.agents/skills/manage-tink/`; catalogs `manage-tink`; stashes tree at `skills/manage-tink/` |
 | I7 | `init --no-manage-tink` | Does **not** install `manage-tink` |
 
 ### Local add
 
 | Id | Action | Expect |
 |---|---|---|
-| A1 | `skill add` valid local skill dir | Installs under `.agents/skills/<name>/`; records name in catalog; archives tree at `$TINK_HOME/skills/<name>/` |
-| A2 | `skill add` same skill again (byte-identical) | Success noop; project + home archive unchanged |
+| A1 | `skill add` valid local skill dir | Installs under `.agents/skills/<name>/`; records name in catalog; stashes tree at `$TINK_HOME/skills/<name>/` |
+| A2 | `skill add` same skill again (byte-identical) | Success noop; project + home stash unchanged |
 | A3 | `skill add` when project target exists and differs | Exit ≠ 0; "Refusing to overwrite"; project target unchanged |
 | A4 | `skill add` skill tree containing a symlink | Exit ≠ 0; refuse |
 | A5 | `skill add` multi-skill source without `--skill` | Exit ≠ 0; lists choices |
-| A6 | `skill add` when home archive has same name but different tree (project missing) | Exit 0; installs project; repairs archive; warns on stderr |
-| A7 | `skill add` skill named `by-project` | Exit ≠ 0; reserved name; no project/archive write |
-| A8 | `skill add` same GitHub tip already archived at home | Exit 0; installs project from home archive (no clone); stdout notes home archive |
+| A6 | `skill add` when home stash has same name but different tree (project missing) | Exit 0; installs project; repairs stash; warns on stderr |
+| A7 | `skill add` skill named `by-project` | Exit ≠ 0; reserved name; no project/stash write |
+| A8 | `skill add` same GitHub tip already stashed at home | Exit 0; installs project from stash (no clone); stdout notes stash |
 
 ### Remote add
 
@@ -94,6 +98,15 @@ Ids are stable. Tests must name or comment the id they prove.
 | L3 | `skill list --home` after init+add | Exit 0; header `project\\troot\\tskill` plus TSV rows for cataloged skills |
 | L4 | `skill list` when `ZEN.md` exists without `AGENTS.md` reference | Exit 0; lists skills; warns on stderr about ZEN/AGENTS; `skill check` still fails |
 
+### Home stash
+
+| Id | Action | Expect |
+|---|---|---|
+| H1 | `skill list --stash` after init+add | Exit 0; stdout includes stashed skill names (at least the added skill) |
+| H2 | `skill add --stash <name>` when stash has that skill and project lacks it | Exit 0; installs under `.agents/skills/<name>/`; catalogs name; **no** network; stdout notes stash |
+| H3 | `skill add --stash <missing>` | Exit ≠ 0; mentions not found / missing; **no** GitHub network fetch |
+| H4 | `skill add --stash <name>` when project skill exists and differs | Exit ≠ 0; "Refusing to overwrite"; project target unchanged |
+
 ### CLI surface
 
 | Id | Action | Expect |
@@ -107,11 +120,11 @@ Ids are stable. Tests must name or comment the id they prove.
 |---|---|---|
 | P1 | `skill refresh` clean GitHub-imported skill after upstream change | Updates project skill + receipt **and** `$TINK_HOME/skills/<name>/` |
 | P2 | `skill refresh` when installed skill has local modifications | Exit ≠ 0; mentions local modifications; tree unchanged |
-| P3 | `skill refresh` when upstream unchanged but home archive missing | Exit 0; backfills `$TINK_HOME/skills/<name>/` from project |
-| P4 | `skill refresh` when home archive lacks only `.tink-source.json` | Exit 0; updates project + archive |
-| P5 | `skill refresh` when home archive body diverges from project | Exit ≠ 0; "home archive diverges"; project unchanged |
-| P6 | `skill refresh` when upstream revision moves but skill tree bytes match | Exit 0; bumps project + archive receipts |
-| P7 | `skill refresh` when project already at HEAD but home archive is stale | Exit 0; repairs archive from project |
+| P3 | `skill refresh` when upstream unchanged but home stash missing | Exit 0; backfills `$TINK_HOME/skills/<name>/` from project |
+| P4 | `skill refresh` when home stash lacks only `.tink-source.json` | Exit 0; updates project + stash |
+| P5 | `skill refresh` when home stash body diverges from project | Exit ≠ 0; "stash diverges"; project unchanged |
+| P6 | `skill refresh` when upstream revision moves but skill tree bytes match | Exit 0; bumps project + stash receipts |
+| P7 | `skill refresh` when project already at HEAD but home stash is stale | Exit 0; repairs stash from project |
 
 ### Destroy
 

@@ -12,7 +12,7 @@ const COMMANDS_MD: &str = include_str!("../skills/manage-tink/references/command
 
 /// Stage the embedded skill and install it into the project via `add`.
 ///
-/// Uses the normal add path (project install + home archive + name catalog).
+/// Uses the normal add path (project install + home stash + name catalog).
 /// Returns the installed skill name.
 pub fn install_manage_tink(project_root: &Path) -> Result<String, Error> {
     let staging = tempfile::Builder::new()
