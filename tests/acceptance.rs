@@ -341,7 +341,7 @@ fn a7_add_refuses_reserved_by_project_name() {
 }
 
 #[test]
-fn a6_add_refuses_when_home_archive_diverges() {
+fn a6_add_repairs_divergent_home_archive_and_installs_project() {
     let ws = Workspace::new();
     let app = ws.project("app");
     let other = ws.project("other");
@@ -368,12 +368,69 @@ fn a6_add_refuses_when_home_archive_diverges() {
     ws.cmd(&other)
         .args(["skill", "add", second.to_str().unwrap()])
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("Refusing to overwrite"));
-    assert!(!Workspace::skill_path(&other, "demo-skill").exists());
+        .success()
+        .stderr(predicate::str::contains("Repaired divergent home archive"));
+    assert!(Workspace::skill_path(&other, "demo-skill")
+        .join("SKILL.md")
+        .is_file());
+    let project = fs::read_to_string(
+        Workspace::skill_path(&other, "demo-skill").join("SKILL.md"),
+    )
+    .unwrap();
+    assert!(project.contains("from other"));
     let archived = fs::read_to_string(ws.archive_skill("demo-skill").join("SKILL.md")).unwrap();
-    assert!(archived.contains("from app"));
-    assert!(!archived.contains("from other"));
+    assert!(archived.contains("from other"));
+    assert!(!archived.contains("from app"));
+}
+
+#[test]
+fn a8_add_uses_home_archive_when_remote_tip_matches() {
+    let ws = Workspace::new();
+    let app = ws.project("app");
+    let other = ws.project("other");
+    ws.cmd(&app)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    ws.cmd(&other)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("root-skill-repo");
+    init_repo(&remote);
+    write_skill(&remote, "root-skill", "cached");
+    commit_all(&remote, "v1");
+    let public = "https://github.com/example/root-skill.git";
+    let redirect = github_redirect(&remote, public);
+
+    let mut first = ws.cmd(&app);
+    first.args(["skill", "add", "example/root-skill"]);
+    for (k, v) in &redirect {
+        first.env(k, v);
+    }
+    first.assert().success();
+
+    let mut second = ws.cmd(&other);
+    second.args(["skill", "add", "example/root-skill"]);
+    for (k, v) in &redirect {
+        second.env(k, v);
+    }
+    second
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("from home archive"));
+    assert!(Workspace::skill_path(&other, "root-skill")
+        .join(".tink-source.json")
+        .is_file());
+    let receipt = fs::read_to_string(
+        Workspace::skill_path(&other, "root-skill").join(".tink-source.json"),
+    )
+    .unwrap();
+    assert!(
+        receipt.contains("\"path\": \".\"") || receipt.contains("\"path\":\".\""),
+        "{receipt}"
+    );
 }
 
 // --- R*: remote add ---

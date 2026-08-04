@@ -23,8 +23,10 @@ form for add, list, check, and refresh.
 
 - Live skills: `<project>/.agents/skills/<name>/` with `SKILL.md`.
 - Home (`$TINK_HOME` or `~/.tink`) is not an agent discovery root. Installs
-  archive trees at `skills/<name>/` and record names in
-  `catalog/by-project/<project>/meta.json`. List the catalog with
-  `tink skill list --home` (TSV with header `project`, `root`, `skill`). Do not
-  hand-parse `meta.json` when the CLI is available. Destroy does not delete
-  home or prune that catalog.
+  archive trees at `skills/<name>/`. Matching GitHub tips install into the
+  project from that archive; divergent archives are repaired with a warning.
+  Names are recorded in `catalog/by-project/<project>/meta.json`. List the
+  catalog with `tink skill list --home` (TSV with header `project`, `root`,
+  `skill`). Do not hand-parse `meta.json` when the CLI is available. Destroy
+  does not delete home or prune that catalog. Project skill overwrites are
+  still refused.

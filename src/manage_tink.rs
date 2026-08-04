@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crate::add::{self, AddOutcome};
+use crate::add;
 use crate::error::Error;
 use crate::paths::map_io;
 
@@ -13,7 +13,8 @@ const COMMANDS_MD: &str = include_str!("../skills/manage-tink/references/command
 /// Stage the embedded skill and install it into the project via `add`.
 ///
 /// Uses the normal add path (project install + home archive + name catalog).
-pub fn install_manage_tink(project_root: &Path) -> Result<AddOutcome, Error> {
+/// Returns the installed skill name.
+pub fn install_manage_tink(project_root: &Path) -> Result<String, Error> {
     let staging = tempfile::Builder::new()
         .prefix(".tink-manage-tink-")
         .tempdir()
@@ -29,11 +30,12 @@ pub fn install_manage_tink(project_root: &Path) -> Result<AddOutcome, Error> {
         .map_err(|e| map_io(&agents.join("openai.yaml"), e))?;
     std::fs::write(references.join("commands.md"), COMMANDS_MD)
         .map_err(|e| map_io(&references.join("commands.md"), e))?;
-    add::add_skill(
+    let outcome = add::add_skill(
         project_root,
         skill_root
             .to_str()
             .ok_or_else(|| Error::msg("manage-tink path is not UTF-8"))?,
         None,
-    )
+    )?;
+    Ok(outcome.name)
 }

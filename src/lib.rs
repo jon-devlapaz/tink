@@ -3,14 +3,17 @@
 //! Acceptance boundary: [`../ACCEPTANCE.md`](../ACCEPTANCE.md).
 
 mod add;
+mod archive;
+mod catalog;
 mod check;
 mod destroy;
 mod error;
 mod git;
+mod home;
 mod init;
-mod inventory;
 mod manage_tink;
 mod paths;
+mod provenance;
 mod refresh;
 mod skills;
 mod sources;
@@ -48,18 +51,10 @@ pub enum Command {
         #[arg(long, group = "zen")]
         no_zen: bool,
         /// Add skill-scout and skill-eval-loop from GitHub (tink-skills)
-        #[arg(
-            long = "with-tink-skills",
-            visible_alias = "with-twotink",
-            group = "tink_skills"
-        )]
+        #[arg(long = "with-tink-skills", group = "tink_skills")]
         with_tink_skills: bool,
         /// Skip tink-skills bundle
-        #[arg(
-            long = "no-tink-skills",
-            visible_alias = "no-twotink",
-            group = "tink_skills"
-        )]
+        #[arg(long = "no-tink-skills", group = "tink_skills")]
         no_tink_skills: bool,
         /// Install the embedded manage-tink skill (default)
         #[arg(long, group = "manage_tink")]
@@ -269,7 +264,7 @@ fn dispatch_skill_list(cwd: &Path) -> Result<(), Error> {
 
 fn dispatch_skill_list_home() -> Result<(), Error> {
     let style = CliStyle::auto_stdout();
-    let entries = inventory::list_catalog(None)?;
+    let entries = catalog::list_catalog(None)?;
     if entries.is_empty() {
         println!("{}", style.muted("(no catalog entries)"));
     } else {

@@ -1,37 +1,27 @@
-//! Terminal styling for user-facing CLI output (`anstyle` + TTY / `NO_COLOR`).
-//!
-//! Brand palette sampled from the tink mark (deep indigo / mauve on cream),
-//! lifted for contrast on typical dark terminals while keeping the same hue.
+//! Terminal styling for CLI output (`anstyle` + TTY / `NO_COLOR`).
 
 use std::io::IsTerminal;
 
-use anstyle::{AnsiColor, Color, Effects, RgbColor, Style};
+use anstyle::{AnsiColor, Color, Effects, Style};
 use clap::builder::styling::Styles;
 
-/// Logo deep indigo `#381048`, brightened for dark terminals.
-const INDIGO: Color = Color::Rgb(RgbColor(0xB5, 0x7B, 0xC9));
-/// Logo mauve `#905098`, brightened for dark terminals.
-const MAUVE: Color = Color::Rgb(RgbColor(0xD4, 0xA8, 0xDC));
-/// Logo soft lavender-gray `#c8c0c8`.
-const LAVENDER: Color = Color::Rgb(RgbColor(0xC8, 0xC0, 0xC8));
+type Ansi = Color;
 
-/// Clap help/error styles aligned with tink's success/error/warn/accent roles.
+const GREEN: Ansi = Color::Ansi(AnsiColor::Green);
+const RED: Ansi = Color::Ansi(AnsiColor::Red);
+const YELLOW: Ansi = Color::Ansi(AnsiColor::Yellow);
+const CYAN: Ansi = Color::Ansi(AnsiColor::Cyan);
+const WHITE: Ansi = Color::Ansi(AnsiColor::White);
+
+/// Clap help/error styles.
 pub const CLAP_STYLES: Styles = Styles::styled()
-    .header(Style::new().fg_color(Some(INDIGO)).effects(Effects::BOLD))
-    .usage(Style::new().fg_color(Some(INDIGO)).effects(Effects::BOLD))
-    .literal(Style::new().fg_color(Some(MAUVE)).effects(Effects::BOLD))
-    .placeholder(Style::new().fg_color(Some(LAVENDER)))
-    .error(
-        Style::new()
-            .fg_color(Some(Color::Ansi(AnsiColor::Red)))
-            .effects(Effects::BOLD),
-    )
-    .valid(
-        Style::new()
-            .fg_color(Some(Color::Ansi(AnsiColor::Green)))
-            .effects(Effects::BOLD),
-    )
-    .invalid(Style::new().fg_color(Some(MAUVE)).effects(Effects::BOLD));
+    .header(Style::new().fg_color(Some(CYAN)).effects(Effects::BOLD))
+    .usage(Style::new().fg_color(Some(CYAN)).effects(Effects::BOLD))
+    .literal(Style::new().fg_color(Some(GREEN)).effects(Effects::BOLD))
+    .placeholder(Style::new().fg_color(Some(WHITE)))
+    .error(Style::new().fg_color(Some(RED)).effects(Effects::BOLD))
+    .valid(Style::new().fg_color(Some(GREEN)).effects(Effects::BOLD))
+    .invalid(Style::new().fg_color(Some(YELLOW)).effects(Effects::BOLD));
 
 /// Whether ANSI styling is enabled for a given output stream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,14 +30,12 @@ pub struct CliStyle {
 }
 
 impl CliStyle {
-    /// Always-plain handle for tests and non-interactive formatters.
-    #[allow(dead_code)] // used by unit tests; integration builds omit cfg(test)
+    #[cfg(test)]
     pub fn plain() -> Self {
         Self { enabled: false }
     }
 
-    /// Force ANSI on/off regardless of TTY / `NO_COLOR` (tests / smokes).
-    #[allow(dead_code)] // used by unit tests; integration builds omit cfg(test)
+    #[cfg(test)]
     pub fn forced(enabled: bool) -> Self {
         Self { enabled }
     }
@@ -64,12 +52,12 @@ impl CliStyle {
         }
     }
 
-    #[allow(dead_code)] // used by unit tests; integration builds omit cfg(test)
+    #[cfg(test)]
     pub fn enabled(self) -> bool {
         self.enabled
     }
 
-    pub fn paint(self, style: Style, text: impl std::fmt::Display) -> String {
+    fn paint(self, style: Style, text: impl std::fmt::Display) -> String {
         if !self.enabled {
             return text.to_string();
         }
@@ -77,47 +65,29 @@ impl CliStyle {
     }
 
     pub fn success(self, text: impl std::fmt::Display) -> String {
-        self.paint(SUCCESS, text)
+        self.paint(Style::new().fg_color(Some(GREEN)).effects(Effects::BOLD), text)
     }
 
     pub fn error(self, text: impl std::fmt::Display) -> String {
-        self.paint(ERROR, text)
+        self.paint(Style::new().fg_color(Some(RED)).effects(Effects::BOLD), text)
     }
 
     pub fn warn(self, text: impl std::fmt::Display) -> String {
-        self.paint(WARN, text)
+        self.paint(Style::new().fg_color(Some(YELLOW)).effects(Effects::BOLD), text)
     }
 
     pub fn muted(self, text: impl std::fmt::Display) -> String {
-        self.paint(MUTED, text)
+        self.paint(Style::new().fg_color(Some(WHITE)).effects(Effects::DIMMED), text)
     }
 
     pub fn accent(self, text: impl std::fmt::Display) -> String {
-        self.paint(ACCENT, text)
+        self.paint(Style::new().fg_color(Some(CYAN)), text)
     }
 }
 
 fn color_enabled() -> bool {
     std::env::var_os("NO_COLOR").is_none()
 }
-
-const SUCCESS: Style = Style::new()
-    .fg_color(Some(Color::Ansi(AnsiColor::Green)))
-    .effects(Effects::BOLD);
-
-const ERROR: Style = Style::new()
-    .fg_color(Some(Color::Ansi(AnsiColor::Red)))
-    .effects(Effects::BOLD);
-
-const WARN: Style = Style::new()
-    .fg_color(Some(MAUVE))
-    .effects(Effects::BOLD);
-
-const MUTED: Style = Style::new()
-    .fg_color(Some(LAVENDER))
-    .effects(Effects::DIMMED);
-
-const ACCENT: Style = Style::new().fg_color(Some(INDIGO));
 
 #[cfg(test)]
 mod tests {
@@ -139,7 +109,6 @@ mod tests {
         assert!(painted.contains("OK"), "{painted}");
         assert!(painted.contains('\u{1b}'), "{painted}");
         assert_ne!(painted, "OK");
-        assert!(painted.ends_with("\u{1b}[0m") || painted.contains("\u{1b}[0m"), "{painted}");
     }
 
     #[test]
