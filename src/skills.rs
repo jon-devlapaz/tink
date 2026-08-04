@@ -14,7 +14,7 @@ pub struct Skill {
     pub path: PathBuf,
 }
 
-fn valid_skill_name(name: &str) -> bool {
+pub fn valid_skill_name(name: &str) -> bool {
     if name.is_empty() || name.len() > 64 {
         return false;
     }

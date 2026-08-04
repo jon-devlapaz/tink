@@ -1211,6 +1211,97 @@ fn d3_destroy_refuses_agents_symlink() {
     assert!(project.join(".agents").is_symlink());
 }
 
+// --- X*: skill remove ---
+
+#[test]
+fn x1_remove_deletes_project_skill_keeps_stash_and_catalog() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+    let source = ws.root.join("demo-skill");
+    write_skill(&source, "demo-skill", "Do the work.");
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .success();
+    assert!(Workspace::skill_path(&project, "demo-skill").is_dir());
+    ws.assert_cataloged("app", "demo-skill");
+
+    ws.cmd(&project)
+        .args(["skill", "remove", "demo-skill"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Removed"));
+
+    assert!(!Workspace::skill_path(&project, "demo-skill").exists());
+    ws.cmd(&project)
+        .args(["skill", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("demo-skill").not());
+    assert!(
+        ws.stash_skill("demo-skill").join("SKILL.md").is_file(),
+        "home stash must remain after project remove"
+    );
+    ws.assert_cataloged("app", "demo-skill");
+}
+
+#[test]
+fn x2_remove_missing_fails() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+    ws.cmd(&project)
+        .args(["skill", "remove", "missing-skill"])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("not found")
+                .or(predicate::str::contains("missing"))
+                .or(predicate::str::contains("Missing")),
+        );
+    assert!(Workspace::skill_path(&project, "manage-tink").is_dir());
+}
+
+#[test]
+fn x3_remove_refuses_agents_symlink() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    let real = ws.root.join("real-agents");
+    fs::create_dir_all(real.join("skills").join("demo-skill")).unwrap();
+    write_skill(&real.join("skills").join("demo-skill"), "demo-skill", "body");
+    std::os::unix::fs::symlink(&real, project.join(".agents")).unwrap();
+    ws.cmd(&project)
+        .args(["skill", "remove", "demo-skill"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("symlink").or(predicate::str::contains("Symlink")));
+    assert!(project.join(".agents").is_symlink());
+    assert!(real.join("skills").join("demo-skill").join("SKILL.md").is_file());
+}
+
+#[test]
+fn x4_remove_does_not_delete_home_stash() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+    let source = ws.root.join("keep-stash");
+    write_skill(&source, "keep-stash", "body");
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .success();
+    let stash_md = ws.stash_skill("keep-stash").join("SKILL.md");
+    let before = fs::read(&stash_md).unwrap();
+    ws.cmd(&project)
+        .args(["skill", "remove", "keep-stash"])
+        .assert()
+        .success();
+    assert!(!Workspace::skill_path(&project, "keep-stash").exists());
+    let after = fs::read(&stash_md).unwrap();
+    assert_eq!(before, after);
+}
+
 // --- S*: safety ---
 
 #[test]

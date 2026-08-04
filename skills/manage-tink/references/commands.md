@@ -1,7 +1,7 @@
 # Tink commands
 
 Load when choosing or running a mutation (step 2). Use the `tink skill …`
-form for add, list, check, and refresh.
+form for add, list, check, refresh, and remove.
 
 | Intent | Command |
 |---|---|
@@ -19,6 +19,7 @@ form for add, list, check, and refresh.
 | Check | `tink skill check` |
 | Refresh all clean imports | `tink skill refresh` |
 | Refresh one | `tink skill refresh NAME` |
+| Remove one project skill | `tink skill remove NAME` |
 | Destroy scaffolding | `tink destroy --yes` (non-TTY/scripts) or `tink destroy` (TTY, confirm `y`) |
 
 ## Layout facts
@@ -32,5 +33,6 @@ form for add, list, check, and refresh.
   Names are recorded in `catalog/by-project/<project>/meta.json`. List the
   catalog with `tink skill list --home` (TSV with header `project`, `root`,
   `skill`). Do not hand-parse `meta.json` when the CLI is available. Destroy
-  does not delete home or prune that catalog or stash. Project skill overwrites
-  are still refused.
+  does not delete home or prune that catalog or stash. `skill remove` deletes
+  only the project skill directory; it does not prune stash or catalog.
+  Project skill overwrites are still refused.

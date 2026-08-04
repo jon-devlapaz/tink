@@ -14,6 +14,7 @@ mod manage_tink;
 mod paths;
 mod provenance;
 mod refresh;
+mod remove;
 mod skills;
 mod sources;
 mod stash;
@@ -105,6 +106,11 @@ pub enum SkillCommand {
         /// Optional skill name; default refreshes all imported skills
         name: Option<String>,
     },
+    /// Delete one project skill directory (not home stash or catalog)
+    Remove {
+        /// Skill directory name under `.agents/skills/`
+        name: String,
+    },
 }
 
 fn flag_tri(yes: bool, no: bool) -> Option<bool> {
@@ -191,6 +197,7 @@ fn dispatch_skill(cwd: &Path, command: SkillCommand) -> Result<(), Error> {
         }
         SkillCommand::Check => dispatch_skill_check(cwd),
         SkillCommand::Refresh { name } => dispatch_skill_refresh(cwd, name.as_deref()),
+        SkillCommand::Remove { name } => dispatch_skill_remove(cwd, &name),
     }
 }
 
@@ -322,6 +329,17 @@ fn dispatch_skill_list_stash() -> Result<(), Error> {
             println!("{}", style.accent(name));
         }
     }
+    Ok(())
+}
+
+fn dispatch_skill_remove(cwd: &Path, name: &str) -> Result<(), Error> {
+    let style = CliStyle::auto_stdout();
+    let report = remove::remove_skill(cwd, name)?;
+    println!(
+        "{} {}",
+        style.success("Removed"),
+        style.accent(report.removed.display())
+    );
     Ok(())
 }
 
