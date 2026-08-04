@@ -4,14 +4,11 @@
 
 # tink
 
-Install Agent Skills into a project's `.agents/skills/`.
+Skill manager that makes sense to you, and your agent.
 
-tink copies a complete skill directory into the project. There is no registry
-and no daemon. You do not need `~/.agents`. Agents that already look for
-project skills find them in `.agents/skills/`.
-
-If you are an agent, follow [`skills/manage-tink/SKILL.md`](skills/manage-tink/SKILL.md).
-The v1 command contract is [`ACCEPTANCE.md`](ACCEPTANCE.md).
+Live skills live only under a project’s `.agents/skills/<name>/`. There is no
+registry and no daemon. Agents that already look for project skills find them
+there.
 
 ## Install
 
@@ -27,140 +24,115 @@ From a checkout:
 cargo install --path . --root ~/.local --force
 ```
 
-### Uninstall
+## First success
 
-```console
-cargo uninstall tink
-```
-
-If you installed with `--root ~/.local`:
-
-```console
-cargo uninstall --root ~/.local tink
-```
-
-## Use
+In an empty project directory:
 
 ```console
 tink init
-tink skill add ../my-skill
+tink skill add jon-devlapaz/tink-skills --skill skill-scout
 tink skill list
-tink skill list --home
-tink skill list --stash
-tink skill add --stash my-skill
-tink skill remove my-skill
 tink skill check
 ```
 
-`init` does this by default:
+That installs live skill directories under `.agents/skills/`. Optional:  
+`tink init --with-tink-skills` pulls the full
+[tink-skills](https://github.com/jon-devlapaz/tink-skills) bundle (scout +
+eval loop). On a TTY, `init` may ask about ZEN and that bundle; non-interactive
+runs skip them unless you pass flags.
+
+Defaults after `init`:
 
 1. Creates `.agents/skills/`.
 2. Ensures `~/.tink` exists.
 3. Installs the embedded `manage-tink` skill.
 
-On a TTY it may ask about ZEN and the tink-skills bundle (`skill-scout`,
-`skill-eval-loop`). Non-interactive runs skip those unless you pass flags.
-
-### More
-
-```console
-# Init options (non-interactive)
-tink init --with-zen --with-tink-skills
-tink init --no-zen --no-tink-skills --no-manage-tink
-
-# GitHub source; --skill when the repo has several skills
-tink skill add owner/repository --skill skill-name
-
-# Promote a skill from the home stash into this project
-tink skill add --stash skill-name
-
-# Refresh clean GitHub imports; local edits are refused
-tink skill refresh
-tink skill refresh skill-name
-
-# Remove one project skill (not home stash or catalog)
-tink skill remove skill-name
-
-# Remove project agent scaffolding (not ~/.tink)
-tink destroy --yes
-```
-
-Set `TINK_HOME` to use a different home directory.
-
-A successful install copies the skill tree to `~/.tink/skills/<name>/`.
-It records the skill name in `~/.tink/catalog/by-project/<project>/meta.json`.
-Home is not an agent discovery root.
-
-`tink skill list --stash` lists stashed skill names.
-`tink skill add --stash <name>` copies one into the project.
-`tink skill list --home` prints the name catalog as TSV (`project`, `root`,
-`skill`).
-
-If the GitHub tip is already in the stash, and the stash copy matches the tip
-byte for byte, `skill add` installs the project skill from the stash.
-If the stash copy differs, tink repairs the stash and writes a warning.
-tink does not overwrite a different project skill.
-
-tink does not:
-
-- init Git
-- stage files
-- commit
-- push
-
-tink does not overwrite a skill that differs from the skill it would install.
-`skill remove` deletes only the project skill directory; it does not prune the
-home stash or catalog.
+**Agents:** follow [`skills/manage-tink/SKILL.md`](skills/manage-tink/SKILL.md).
+The v1 command contract is [`ACCEPTANCE.md`](ACCEPTANCE.md).
 
 ## Model
 
-A skill is a directory that contains `SKILL.md` and the files that skill uses.
-A GitHub import writes a `.tink-source.json` receipt.
-`skill refresh` uses the receipt to check that the installed skill still
-matches its source.
-tink does not run skill code during add, check, or refresh.
-
-### Where skills live
-
-Purpose: show the live project boundary versus home stash and catalog.
-Scope: install/promote paths only; not refresh internals or Git.
+A skill is a directory with `SKILL.md` and the files it needs. Project work uses
+only `.agents/skills/`. A GitHub import writes `.tink-source.json`; `skill
+refresh` checks that receipt. tink does not run skill code on add, check, or
+refresh.
 
 ```mermaid
 flowchart LR
   agent["Agent harness"]
   tink["tink CLI"]
-  live[".agents/skills/ live skills"]
-  stash["~/.tink/skills/ stash"]
-  catalog["~/.tink/catalog/ names"]
+  live[".agents/skills/"]
+  stash["~/.tink/skills/"]
+  catalog["~/.tink/catalog/"]
 
   agent -->|"discovers"| live
-  tink -->|"skill add / remove"| live
-  tink -->|"copies trees on add"| stash
-  tink -->|"records names on add"| catalog
-  tink -->|"skill add --stash"| live
+  tink -->|"add / remove"| live
+  tink -->|"copies on add"| stash
+  tink -->|"records names"| catalog
+  tink -->|"add --stash"| live
 ```
 
-Installed project skills exist only under `.agents/skills/`.
-`~/.tink` stores skill trees in `skills/<name>/`.
-`~/.tink` stores the by-project name catalog in `catalog/by-project/`.
-Agents do not load skills from home.
-To install a stashed skill into the project, run
-`tink skill add --stash <name>`.
+Home (`~/.tink` or `$TINK_HOME`) is **not** an agent discovery root. Stash holds
+skill trees; catalog holds by-project **names** only.
 
+## Use (everyday)
+
+```console
+tink skill add ../my-skill
+tink skill add owner/repository --skill skill-name
+tink skill add jon-devlapaz/tink-skills --skill skill-eval-loop
+tink skill list
+tink skill check
+tink skill refresh
+tink skill refresh skill-name
+tink skill remove skill-name
+```
+
+- `--skill` when the source repo publishes several skills.
+- Refresh only clean GitHub imports; local edits are refused.
+- tink does not overwrite a project skill that differs from what it would
+  install.
+- tink never inits Git, stages, commits, or pushes.
+
+## Power
+
+Stash, catalog, init flags, and destroy:
+
+```console
+tink skill list --stash
+tink skill add --stash skill-name
+tink skill list --home
+
+tink init --with-zen --with-tink-skills
+tink init --no-zen --no-tink-skills --no-manage-tink
+
+tink destroy --yes
+```
+
+If the GitHub tip is already in the stash and matches the tip byte-for-byte,
+`skill add` may install from the stash. If the stash differs, tink repairs it
+and warns. `skill remove` deletes only the project skill directory, not stash
+or catalog.
+
+### Uninstall the CLI
+
+```console
+cargo uninstall tink
+# or, if installed with --root ~/.local:
+cargo uninstall --root ~/.local tink
+```
 
 ## Layout
 
 ```text
 .
-├── ACCEPTANCE.md     # v1 command and on-disk contracts
-├── ZEN.md            # maintainability principles
-├── assets/           # logo
+├── ACCEPTANCE.md
+├── ZEN.md
+├── assets/
 ├── skills/           # embedded manage-tink (shipped with the binary)
-├── src/              # Rust CLI
-└── tests/            # acceptance tests
+├── src/
+└── tests/
 ```
-
-After `init` or `skill add`, installed skills are under `.agents/skills/<name>/`.
 
 ## Develop
 
@@ -169,7 +141,8 @@ cargo test
 cargo run -q -- init
 ```
 
-Maintainability notes are in [ZEN.md](ZEN.md).
+See [ZEN.md](ZEN.md). Flag-level detail also lives in `tink --help` and
+`ACCEPTANCE.md`.
 
 ## License
 
