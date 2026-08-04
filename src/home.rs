@@ -23,7 +23,7 @@ Tink home directory. This is **not** an agent skill discovery root. Agents load
 skills only from a project's `.agents/skills/`.
 
 Successful installs:
-- archive skill trees under `skills/<name>/` (divergent archives are repaired)
+- stash skill trees under `skills/<name>/` (divergent entries are repaired)
 - record skill **names** under `catalog/by-project/<project>/meta.json`
 
 Default location: `~/.tink` (override with `TINK_HOME`).
@@ -45,12 +45,12 @@ pub fn by_project_path(home: &Path) -> PathBuf {
     home.join("catalog").join(BY_PROJECT)
 }
 
-/// Path to the skill-tree archive root (`skills/`).
-pub fn skills_archive_path(home: &Path) -> PathBuf {
+/// Path to the skill-tree stash root (`skills/`).
+pub fn skills_stash_path(home: &Path) -> PathBuf {
     home.join("skills")
 }
 
-/// Ensure inventory root + archive dir + catalog + layout marker.
+/// Ensure inventory root + stash dir + catalog + layout marker.
 ///
 /// Returns `(path, created)` where `created` is true only when the root
 /// directory did not exist before this call.
@@ -68,7 +68,7 @@ pub fn ensure_inventory_root(root: Option<&Path>) -> Result<(PathBuf, bool), Err
         )));
     }
     mkdir_p(&root)?;
-    mkdir_p(&skills_archive_path(&root))?;
+    mkdir_p(&skills_stash_path(&root))?;
     migrate_catalog_if_needed(&root)?;
     mkdir_p(&by_project_path(&root))?;
     write_layout_marker(&root)?;
@@ -81,7 +81,7 @@ pub(crate) fn looks_like_legacy_catalog(path: &Path) -> bool {
 }
 
 /// Older homes kept the name catalog at `skills/by-project/`; move it out so
-/// `skills/<name>/` can hold archived trees.
+/// `skills/<name>/` can hold stashed trees.
 fn migrate_catalog_if_needed(home: &Path) -> Result<(), Error> {
     let old = home.join("skills").join(BY_PROJECT);
     let new = by_project_path(home);
@@ -100,7 +100,7 @@ fn migrate_catalog_if_needed(home: &Path) -> Result<(), Error> {
             old.display()
         )));
     }
-    // A skill tree mistakenly archived as by-project has SKILL.md — leave it.
+    // A skill tree mistakenly stashed as by-project has SKILL.md — leave it.
     if !looks_like_legacy_catalog(&old) {
         return Ok(());
     }
@@ -160,7 +160,7 @@ mod tests {
         assert_eq!(path, root);
         assert!(root.join("layout.json").is_file());
         assert!(by_project_path(&root).is_dir());
-        assert!(skills_archive_path(&root).is_dir());
+        assert!(skills_stash_path(&root).is_dir());
         assert!(!root.join("skills").join(BY_PROJECT).exists());
         let (_, created_again) = ensure_inventory_root(Some(&root)).unwrap();
         assert!(!created_again);

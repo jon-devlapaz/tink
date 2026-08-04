@@ -45,6 +45,8 @@ tink init
 tink skill add ../my-skill
 tink skill list
 tink skill list --home
+tink skill list --stash
+tink skill add --stash my-skill
 tink skill check
 ```
 
@@ -58,6 +60,9 @@ tink init --no-zen --no-tink-skills --no-manage-tink
 # GitHub source; --skill when the repo has several skills
 tink skill add owner/repository --skill skill-name
 
+# Promote a skill from the home stash into this project
+tink skill add --stash skill-name
+
 # Refresh clean GitHub imports; local edits are refused
 tink skill refresh
 tink skill refresh skill-name
@@ -67,11 +72,13 @@ tink destroy --yes
 ```
 
 Override the home root with `TINK_HOME` when you need an isolated home.
-Successful installs archive skill trees under `~/.tink/skills/<name>/` and
+Successful installs stash skill trees under `~/.tink/skills/<name>/` and
 record skill **names** under `~/.tink/catalog/by-project/<project>/meta.json`.
-Home is not an agent discovery root. When a GitHub tip is already archived
-byte-for-byte, add installs the project copy from home. Divergent archives are
-repaired with a warning (project skill overwrites are still refused).
+Home is not an agent discovery root. List the stash with
+`tink skill list --stash`; promote into a project with
+`tink skill add --stash <name>`. When a GitHub tip is already stashed
+byte-for-byte, add installs the project copy from that stash. Divergent stash
+trees are repaired with a warning (project skill overwrites are still refused).
 
 tink does not init Git, stage files, commit, push, or overwrite a skill that
 diverged from what it would install.
@@ -81,6 +88,11 @@ diverged from what it would install.
 A skill is a directory with `SKILL.md` plus whatever it needs. GitHub imports
 get a small receipt so refresh can prove the install still matches its source.
 tink does not execute skill code during add, check, or refresh.
+
+**Live** skills are only under `.agents/skills/`. **Home** (`~/.tink`) holds a
+rebuildable **stash** of skill trees (`skills/<name>/`) and a by-project **name
+catalog** (`catalog/by-project/`). Agents never load from home; promote with
+`tink skill add --stash <name>`.
 
 ## Develop
 

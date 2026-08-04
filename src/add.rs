@@ -2,7 +2,6 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::archive::{self, ArchiveWrite};
 use crate::catalog;
 use crate::error::Error;
 use crate::git;
@@ -10,14 +9,23 @@ use crate::init;
 use crate::provenance::Provenance;
 use crate::skills::{self, Skill};
 use crate::sources::{self, RemoteSource};
+use crate::stash::{self, StashWrite};
 use crate::style::CliStyle;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AddOrigin {
+    /// Installed from a local path or fresh remote checkout.
+    Source,
+    /// Installed from the home stash (`skills/<name>/`), including tip reuse.
+    Stash,
+}
 
 #[derive(Debug)]
 pub(crate) struct AddOutcome {
     pub name: String,
     created: bool,
     project_path: PathBuf,
-    from_home_archive: bool,
+    origin: AddOrigin,
 }
 
 fn place_skill(
@@ -26,19 +34,16 @@ fn place_skill(
     destination_root: &Path,
     provenance: Option<&Provenance>,
 ) -> Result<AddOutcome, Error> {
-    // Protect the project tree first. Home archive is a rebuildable cache:
-    // repair on diverge, then install project (re-add recovers if that fails).
+    // Protect the project tree first. Stash is a rebuildable dump: repair on
+    // diverge, then install project (re-add recovers if that fails).
     skills::preflight_install(skill, destination_root, provenance)?
         .require_compatible(&skill.name, destination_root)?;
-    let (_, archive_write) = archive::deposit_archive(skill, provenance)?;
-    if archive_write == ArchiveWrite::Repaired {
+    let (_, write) = stash::deposit(skill, provenance)?;
+    if write == StashWrite::Repaired {
         let err = CliStyle::auto_stderr();
         eprintln!(
             "{}",
-            err.warn(format!(
-                "Repaired divergent home archive for {}",
-                skill.name
-            ))
+            err.warn(format!("Repaired divergent stash for {}", skill.name))
         );
     }
     let (installed, created) = skills::install_local(skill, destination_root, provenance)?;
@@ -48,25 +53,25 @@ fn place_skill(
         name: skill.name.clone(),
         created,
         project_path: installed,
-        from_home_archive: false,
+        origin: AddOrigin::Source,
     })
 }
 
-/// Install into the project from an already-complete home archive tree (receipt included).
-fn place_from_home_archive(
+/// Install into the project from an already-complete stash tree (receipt included).
+fn place_from_stash(
     project_root: &Path,
-    archived: &Skill,
+    skill: &Skill,
     destination_root: &Path,
 ) -> Result<AddOutcome, Error> {
-    skills::preflight_install(archived, destination_root, None)?
-        .require_compatible(&archived.name, destination_root)?;
-    let (installed, created) = skills::install_local(archived, destination_root, None)?;
-    catalog::deposit_skill(project_root, &archived.name)?;
+    skills::preflight_install(skill, destination_root, None)?
+        .require_compatible(&skill.name, destination_root)?;
+    let (installed, created) = skills::install_local(skill, destination_root, None)?;
+    catalog::deposit_skill(project_root, &skill.name)?;
     Ok(AddOutcome {
-        name: archived.name.clone(),
+        name: skill.name.clone(),
         created,
         project_path: installed,
-        from_home_archive: true,
+        origin: AddOrigin::Stash,
     })
 }
 
@@ -136,8 +141,8 @@ fn install_from_checkout(
         }
         _ => None,
     };
-    if let Some(cached) = archive::matching_archive(&skill, provenance.as_ref())? {
-        return place_from_home_archive(project_root, &cached, destination_root);
+    if let Some(cached) = stash::matching(&skill, provenance.as_ref())? {
+        return place_from_stash(project_root, &cached, destination_root);
     }
     place_skill(project_root, &skill, destination_root, provenance.as_ref())
 }
@@ -175,6 +180,16 @@ pub fn add_skill(
     Ok(outcome)
 }
 
+/// Promote one skill from the home stash into the project by name.
+pub fn add_from_stash(project_root: &Path, name: &str) -> Result<AddOutcome, Error> {
+    init::ensure_project_layout(project_root)?;
+    let destination_root = project_root.join(".agents").join("skills");
+    let skill = stash::load(name)?;
+    let outcome = place_from_stash(project_root, &skill, &destination_root)?;
+    report_add(&outcome);
+    Ok(outcome)
+}
+
 fn looks_like_filesystem_path(value: &str) -> bool {
     let path = Path::new(value);
     path.is_absolute()
@@ -186,27 +201,25 @@ fn looks_like_filesystem_path(value: &str) -> bool {
 
 fn report_add(outcome: &AddOutcome) {
     let style = CliStyle::auto_stdout();
-    if outcome.from_home_archive && outcome.created {
-        println!(
+    match (outcome.created, outcome.origin) {
+        (true, AddOrigin::Stash) => println!(
             "{} {} → {} {}",
             style.success("Installed"),
             style.accent(&outcome.name),
             style.accent(outcome.project_path.display()),
-            style.muted("(from home archive)")
-        );
-    } else if outcome.created {
-        println!(
+            style.muted("(from stash)")
+        ),
+        (true, AddOrigin::Source) => println!(
             "{} {} → {}",
             style.success("Installed"),
             style.accent(&outcome.name),
             style.accent(outcome.project_path.display())
-        );
-    } else {
-        println!(
+        ),
+        (false, _) => println!(
             "{} {}",
             style.muted("Unchanged"),
             style.accent(&outcome.name)
-        );
+        ),
     }
 }
 
@@ -216,12 +229,10 @@ fn add_from_remote(
     remote: &RemoteSource,
     selected_name: Option<&str>,
 ) -> Result<AddOutcome, Error> {
-    // Cheap tip check: if home already has this exact remote revision, copy it.
+    // Cheap tip check: if stash already has this exact remote revision, copy it.
     let tip = git::remote_head(remote)?;
-    if let Some(cached) =
-        archive::archive_for_remote_tip(&remote.url, &tip, selected_name)?
-    {
-        return place_from_home_archive(project_root, &cached, destination_root);
+    if let Some(cached) = stash::for_remote_tip(&remote.url, &tip, selected_name)? {
+        return place_from_stash(project_root, &cached, destination_root);
     }
     let (_temp, source_root, revision) = git::checkout(remote)?;
     install_from_checkout(

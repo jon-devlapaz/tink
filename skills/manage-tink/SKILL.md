@@ -1,6 +1,6 @@
 ---
 name: manage-tink
-description: "Tink CLI for repository-owned Agent Skills. Use when the user asks to set up or init Tink, add or refresh a project skill, list or check .agents/skills, list the home by-project catalog, or destroy project agent scaffolding."
+description: "Tink CLI for repository-owned Agent Skills. Use when the user asks to set up or init Tink, add or refresh a project skill, list or check .agents/skills, list the home by-project catalog or home stash, promote a stash skill into the project, or destroy project agent scaffolding."
 ---
 
 # Manage Tink
@@ -14,15 +14,17 @@ are hard stops — honor them; do not work around them.
    (`cargo install --git https://github.com/jon-devlapaz/tink.git --locked`) and
    stop. Otherwise: use `tink skill check` for this project's live state; use
    `tink skill list` for live skill names; use `tink skill list --home` when the
-   user asks what Tink has recorded across projects (do not hand-parse
-   `~/.tink/catalog/by-project`).
+   user asks what Tink has recorded across projects; use `tink skill list --stash`
+   when the user asks what skill trees sit in the home dump (do not hand-parse
+   `~/.tink/catalog/by-project` or `~/.tink/skills`).
    - Done when: either install guidance was given, or the chosen inspect
      command's exit status and output are known.
 
 2. **Mutate only on explicit ask** — Map the user's request to exactly one
    command from [references/commands.md](references/commands.md). Run that
    command; do not invent flags, merges, force-overwrites, or alternate install
-   paths (no symlinks, manual copies, or private registries).
+   paths (no symlinks, manual copies, or private registries). To promote from
+   the home stash into the project, use `tink skill add --stash NAME` only.
    - Done when: the chosen command has finished and its stdout/stderr is known.
 
 3. **Prove** — After every successful mutation except `destroy`, run
@@ -36,7 +38,9 @@ are hard stops — honor them; do not work around them.
 |---|---|
 | Set up / init Tink (no extras) | `tink init --no-zen --no-tink-skills` (embeds `manage-tink`) |
 | …and ZEN / tink-skills / skip manage-tink | Only the matching `--with-*` / `--no-*` flags |
-| Add / list / check / refresh … | The matching `tink skill …` command (`list --home` for the offline catalog) |
+| Add / list / check / refresh … | The matching `tink skill …` command |
+| List home catalog | `tink skill list --home` |
+| List home stash / promote from stash | `tink skill list --stash` / `tink skill add --stash NAME` |
 | Remove scaffolding / destroy Tink setup | `tink destroy` (TTY) or `tink destroy --yes` (scripts) |
 
 "Set up Tink" does **not** authorize ZEN, tink-skills, or destroy.
@@ -48,3 +52,7 @@ are hard stops — honor them; do not work around them.
   only `.agents/`, `ZEN.md`, and `AGENTS.md`.
 - Treat local skills as non-refreshable unless they carry a valid receipt.
 - Never execute code from a skill while adding, checking, refreshing, or destroying.
+- Home stash (`~/.tink/skills/`) is **not** an agent discovery root; do not
+  symlink or copy from it by hand — use `tink skill add --stash NAME`.
+- Do not prune the home stash or by-project catalog unless the user explicitly
+  asks and a supporting command exists (prune is out of v1).

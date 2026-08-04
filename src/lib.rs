@@ -3,7 +3,6 @@
 //! Acceptance boundary: [`../ACCEPTANCE.md`](../ACCEPTANCE.md).
 
 mod add;
-mod archive;
 mod catalog;
 mod check;
 mod destroy;
@@ -17,6 +16,7 @@ mod provenance;
 mod refresh;
 mod skills;
 mod sources;
+mod stash;
 mod style;
 mod templates;
 
@@ -80,17 +80,23 @@ pub enum Command {
 pub enum SkillCommand {
     /// Copy one complete skill into the project
     Add {
-        /// Local skill/repository path, `owner/repo`, or public GitHub HTTPS URL
+        /// Local skill/repository path, `owner/repo`, public GitHub HTTPS URL, or stash name with `--stash`
         source: String,
         /// Skill name when the source contains several skills
         #[arg(long)]
         skill: Option<String>,
+        /// Install from the home stash (`$TINK_HOME/skills/<name>/`) by skill name
+        #[arg(long)]
+        stash: bool,
     },
-    /// List installed project skills, or the home by-project catalog
+    /// List installed project skills, the home by-project catalog, or the home stash
     List {
         /// List offline catalog under `$TINK_HOME` / `~/.tink` as `project\\troot\\tskill` TSV
-        #[arg(long)]
+        #[arg(long, group = "list_source")]
         home: bool,
+        /// List skill names in the home stash (`skills/<name>/`)
+        #[arg(long, group = "list_source")]
+        stash: bool,
     },
     /// Validate project skills without changing anything
     Check,
@@ -158,12 +164,27 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
 
 fn dispatch_skill(cwd: &Path, command: SkillCommand) -> Result<(), Error> {
     match command {
-        SkillCommand::Add { source, skill } => {
-            dispatch_skill_add(cwd, &source, skill.as_deref())
+        SkillCommand::Add {
+            source,
+            skill,
+            stash,
+        } => {
+            if stash {
+                if skill.is_some() {
+                    return Err(Error::msg(
+                        "Do not combine --skill with --stash; pass the stash skill name as the source",
+                    ));
+                }
+                dispatch_skill_add_stash(cwd, &source)
+            } else {
+                dispatch_skill_add(cwd, &source, skill.as_deref())
+            }
         }
-        SkillCommand::List { home } => {
+        SkillCommand::List { home, stash } => {
             if home {
                 dispatch_skill_list_home()
+            } else if stash {
+                dispatch_skill_list_stash()
             } else {
                 dispatch_skill_list(cwd)
             }
@@ -234,6 +255,10 @@ fn dispatch_skill_add(cwd: &Path, source: &str, skill: Option<&str>) -> Result<(
     add::add_skill(cwd, source, skill).map(|_| ())
 }
 
+fn dispatch_skill_add_stash(cwd: &Path, name: &str) -> Result<(), Error> {
+    add::add_from_stash(cwd, name).map(|_| ())
+}
+
 fn dispatch_skill_check(cwd: &Path) -> Result<(), Error> {
     let style = CliStyle::auto_stdout();
     let skills = check::check_project(cwd)?;
@@ -282,6 +307,19 @@ fn dispatch_skill_list_home() -> Result<(), Error> {
                 style.muted(&entry.root),
                 style.accent(&entry.skill)
             );
+        }
+    }
+    Ok(())
+}
+
+fn dispatch_skill_list_stash() -> Result<(), Error> {
+    let style = CliStyle::auto_stdout();
+    let names = stash::list_names(None)?;
+    if names.is_empty() {
+        println!("{}", style.muted("(no stash skills)"));
+    } else {
+        for name in &names {
+            println!("{}", style.accent(name));
         }
     }
     Ok(())
