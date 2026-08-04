@@ -120,12 +120,33 @@ A GitHub import writes a `.tink-source.json` receipt.
 matches its source.
 tink does not run skill code during add, check, or refresh.
 
+### Where skills live
+
+Purpose: show the live project boundary versus home stash and catalog.
+Scope: install/promote paths only; not refresh internals or Git.
+
+```mermaid
+flowchart LR
+  agent["Agent harness"]
+  tink["tink CLI"]
+  live[".agents/skills/ live skills"]
+  stash["~/.tink/skills/ stash"]
+  catalog["~/.tink/catalog/ names"]
+
+  agent -->|"discovers"| live
+  tink -->|"skill add / remove"| live
+  tink -->|"copies trees on add"| stash
+  tink -->|"records names on add"| catalog
+  tink -->|"skill add --stash"| live
+```
+
 Installed project skills exist only under `.agents/skills/`.
 `~/.tink` stores skill trees in `skills/<name>/`.
 `~/.tink` stores the by-project name catalog in `catalog/by-project/`.
 Agents do not load skills from home.
 To install a stashed skill into the project, run
 `tink skill add --stash <name>`.
+
 
 ## Layout
 
