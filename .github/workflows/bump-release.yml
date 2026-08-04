@@ -1,0 +1,76 @@
+name: bump-release
+
+# Every push to main ships a patch release: bump Cargo version, tag, then
+# dispatch the existing tag/ref-based release workflow.
+# GITHUB_TOKEN pushes do not re-trigger workflows; we still skip our own
+# release commits and dispatch release.yml explicitly.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: bump-release-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  bump:
+    if: "${{ !startsWith(github.event.head_commit.message, 'chore: release v') }}"
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump patch, tag, and dispatch release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          current="$(sed -n 's/^version = "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)"/\1/p' Cargo.toml | head -n1)"
+          if [ -z "${current}" ]; then
+            echo "Could not read package version from Cargo.toml" >&2
+            exit 1
+          fi
+
+          IFS=. read -r major minor patch <<< "${current}"
+          new="${major}.${minor}.$((patch + 1))"
+          tag="v${new}"
+
+          if git rev-parse --verify --quiet "refs/tags/${tag}" >/dev/null; then
+            echo "Tag ${tag} already exists; skipping."
+            exit 0
+          fi
+
+          sed -i "s/^version = \"${current}\"/version = \"${new}\"/" Cargo.toml
+          CURRENT="${current}" NEW="${new}" python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          current = os.environ["CURRENT"]
+          new = os.environ["NEW"]
+          path = Path("Cargo.lock")
+          text = path.read_text()
+          needle = f'name = "tink"\nversion = "{current}"'
+          repl = f'name = "tink"\nversion = "{new}"'
+          if needle not in text:
+              raise SystemExit(f"Cargo.lock missing package entry for tink {current}")
+          path.write_text(text.replace(needle, repl, 1))
+          PY
+
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore: release v${new}"
+          git tag "${tag}"
+          git push origin HEAD:main
+          git push origin "${tag}"
+
+          # Token pushes do not cascade to on.push.tags; dispatch explicitly.
+          gh workflow run release.yml --ref "${tag}"
+          echo "Dispatched release for ${tag} (was ${current})"
