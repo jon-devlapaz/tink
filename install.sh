@@ -80,6 +80,4 @@ case ":${PATH}:" in
     ;;
 esac
 
-if command -v tink >/dev/null 2>&1; then
-  tink --version || true
-fi
+"${INSTALL_DIR}/tink" --version || true
