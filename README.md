@@ -4,17 +4,18 @@
 
 # tink
 
-**One skill manager. Any harness. Just works.**
+Install Agent Skills into a project's `.agents/skills/`.
 
-tink copies complete Agent Skills into a project's `.agents/skills/` directory.
-No registry, no daemon, no required `~/.agents`. Agents that already look for
-project skills find them where they live.
+tink copies a complete skill directory into the project. There is no registry
+and no daemon. You do not need `~/.agents`. Agents that already look for
+project skills find them in `.agents/skills/`.
 
 If you are an agent, follow [`skills/manage-tink/SKILL.md`](skills/manage-tink/SKILL.md).
+The v1 command contract is [`ACCEPTANCE.md`](ACCEPTANCE.md).
 
 ## Install
 
-Needs a current Rust toolchain and `git` on `PATH` for GitHub sources.
+You need a current Rust toolchain. For GitHub sources, `git` must be on `PATH`.
 
 ```console
 cargo install --git https://github.com/jon-devlapaz/tink.git --locked
@@ -47,8 +48,18 @@ tink skill list
 tink skill list --home
 tink skill list --stash
 tink skill add --stash my-skill
+tink skill remove my-skill
 tink skill check
 ```
+
+`init` does this by default:
+
+1. Creates `.agents/skills/`.
+2. Ensures `~/.tink` exists.
+3. Installs the embedded `manage-tink` skill.
+
+On a TTY it may ask about ZEN and the tink-skills bundle (`skill-scout`,
+`skill-eval-loop`). Non-interactive runs skip those unless you pass flags.
 
 ### More
 
@@ -67,32 +78,68 @@ tink skill add --stash skill-name
 tink skill refresh
 tink skill refresh skill-name
 
+# Remove one project skill (not home stash or catalog)
+tink skill remove skill-name
+
 # Remove project agent scaffolding (not ~/.tink)
 tink destroy --yes
 ```
 
-Override the home root with `TINK_HOME` when you need an isolated home.
-Successful installs stash skill trees under `~/.tink/skills/<name>/` and
-record skill **names** under `~/.tink/catalog/by-project/<project>/meta.json`.
-Home is not an agent discovery root. List the stash with
-`tink skill list --stash`; promote into a project with
-`tink skill add --stash <name>`. When a GitHub tip is already stashed
-byte-for-byte, add installs the project copy from that stash. Divergent stash
-trees are repaired with a warning (project skill overwrites are still refused).
+Set `TINK_HOME` to use a different home directory.
 
-tink does not init Git, stage files, commit, push, or overwrite a skill that
-diverged from what it would install.
+A successful install copies the skill tree to `~/.tink/skills/<name>/`.
+It records the skill name in `~/.tink/catalog/by-project/<project>/meta.json`.
+Home is not an agent discovery root.
+
+`tink skill list --stash` lists stashed skill names.
+`tink skill add --stash <name>` copies one into the project.
+`tink skill list --home` prints the name catalog as TSV (`project`, `root`,
+`skill`).
+
+If the GitHub tip is already in the stash, and the stash copy matches the tip
+byte for byte, `skill add` installs the project skill from the stash.
+If the stash copy differs, tink repairs the stash and writes a warning.
+tink does not overwrite a different project skill.
+
+tink does not:
+
+- init Git
+- stage files
+- commit
+- push
+
+tink does not overwrite a skill that differs from the skill it would install.
+`skill remove` deletes only the project skill directory; it does not prune the
+home stash or catalog.
 
 ## Model
 
-A skill is a directory with `SKILL.md` plus whatever it needs. GitHub imports
-get a small receipt so refresh can prove the install still matches its source.
-tink does not execute skill code during add, check, or refresh.
+A skill is a directory that contains `SKILL.md` and the files that skill uses.
+A GitHub import writes a `.tink-source.json` receipt.
+`skill refresh` uses the receipt to check that the installed skill still
+matches its source.
+tink does not run skill code during add, check, or refresh.
 
-**Live** skills are only under `.agents/skills/`. **Home** (`~/.tink`) holds a
-rebuildable **stash** of skill trees (`skills/<name>/`) and a by-project **name
-catalog** (`catalog/by-project/`). Agents never load from home; promote with
+Installed project skills exist only under `.agents/skills/`.
+`~/.tink` stores skill trees in `skills/<name>/`.
+`~/.tink` stores the by-project name catalog in `catalog/by-project/`.
+Agents do not load skills from home.
+To install a stashed skill into the project, run
 `tink skill add --stash <name>`.
+
+## Layout
+
+```text
+.
+├── ACCEPTANCE.md     # v1 command and on-disk contracts
+├── ZEN.md            # maintainability principles
+├── assets/           # logo
+├── skills/           # embedded manage-tink (shipped with the binary)
+├── src/              # Rust CLI
+└── tests/            # acceptance tests
+```
+
+After `init` or `skill add`, installed skills are under `.agents/skills/<name>/`.
 
 ## Develop
 
@@ -101,7 +148,7 @@ cargo test
 cargo run -q -- init
 ```
 
-Maintainability notes live in [ZEN.md](ZEN.md).
+Maintainability notes are in [ZEN.md](ZEN.md).
 
 ## License
 
