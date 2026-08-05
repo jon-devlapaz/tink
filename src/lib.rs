@@ -71,7 +71,7 @@ pub enum Command {
         #[command(subcommand)]
         command: SkillCommand,
     },
-    /// Remove `.agents/`, `ZEN.md`, and `AGENTS.md` from this project
+    /// Remove `.agents/`, `ZEN.md`, `AGENTS.md`, and this project's catalog entry (not home stash)
     Destroy {
         /// Skip the confirmation prompt
         #[arg(long)]
@@ -110,7 +110,7 @@ pub enum SkillCommand {
         /// Optional skill name; default refreshes all imported skills
         name: Option<String>,
     },
-    /// Delete one project skill directory (not home stash or catalog)
+    /// Delete one project skill directory and drop it from the by-project catalog (not home stash)
     Remove {
         /// Skill directory name under `.agents/skills/`
         name: String,
@@ -248,26 +248,38 @@ fn dispatch_init(
             style.accent("ZEN.md maintainability principles")
         );
     }
-    if let Some(name) = &report.manage_tink_added {
-        println!("{} {}", style.success("Added"), style.accent(name));
+    if let Some(skill) = &report.manage_tink_added {
+        print_init_skill(&style, skill);
     }
-    for name in &report.tink_skills_added {
-        println!("{} {}", style.success("Added"), style.accent(name));
+    for skill in &report.tink_skills_added {
+        print_init_skill(&style, skill);
     }
     if report.inventory_created {
         println!(
             "{} {}",
-            style.success("New home inventory at"),
+            style.success("New home at"),
             style.accent(report.inventory_home.display())
         );
     } else {
         println!(
             "{} {}",
-            style.muted("Home inventory at"),
+            style.muted("Home at"),
             style.accent(report.inventory_home.display())
         );
     }
     Ok(())
+}
+
+fn print_init_skill(style: &CliStyle, skill: &init::InstalledSkill) {
+    if skill.created {
+        println!("{} {}", style.success("Added"), style.skill(&skill.name));
+    } else {
+        println!(
+            "{} {}",
+            style.muted("Already present"),
+            style.skill(&skill.name)
+        );
+    }
 }
 
 fn dispatch_skill_add(cwd: &Path, source: &str, skill: Option<&str>) -> Result<(), Error> {
@@ -300,7 +312,7 @@ fn dispatch_skill_list(cwd: &Path) -> Result<(), Error> {
         println!("{}", out.muted("(no skills)"));
     } else {
         for skill in &skills {
-            println!("{}", out.accent(&skill.name));
+            println!("{}", out.skill(&skill.name));
         }
     }
     Ok(())
@@ -324,7 +336,7 @@ fn dispatch_skill_list_home() -> Result<(), Error> {
                 "{}\t{}\t{}",
                 style.muted(&entry.project),
                 style.muted(&entry.root),
-                style.accent(&entry.skill)
+                style.skill(&entry.skill)
             );
         }
     }
@@ -338,7 +350,7 @@ fn dispatch_skill_list_stash() -> Result<(), Error> {
         println!("{}", style.muted("(no stash skills)"));
     } else {
         for name in &names {
-            println!("{}", style.accent(name));
+            println!("{}", style.skill(name));
         }
     }
     Ok(())
@@ -364,38 +376,38 @@ fn dispatch_skill_harvest(cwd: &Path) -> Result<(), Error> {
             harvest::HarvestAction::Created => {
                 println!(
                     "{} {} {}",
-                    out.success("created"),
-                    out.accent(&event.name),
+                    out.success("Harvested"),
+                    out.skill(&event.name),
                     out.muted(event.source.display())
                 );
             }
             harvest::HarvestAction::Unchanged => {
-                println!(
-                    "{} {} {}",
-                    out.muted("unchanged"),
-                    out.accent(&event.name),
-                    out.muted(event.source.display())
-                );
+                // Quiet no-ops; counts appear in the summary.
             }
             harvest::HarvestAction::Skipped => {
                 let detail = event.detail.as_deref().unwrap_or("skipped");
                 eprintln!(
                     "{} {} {} ({})",
-                    err.warn("skipped"),
-                    err.accent(&event.name),
+                    err.warn("Skipped"),
+                    err.skill(&event.name),
                     err.muted(event.source.display()),
                     detail
                 );
             }
         }
     }
+    let home = home::resolve_home()?;
     println!(
-        "{} created={} unchanged={} skipped={}",
+        "{} {} {} · {} {} · {} {}",
         out.success("Harvest"),
         out.accent(report.created),
+        out.muted("harvested"),
         out.accent(report.unchanged),
-        out.accent(report.skipped)
+        out.muted("already present"),
+        out.accent(report.skipped),
+        out.muted("skipped")
     );
+    println!("{} {}", out.muted("Home"), out.accent(home.display()));
     Ok(())
 }
 
@@ -405,9 +417,9 @@ fn dispatch_skill_refresh(cwd: &Path, name: Option<&str>) -> Result<(), Error> {
         Some(name) => {
             let changed = refresh::refresh_skill(cwd, name)?;
             if changed {
-                println!("{} {}", style.success("Refreshed"), style.accent(name));
+                println!("{} {}", style.success("Refreshed"), style.skill(name));
             } else {
-                println!("{} {}", style.muted("Unchanged"), style.accent(name));
+                println!("{} {}", style.muted("Unchanged"), style.skill(name));
             }
             Ok(())
         }
@@ -419,7 +431,7 @@ fn dispatch_skill_refresh(cwd: &Path, name: Option<&str>) -> Result<(), Error> {
                 println!(
                     "{} {}",
                     style.success("Refreshed"),
-                    style.accent(refreshed.join(", "))
+                    style.skill(refreshed.join(", "))
                 );
             }
             Ok(())

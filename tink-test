@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Run this checkout's tink without using ~/.local/bin or ~/.cargo/bin.
+# Always uses ~/.tink-test (ignores ambient TINK_HOME) so dogfood stays off
+# ~/.tink. Override: TINK_TEST_HOME=/other/path ./tink-test …
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cargo build -q --manifest-path "$ROOT/Cargo.toml"
+export TINK_HOME="${TINK_TEST_HOME:-$HOME/.tink-test}"
+exec "$ROOT/target/debug/tink" "$@"

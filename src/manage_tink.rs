@@ -12,9 +12,9 @@ const COMMANDS_MD: &str = include_str!("../skills/manage-tink/references/command
 
 /// Stage the embedded skill and install it into the project via `add`.
 ///
-/// Uses the normal add path (project install + home stash + name catalog).
-/// Returns the installed skill name.
-pub fn install_manage_tink(project_root: &Path) -> Result<String, Error> {
+/// Uses the quiet add path so init can own the closing narrative.
+/// Returns the install outcome (name + whether the project tree was created).
+pub fn install_manage_tink(project_root: &Path) -> Result<add::AddOutcome, Error> {
     let staging = tempfile::Builder::new()
         .prefix(".tink-manage-tink-")
         .tempdir()
@@ -30,12 +30,11 @@ pub fn install_manage_tink(project_root: &Path) -> Result<String, Error> {
         .map_err(|e| map_io(&agents.join("openai.yaml"), e))?;
     std::fs::write(references.join("commands.md"), COMMANDS_MD)
         .map_err(|e| map_io(&references.join("commands.md"), e))?;
-    let outcome = add::add_skill(
+    add::add_skill_quiet(
         project_root,
         skill_root
             .to_str()
             .ok_or_else(|| Error::msg("manage-tink path is not UTF-8"))?,
         None,
-    )?;
-    Ok(outcome.name)
+    )
 }

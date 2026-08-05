@@ -12,8 +12,8 @@ from GitHub Releases via `tink update`.
 below has an automated test that passes on macOS with `git` on `PATH`.
 
 **Out of v1:** weekly GitHub update workflows, private GitHub auth, Windows,
-Linux CI as a gate, pruning the home by-project catalog or home stash,
-bare-name stash promote without `--stash`.
+Linux CI as a gate, pruning the home stash, bare-name stash promote without
+`--stash`.
 
 **Dogfood:** Prefer an installed `tink` from this repo, or `cargo run -q -- …`.
 
@@ -33,9 +33,9 @@ Skill verbs live only under `tink skill`. There are no top-level `add` /
 | `tink skill harvest` | Copy complete skill trees from known harness roots into the home stash (create-only; no project writes) |
 | `tink skill check` | Validate project skills; no network; no writes |
 | `tink skill refresh [name]` | Refresh clean GitHub imports; refuse local edits |
-| `tink skill remove <name>` | Delete one project skill under `.agents/skills/<name>/` (not home stash or catalog) |
+| `tink skill remove <name>` | Delete one project skill under `.agents/skills/<name>/` and drop that name from the by-project catalog (not home stash) |
 | `tink update` | Replace this binary with the latest public GitHub Release (requires `curl` + `tar`) |
-| `tink destroy [--yes]` | Remove `.agents/`, `ZEN.md`, and `AGENTS.md` (not `~/.tink`) |
+| `tink destroy [--yes]` | Remove `.agents/`, `ZEN.md`, and `AGENTS.md`; drop this project's by-project catalog entry (not home stash) |
 
 ## On-disk contracts
 
@@ -45,7 +45,7 @@ Skill verbs live only under `tink skill`. There are no top-level `add` /
 | Receipt | `.tink-source.json` with exactly `source`, `revision`, `path` (non-empty strings) |
 | Home root | `$TINK_HOME` or `~/.tink`, with `layout.json` (`kind`: `tink-skill-inventory`) |
 | Home stash | `skills/<name>/` skill trees copied on successful add (rebuildable dump; identical tip may install project from stash; divergent → repair + warn; project overwrite still refused; not an agent discovery root) |
-| Offline catalog | `catalog/by-project/<project>/meta.json` with `name`, `root`, grow-only `skills` name list (not skill trees) |
+| Offline catalog | `catalog/by-project/<project>/meta.json` with `name`, `root`, `skills` name list (not skill trees); `skill remove` drops a name; `destroy` drops the project entry |
 
 ## Rows
 
@@ -113,7 +113,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | H3 | `skill add --stash <missing>` | Exit ≠ 0; mentions not found / missing; **no** GitHub network fetch |
 | H4 | `skill add --stash <name>` when project skill exists and differs | Exit ≠ 0; "Refusing to overwrite"; project target unchanged |
 | H5 | `skill harvest` with fixture `$HOME/.agents/skills` + `$HOME/.claude/skills` + `TINK_HOME` | Copies complete skill trees into `$TINK_HOME/skills/`; no project `.agents` skill writes from harvest |
-| H6 | `skill harvest` when stash already identical | Exit 0; unchanged |
+| H6 | `skill harvest` when stash already identical | Exit 0; summary counts already present; no per-skill already-present lines |
 | H7 | `skill harvest` when stash diverges | Exit 0; stash unchanged; stderr skip warn |
 | H8 | `skill harvest` skips home stash sources and unsafe (symlink-inside) skill trees; still harvests cwd skills under `TINK_HOME` outside `skills/` | Stash/unsafe omitted; non-stash path under home deposited |
 
@@ -140,16 +140,17 @@ Ids are stable. Tests must name or comment the id they prove.
 
 | Id | Action | Expect |
 |---|---|---|
-| X1 | `skill remove <name>` after init+add | Exit 0; project `.agents/skills/<name>/` gone; `skill list` omits name; home stash `$TINK_HOME/skills/<name>/` still present; catalog may still list the name |
+| X1 | `skill remove <name>` after init+add | Exit 0; project `.agents/skills/<name>/` gone; `skill list` omits name; home stash `$TINK_HOME/skills/<name>/` still present; `skill list --home` omits that skill for the project (siblings may remain) |
 | X2 | `skill remove <missing>` | Exit ≠ 0; mentions not found / missing; nothing deleted |
 | X3 | `skill remove` when `.agents` is a symlink | Exit ≠ 0; mentions symlink; tree unchanged |
 | X4 | Successful `skill remove <name>` | Does **not** delete `$TINK_HOME/skills/<name>/` |
+| X5 | `init` installs `manage-tink` | Embedded skill documents `tink skill remove NAME` as the only remove path; states remove drops the catalog name and destroy drops the project catalog entry; home stash remains unpruned |
 
 ### Destroy
 
 | Id | Action | Expect |
 |---|---|---|
-| D1 | `destroy --yes` after `init --with-zen` | Removes `.agents/`, `ZEN.md`, `AGENTS.md`; leaves `~/.tink` intact |
+| D1 | `destroy --yes` after `init --with-zen` (extra skill allowed) | Removes `.agents/`, `ZEN.md`, `AGENTS.md`; leaves home stash + `layout.json` intact; drops this project's by-project catalog entry (`skill list --home` has no rows for it) |
 | D2 | `destroy` without `--yes` (non-TTY) | Exit ≠ 0; refuses without confirmation; project files unchanged |
 | D3 | `destroy --yes` when `.agents` is a symlink | Exit ≠ 0; mentions symlink |
 

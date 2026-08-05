@@ -4,6 +4,7 @@ use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
+use crate::catalog;
 use crate::error::Error;
 use crate::paths::{map_io, refuse_symlink};
 use crate::style::CliStyle;
@@ -13,16 +14,17 @@ pub struct DestroyReport {
     pub removed: Vec<PathBuf>,
 }
 
-/// Remove `.agents/`, `ZEN.md`, and `AGENTS.md` from the project root.
-///
-/// Does not touch `~/.tink` or the by-project name catalog. Refuses symlinks.
-/// Requires `--yes` or an interactive `y` confirmation (default no).
+/// Drop this project's by-project catalog entry, then remove `.agents/`,
+/// `ZEN.md`, and `AGENTS.md` from the project root. Does not touch the home
+/// stash. Catalog sync runs before disk deletes; sync errors leave project
+/// files intact. Refuses symlinks. Requires `--yes` or an interactive `y`
+/// confirmation (default no).
 pub fn destroy_project(project_root: &Path, yes: bool) -> Result<DestroyReport, Error> {
     if !yes {
         confirm_destroy()?;
     }
 
-    let mut removed = Vec::new();
+    let mut to_remove = Vec::new();
     let agents = project_root.join(".agents");
     if agents.exists() || agents.is_symlink() {
         refuse_symlink(&agents)?;
@@ -32,8 +34,7 @@ pub fn destroy_project(project_root: &Path, yes: bool) -> Result<DestroyReport, 
                 agents.display()
             )));
         }
-        fs::remove_dir_all(&agents).map_err(|e| map_io(&agents, e))?;
-        removed.push(agents);
+        to_remove.push(agents);
     }
 
     for name in ["ZEN.md", "AGENTS.md"] {
@@ -48,10 +49,20 @@ pub fn destroy_project(project_root: &Path, yes: bool) -> Result<DestroyReport, 
                 path.display()
             )));
         }
-        fs::remove_file(&path).map_err(|e| map_io(&path, e))?;
-        removed.push(path);
+        to_remove.push(path);
     }
 
+    catalog::forget_project(project_root)?;
+
+    let mut removed = Vec::new();
+    for path in to_remove {
+        if path.is_dir() {
+            fs::remove_dir_all(&path).map_err(|e| map_io(&path, e))?;
+        } else {
+            fs::remove_file(&path).map_err(|e| map_io(&path, e))?;
+        }
+        removed.push(path);
+    }
     Ok(DestroyReport { removed })
 }
 

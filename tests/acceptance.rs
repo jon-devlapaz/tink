@@ -833,7 +833,7 @@ fn h5_skill_harvest_copies_harness_skills_into_stash() {
         .assert()
         .success()
         .stdout(
-            predicate::str::contains("created")
+            predicate::str::contains("Harvested")
                 .and(predicate::str::contains("agents-skill"))
                 .and(predicate::str::contains("claude-skill"))
                 .and(predicate::str::contains("nested-skill")),
@@ -865,7 +865,11 @@ fn h6_skill_harvest_identical_is_unchanged() {
         .args(["skill", "harvest"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("unchanged").and(predicate::str::contains("same-skill")));
+        .stdout(
+            predicate::str::contains("already present")
+                .and(predicate::str::contains("0 harvested"))
+                .and(predicate::str::contains("same-skill").not()),
+        );
 }
 
 #[test]
@@ -887,7 +891,7 @@ fn h7_skill_harvest_divergent_skips_without_repair() {
         .args(["skill", "harvest"])
         .assert()
         .success()
-        .stderr(predicate::str::contains("skipped").and(predicate::str::contains("demo-skill")));
+        .stderr(predicate::str::contains("Skipped").and(predicate::str::contains("demo-skill")));
 
     let after = fs::read_to_string(ws.stash_skill("demo-skill").join("SKILL.md")).unwrap();
     assert_eq!(before, after, "create-only must not repair divergent stash");
@@ -1321,10 +1325,18 @@ fn d1_destroy_yes_removes_agents_zen_agents_md() {
         .args(["init", "--with-zen", "--no-tink-skills"])
         .assert()
         .success();
+    let source = ws.root.join("extra-skill");
+    write_skill(&source, "extra-skill", "also cataloged");
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .success();
     assert!(project.join(".agents").is_dir());
     assert!(project.join("ZEN.md").is_file());
     assert!(project.join("AGENTS.md").is_file());
     assert!(ws.inventory.join("layout.json").is_file());
+    ws.assert_cataloged("app", "manage-tink");
+    ws.assert_cataloged("app", "extra-skill");
 
     ws.cmd(&project)
         .args(["destroy", "--yes"])
@@ -1335,6 +1347,23 @@ fn d1_destroy_yes_removes_agents_zen_agents_md() {
     assert!(!project.join("ZEN.md").exists());
     assert!(!project.join("AGENTS.md").exists());
     assert!(ws.inventory.join("layout.json").is_file());
+    assert!(
+        ws.stash_skill("manage-tink").join("SKILL.md").is_file(),
+        "home stash must remain after destroy"
+    );
+    assert!(
+        ws.stash_skill("extra-skill").join("SKILL.md").is_file(),
+        "home stash must remain after destroy"
+    );
+    ws.cmd(&project)
+        .args(["skill", "list", "--home"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("manage-tink")
+                .not()
+                .and(predicate::str::contains("extra-skill").not()),
+        );
 }
 
 #[test]
@@ -1368,7 +1397,7 @@ fn d3_destroy_refuses_agents_symlink() {
 // --- X*: skill remove ---
 
 #[test]
-fn x1_remove_deletes_project_skill_keeps_stash_and_catalog() {
+fn x1_remove_deletes_project_skill_keeps_stash_drops_catalog() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project).arg("init").assert().success();
@@ -1397,7 +1426,15 @@ fn x1_remove_deletes_project_skill_keeps_stash_and_catalog() {
         ws.stash_skill("demo-skill").join("SKILL.md").is_file(),
         "home stash must remain after project remove"
     );
-    ws.assert_cataloged("app", "demo-skill");
+    ws.cmd(&project)
+        .args(["skill", "list", "--home"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("demo-skill")
+                .not()
+                .and(predicate::str::contains("manage-tink")),
+        );
 }
 
 #[test]
@@ -1454,6 +1491,47 @@ fn x4_remove_does_not_delete_home_stash() {
     assert!(!Workspace::skill_path(&project, "keep-stash").exists());
     let after = fs::read(&stash_md).unwrap();
     assert_eq!(before, after);
+}
+
+#[test]
+fn x5_manage_tink_documents_remove_and_catalog_sync() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+    let skill_md =
+        fs::read_to_string(Workspace::skill_path(&project, "manage-tink").join("SKILL.md"))
+            .expect("manage-tink SKILL.md");
+    let commands = fs::read_to_string(
+        Workspace::skill_path(&project, "manage-tink")
+            .join("references")
+            .join("commands.md"),
+    )
+    .expect("manage-tink commands.md");
+
+    assert!(
+        skill_md.contains("tink skill remove NAME"),
+        "manage-tink must authorize skill remove"
+    );
+    assert!(
+        skill_md.contains("by-project catalog")
+            && (skill_md.contains("drops") || skill_md.contains("drop")),
+        "manage-tink must state remove/destroy sync the catalog: {skill_md}"
+    );
+    assert!(
+        !skill_md.contains("prune is out of v1"),
+        "manage-tink must not claim catalog prune is out of v1"
+    );
+    assert!(
+        commands.contains("tink skill remove NAME"),
+        "commands.md must list skill remove"
+    );
+    assert!(
+        commands.contains("catalog")
+            && (commands.contains("drops")
+                || commands.contains("drop")
+                || commands.contains("updates")),
+        "commands.md must describe catalog sync on remove/destroy: {commands}"
+    );
 }
 
 // --- S*: safety ---

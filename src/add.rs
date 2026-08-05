@@ -23,7 +23,7 @@ enum AddOrigin {
 #[derive(Debug)]
 pub(crate) struct AddOutcome {
     pub name: String,
-    created: bool,
+    pub created: bool,
     project_path: PathBuf,
     origin: AddOrigin,
 }
@@ -152,6 +152,24 @@ pub fn add_skill(
     source_value: &str,
     selected_name: Option<&str>,
 ) -> Result<AddOutcome, Error> {
+    add_skill_inner(project_root, source_value, selected_name, true)
+}
+
+/// Like [`add_skill`] but skips per-skill stdout (caller owns the narrative).
+pub(crate) fn add_skill_quiet(
+    project_root: &Path,
+    source_value: &str,
+    selected_name: Option<&str>,
+) -> Result<AddOutcome, Error> {
+    add_skill_inner(project_root, source_value, selected_name, false)
+}
+
+fn add_skill_inner(
+    project_root: &Path,
+    source_value: &str,
+    selected_name: Option<&str>,
+    report: bool,
+) -> Result<AddOutcome, Error> {
     init::ensure_project_layout(project_root)?;
     let destination_root = project_root.join(".agents").join("skills");
     let local_source = Path::new(source_value);
@@ -168,7 +186,9 @@ pub fn add_skill(
             None,
             None,
         )?;
-        report_add(&outcome);
+        if report {
+            report_add(&outcome);
+        }
         return Ok(outcome);
     }
     if looks_like_filesystem_path(source_value) {
@@ -176,7 +196,9 @@ pub fn add_skill(
     }
     let remote = sources::parse_remote(source_value)?;
     let outcome = add_from_remote(project_root, &destination_root, &remote, selected_name)?;
-    report_add(&outcome);
+    if report {
+        report_add(&outcome);
+    }
     Ok(outcome)
 }
 
@@ -205,20 +227,20 @@ fn report_add(outcome: &AddOutcome) {
         (true, AddOrigin::Stash) => println!(
             "{} {} → {} {}",
             style.success("Installed"),
-            style.accent(&outcome.name),
+            style.skill(&outcome.name),
             style.accent(outcome.project_path.display()),
             style.muted("(from stash)")
         ),
         (true, AddOrigin::Source) => println!(
             "{} {} → {}",
             style.success("Installed"),
-            style.accent(&outcome.name),
+            style.skill(&outcome.name),
             style.accent(outcome.project_path.display())
         ),
         (false, _) => println!(
             "{} {}",
             style.muted("Unchanged"),
-            style.accent(&outcome.name)
+            style.skill(&outcome.name)
         ),
     }
 }
