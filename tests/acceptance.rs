@@ -735,7 +735,7 @@ fn h2_skill_add_stash_installs_into_project() {
         .assert()
         .success();
     ws.cmd(&app)
-        .args(["skill", "add", "--stash", "stash-skill"])
+        .args(["skill", "add", "stash-skill"])
         .assert()
         .success()
         .stdout(
@@ -757,7 +757,7 @@ fn h3_skill_add_stash_missing_refuses_without_github() {
         .assert()
         .success();
     ws.cmd(&project)
-        .args(["skill", "add", "--stash", "no-such-skill"])
+        .args(["skill", "add", "no-such-skill"])
         .assert()
         .failure()
         .stderr(
@@ -792,7 +792,7 @@ fn h4_skill_add_stash_refuses_overwrite_when_diverged() {
         "project local body",
     );
     ws.cmd(&app)
-        .args(["skill", "add", "--stash", "demo-skill"])
+        .args(["skill", "add", "demo-skill"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("Refusing to overwrite"));

@@ -194,22 +194,30 @@ fn add_skill_inner(
     if looks_like_filesystem_path(source_value) {
         return Err(Error::msg(format!("Path does not exist: {source_value}")));
     }
-    let remote = sources::parse_remote(source_value)?;
-    let outcome = add_from_remote(project_root, &destination_root, &remote, selected_name)?;
+    // Slash or URL → remote only. Bare name → home stash promote.
+    if looks_like_remote_source(source_value) {
+        let remote = sources::parse_remote(source_value)?;
+        let outcome = add_from_remote(project_root, &destination_root, &remote, selected_name)?;
+        if report {
+            report_add(&outcome);
+        }
+        return Ok(outcome);
+    }
+    if selected_name.is_some() {
+        return Err(Error::msg(
+            "Do not combine --skill with a stash skill name; pass only the stash name",
+        ));
+    }
+    let skill = stash::load(source_value)?;
+    let outcome = place_from_stash(project_root, &skill, &destination_root)?;
     if report {
         report_add(&outcome);
     }
     Ok(outcome)
 }
 
-/// Promote one skill from the home stash into the project by name.
-pub fn add_from_stash(project_root: &Path, name: &str) -> Result<AddOutcome, Error> {
-    init::ensure_project_layout(project_root)?;
-    let destination_root = project_root.join(".agents").join("skills");
-    let skill = stash::load(name)?;
-    let outcome = place_from_stash(project_root, &skill, &destination_root)?;
-    report_add(&outcome);
-    Ok(outcome)
+fn looks_like_remote_source(value: &str) -> bool {
+    value.contains('/') || value.contains("://")
 }
 
 fn looks_like_filesystem_path(value: &str) -> bool {

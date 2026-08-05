@@ -86,7 +86,7 @@ flowchart LR
   tink -->|"add / remove"| live
   tink -->|"copies on add"| stash
   tink -->|"records names"| catalog
-  tink -->|"add --stash"| live
+  tink -->|"add <stash-name>"| live
 ```
 
 Home (`~/.tink` or `$TINK_HOME`) is **not** an agent discovery root. Stash holds
@@ -117,7 +117,7 @@ Stash, catalog, init flags, and destroy:
 
 ```console
 tink skill list --stash
-tink skill add --stash skill-name
+tink skill add skill-name
 tink skill harvest
 tink skill list --home
 
@@ -130,9 +130,10 @@ tink update
 
 If the GitHub tip is already in the stash and matches the tip byte-for-byte,
 `skill add` may install from the stash. If the stash differs, tink repairs it
-and warns. `skill remove` deletes the project skill directory and drops that
-name from the by-project catalog; it does not delete home stash trees.
-`destroy` also drops this project's catalog entry.
+and warns. A bare skill name (not a path and not `owner/repo`) promotes from
+the home stash into the project. `skill remove` deletes the project skill
+directory and drops that name from the by-project catalog; it does not delete
+home stash trees. `destroy` also drops this project's catalog entry.
 
 ### Uninstall the CLI
 

@@ -24,7 +24,8 @@ are hard stops — honor them; do not work around them.
    command from [references/commands.md](references/commands.md). Run that
    command; do not invent flags, merges, force-overwrites, or alternate install
    paths (no symlinks, manual copies, or private registries). To promote from
-   the home stash into the project, use `tink skill add --stash NAME` only.
+   the home stash into the project, use `tink skill add NAME` only (bare stash
+   skill name; not a path and not `owner/repo`).
    To fill the home stash from known harness skill locations, use
    `tink skill harvest` only (create-only; does not write project skills).
    To remove a live project skill, use `tink skill remove NAME` only (drops the
@@ -48,7 +49,7 @@ are hard stops — honor them; do not work around them.
 | …and ZEN / tink-skills / skip manage-tink | Only the matching `--with-*` / `--no-*` flags |
 | Add / list / check / refresh / remove … | The matching `tink skill …` command |
 | List home catalog | `tink skill list --home` |
-| List home stash / promote from stash | `tink skill list --stash` / `tink skill add --stash NAME` |
+| List home stash / promote from stash | `tink skill list --stash` / `tink skill add NAME` |
 | Harvest harness skills into home stash | `tink skill harvest` |
 | Remove one project skill | `tink skill remove NAME` |
 | Update the tink CLI | `tink update` |
@@ -68,6 +69,6 @@ are hard stops — honor them; do not work around them.
 - Never execute code from a skill while adding, checking, refreshing, removing,
   or destroying.
 - Home stash (`~/.tink/skills/`) is **not** an agent discovery root; do not
-  symlink or copy from it by hand — use `tink skill add --stash NAME`.
+  symlink or copy from it by hand — use `tink skill add NAME`.
 - Do not prune the home stash by hand. `skill remove` and `destroy` sync the
   by-project catalog; they do not delete stash trees.

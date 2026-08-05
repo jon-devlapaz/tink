@@ -1,7 +1,7 @@
 //! Home skill stash (`$TINK_HOME/skills/<name>/`).
 //!
 //! Rebuildable dump of skill trees from successful installs. Not an agent
-//! discovery root — promote into a project with `tink skill add --stash`.
+//! discovery root — promote into a project with `tink skill add <name>`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
