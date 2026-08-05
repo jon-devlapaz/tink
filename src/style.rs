@@ -11,6 +11,7 @@ const GREEN: Ansi = Color::Ansi(AnsiColor::Green);
 const RED: Ansi = Color::Ansi(AnsiColor::Red);
 const YELLOW: Ansi = Color::Ansi(AnsiColor::Yellow);
 const CYAN: Ansi = Color::Ansi(AnsiColor::Cyan);
+const MAGENTA: Ansi = Color::Ansi(AnsiColor::Magenta);
 const WHITE: Ansi = Color::Ansi(AnsiColor::White);
 
 /// Clap help/error styles.
@@ -83,6 +84,26 @@ impl CliStyle {
     pub fn accent(self, text: impl std::fmt::Display) -> String {
         self.paint(Style::new().fg_color(Some(CYAN)), text)
     }
+
+    /// Skill names — magenta so they read apart from cyan paths/accents.
+    pub fn skill(self, text: impl std::fmt::Display) -> String {
+        self.paint(Style::new().fg_color(Some(MAGENTA)).effects(Effects::BOLD), text)
+    }
+
+    /// Clickable terminal hyperlink (OSC 8). Plain label when styling is off.
+    pub fn link(self, url: &str, text: impl std::fmt::Display) -> String {
+        let label = text.to_string();
+        if !self.enabled {
+            return label;
+        }
+        let painted = self.paint(
+            Style::new()
+                .fg_color(Some(CYAN))
+                .effects(Effects::UNDERLINE),
+            &label,
+        );
+        format!("\u{1b}]8;;{url}\u{1b}\\{painted}\u{1b}]8;;\u{1b}\\")
+    }
 }
 
 fn color_enabled() -> bool {
@@ -99,6 +120,11 @@ mod tests {
         assert_eq!(style.success("OK"), "OK");
         assert_eq!(style.error("nope"), "nope");
         assert_eq!(style.accent("tui-design"), "tui-design");
+        assert_eq!(style.skill("manage-tink"), "manage-tink");
+        assert_eq!(
+            style.link("https://github.com/jon-devlapaz/tink-skills", "tink-skills"),
+            "tink-skills"
+        );
         assert!(!style.enabled());
     }
 
@@ -109,6 +135,15 @@ mod tests {
         assert!(painted.contains("OK"), "{painted}");
         assert!(painted.contains('\u{1b}'), "{painted}");
         assert_ne!(painted, "OK");
+        let skill = style.skill("manage-tink");
+        assert!(skill.contains("manage-tink"), "{skill}");
+        assert!(skill.contains('\u{1b}'), "{skill}");
+        let link = style.link("https://github.com/jon-devlapaz/tink-skills", "tink-skills");
+        assert!(link.contains("tink-skills"), "{link}");
+        assert!(
+            link.contains("\u{1b}]8;;https://github.com/jon-devlapaz/tink-skills\u{1b}\\"),
+            "{link}"
+        );
     }
 
     #[test]

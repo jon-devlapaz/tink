@@ -158,8 +158,13 @@ cargo uninstall tink
 
 ```console
 cargo test
-cargo run -q -- init
+./tink-test init
+./tink-test skill list --home
 ```
+
+`./tink-test` builds this checkout and runs `target/debug/tink` (not
+`~/.local/bin/tink`). It forces `TINK_HOME` to `.tink-test-home/` (override with
+`TINK_TEST_HOME`) so dogfood does not touch `~/.tink`.
 
 See [ZEN.md](ZEN.md). Flag-level detail also lives in `tink --help` and
 `ACCEPTANCE.md`.

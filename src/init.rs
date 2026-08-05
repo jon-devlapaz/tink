@@ -30,19 +30,28 @@ pub struct InitOptions {
 }
 
 #[derive(Debug)]
+pub struct InstalledSkill {
+    pub name: String,
+    pub created: bool,
+}
+
+#[derive(Debug)]
 pub struct InitReport {
     pub skills_path: PathBuf,
     pub skills_created: bool,
     pub inventory_home: PathBuf,
     pub inventory_created: bool,
     pub zen_written: bool,
-    pub tink_skills_added: Vec<String>,
-    pub manage_tink_added: Option<String>,
+    pub tink_skills_added: Vec<InstalledSkill>,
+    pub manage_tink_added: Option<InstalledSkill>,
 }
 
 /// Ask `[y/N]` when `explicit` is unset and stdin is a TTY; otherwise use
 /// `explicit` or default `false`.
-pub fn opt_in(explicit: Option<bool>, question: &str) -> Result<bool, Error> {
+///
+/// `question` is printed as-is (callers apply styling, including purple skill names).
+/// Optional `hint` is printed above the prompt in muted style.
+pub fn opt_in(explicit: Option<bool>, question: &str, hint: Option<&str>) -> Result<bool, Error> {
     if let Some(value) = explicit {
         return Ok(value);
     }
@@ -50,7 +59,10 @@ pub fn opt_in(explicit: Option<bool>, question: &str) -> Result<bool, Error> {
         return Ok(false);
     }
     let style = CliStyle::auto_stdout();
-    print!("{} {}", style.warn(question), style.accent("[y/N] "));
+    if let Some(hint) = hint {
+        println!("{}", style.muted(hint));
+    }
+    print!("{} {}", question, style.accent("[y/N] "));
     io::stdout()
         .flush()
         .map_err(|e| Error::msg(format!("prompt: {e}")))?;
@@ -61,6 +73,41 @@ pub fn opt_in(explicit: Option<bool>, question: &str) -> Result<bool, Error> {
         .map_err(|e| Error::msg(format!("prompt: {e}")))?;
     let answer = line.trim().to_ascii_lowercase();
     Ok(answer == "y" || answer == "yes")
+}
+
+/// Like [`opt_in`], but offers `r` to print embedded `ZEN.md` before deciding.
+fn opt_in_zen(explicit: Option<bool>) -> Result<bool, Error> {
+    if let Some(value) = explicit {
+        return Ok(value);
+    }
+    if !io::stdin().is_terminal() {
+        return Ok(false);
+    }
+    let style = CliStyle::auto_stdout();
+    let question = style.warn("Add tink's maintainability principles (ZEN.md)?");
+    let hint = style.muted("r = print ZEN.md without adding it");
+    loop {
+        println!("{hint}");
+        print!("{} {}", question, style.accent("[y/N/r] "));
+        io::stdout()
+            .flush()
+            .map_err(|e| Error::msg(format!("prompt: {e}")))?;
+        let mut line = String::new();
+        io::stdin()
+            .lock()
+            .read_line(&mut line)
+            .map_err(|e| Error::msg(format!("prompt: {e}")))?;
+        let answer = line.trim().to_ascii_lowercase();
+        match answer.as_str() {
+            "y" | "yes" => return Ok(true),
+            "r" | "read" => {
+                println!();
+                println!("{}", style.muted(ZEN.trim_end()));
+                println!();
+            }
+            _ => return Ok(false),
+        }
+    }
 }
 
 fn write_zen(project_root: &Path) -> Result<bool, Error> {
@@ -106,13 +153,22 @@ pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitRep
     require_directory(&skills)?;
     require_file(&readme)?;
 
-    let with_zen = opt_in(
-        options.with_zen,
-        "Add Tink's maintainability principles (ZEN.md)?",
-    )?;
+    let style = CliStyle::auto_stdout();
+    let with_zen = opt_in_zen(options.with_zen)?;
     let with_tink_skills = opt_in(
         options.with_tink_skills,
-        "Add skill-scout and skill-eval-loop from tink-skills?",
+        &format!(
+            "{}{} and {}{}{}?",
+            style.warn("Add "),
+            style.skill("skill-scout"),
+            style.skill("skill-eval-loop"),
+            style.warn(" from "),
+            style.link(
+                &format!("https://github.com/{TINK_SKILLS_SOURCE}"),
+                "tink-skills",
+            ),
+        ),
+        Some("Optional GitHub bundle — click tink-skills to open the repo"),
     )?;
     let with_manage_tink = options.with_manage_tink.unwrap_or(true);
 
@@ -135,7 +191,11 @@ pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitRep
     };
 
     let manage_tink_added = if with_manage_tink {
-        Some(manage_tink::install_manage_tink(project_root)?)
+        let outcome = manage_tink::install_manage_tink(project_root)?;
+        Some(InstalledSkill {
+            name: outcome.name,
+            created: outcome.created,
+        })
     } else {
         None
     };
@@ -143,8 +203,11 @@ pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitRep
     let mut tink_skills_added = Vec::new();
     if with_tink_skills {
         for name in TINK_SKILLS {
-            let outcome = add::add_skill(project_root, TINK_SKILLS_SOURCE, Some(name))?;
-            tink_skills_added.push(outcome.name);
+            let outcome = add::add_skill_quiet(project_root, TINK_SKILLS_SOURCE, Some(name))?;
+            tink_skills_added.push(InstalledSkill {
+                name: outcome.name,
+                created: outcome.created,
+            });
         }
     }
 
