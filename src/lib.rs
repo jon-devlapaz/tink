@@ -227,9 +227,10 @@ fn dispatch_init(
     }
     if report.zen_written {
         println!(
-            "{} {}",
+            "{} {} {}",
             style.success("Added"),
-            style.accent("ZEN.md maintainability principles")
+            style.rainbow("ZEN.md"),
+            style.accent("maintainability principles")
         );
     }
     if let Some(skill) = &report.manage_tink_added {

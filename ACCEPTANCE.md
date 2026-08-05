@@ -70,7 +70,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | A3 | `skill add` when project target exists and differs | Exit ≠ 0; "Refusing to overwrite"; project target unchanged |
 | A4 | `skill add` skill tree containing a symlink | Exit ≠ 0; refuse |
 | A5 | `skill add` multi-skill source without `--skill` | Exit ≠ 0; lists choices |
-| A6 | `skill add` when home stash has same name but different tree (project missing) | Exit 0; installs project; repairs stash; warns on stderr |
+| A6 | `skill add` when home stash has same name but different tree (project missing) | Exit 0; installs project; repairs stash; warns on stderr that the home copy was updated |
 | A7 | `skill add` skill named `by-project` | Exit ≠ 0; reserved name; no project/stash write |
 | A8 | `skill add` same GitHub tip already stashed at home | Exit 0; installs project from stash (no clone); stdout notes stash |
 

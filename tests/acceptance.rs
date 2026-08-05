@@ -369,7 +369,7 @@ fn a6_add_repairs_divergent_home_archive_and_installs_project() {
         .args(["skill", "add", second.to_str().unwrap()])
         .assert()
         .success()
-        .stderr(predicate::str::contains("Repaired divergent stash"));
+        .stderr(predicate::str::contains("Updated home copy of"));
     assert!(Workspace::skill_path(&other, "demo-skill")
         .join("SKILL.md")
         .is_file());

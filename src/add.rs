@@ -43,7 +43,7 @@ fn place_skill(
         let err = CliStyle::auto_stderr();
         eprintln!(
             "{}",
-            err.warn(format!("Repaired divergent stash for {}", skill.name))
+            err.warn(format!("Updated home copy of {}", skill.name))
         );
     }
     let (installed, created) = skills::install_local(skill, destination_root, provenance)?;
