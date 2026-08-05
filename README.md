@@ -163,7 +163,7 @@ cargo test
 ```
 
 `./tink-test` builds this checkout and runs `target/debug/tink` (not
-`~/.local/bin/tink`). It forces `TINK_HOME` to `.tink-test-home/` (override with
+`~/.local/bin/tink`). It forces `TINK_HOME` to `~/.tink-test` (override with
 `TINK_TEST_HOME`) so dogfood does not touch `~/.tink`.
 
 See [ZEN.md](ZEN.md). Flag-level detail also lives in `tink --help` and

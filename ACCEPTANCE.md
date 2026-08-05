@@ -113,7 +113,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | H3 | `skill add --stash <missing>` | Exit ≠ 0; mentions not found / missing; **no** GitHub network fetch |
 | H4 | `skill add --stash <name>` when project skill exists and differs | Exit ≠ 0; "Refusing to overwrite"; project target unchanged |
 | H5 | `skill harvest` with fixture `$HOME/.agents/skills` + `$HOME/.claude/skills` + `TINK_HOME` | Copies complete skill trees into `$TINK_HOME/skills/`; no project `.agents` skill writes from harvest |
-| H6 | `skill harvest` when stash already identical | Exit 0; unchanged |
+| H6 | `skill harvest` when stash already identical | Exit 0; summary counts already present; no per-skill already-present lines |
 | H7 | `skill harvest` when stash diverges | Exit 0; stash unchanged; stderr skip warn |
 | H8 | `skill harvest` skips home stash sources and unsafe (symlink-inside) skill trees; still harvests cwd skills under `TINK_HOME` outside `skills/` | Stash/unsafe omitted; non-stash path under home deposited |
 

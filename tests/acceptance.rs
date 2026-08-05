@@ -833,7 +833,7 @@ fn h5_skill_harvest_copies_harness_skills_into_stash() {
         .assert()
         .success()
         .stdout(
-            predicate::str::contains("created")
+            predicate::str::contains("Harvested")
                 .and(predicate::str::contains("agents-skill"))
                 .and(predicate::str::contains("claude-skill"))
                 .and(predicate::str::contains("nested-skill")),
@@ -865,7 +865,11 @@ fn h6_skill_harvest_identical_is_unchanged() {
         .args(["skill", "harvest"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("unchanged").and(predicate::str::contains("same-skill")));
+        .stdout(
+            predicate::str::contains("already present")
+                .and(predicate::str::contains("0 harvested"))
+                .and(predicate::str::contains("same-skill").not()),
+        );
 }
 
 #[test]
@@ -887,7 +891,7 @@ fn h7_skill_harvest_divergent_skips_without_repair() {
         .args(["skill", "harvest"])
         .assert()
         .success()
-        .stderr(predicate::str::contains("skipped").and(predicate::str::contains("demo-skill")));
+        .stderr(predicate::str::contains("Skipped").and(predicate::str::contains("demo-skill")));
 
     let after = fs::read_to_string(ws.stash_skill("demo-skill").join("SKILL.md")).unwrap();
     assert_eq!(before, after, "create-only must not repair divergent stash");

@@ -257,13 +257,13 @@ fn dispatch_init(
     if report.inventory_created {
         println!(
             "{} {}",
-            style.success("New home inventory at"),
+            style.success("New home at"),
             style.accent(report.inventory_home.display())
         );
     } else {
         println!(
             "{} {}",
-            style.muted("Home inventory at"),
+            style.muted("Home at"),
             style.accent(report.inventory_home.display())
         );
     }
@@ -376,24 +376,19 @@ fn dispatch_skill_harvest(cwd: &Path) -> Result<(), Error> {
             harvest::HarvestAction::Created => {
                 println!(
                     "{} {} {}",
-                    out.success("created"),
+                    out.success("Harvested"),
                     out.skill(&event.name),
                     out.muted(event.source.display())
                 );
             }
             harvest::HarvestAction::Unchanged => {
-                println!(
-                    "{} {} {}",
-                    out.muted("unchanged"),
-                    out.skill(&event.name),
-                    out.muted(event.source.display())
-                );
+                // Quiet no-ops; counts appear in the summary.
             }
             harvest::HarvestAction::Skipped => {
                 let detail = event.detail.as_deref().unwrap_or("skipped");
                 eprintln!(
                     "{} {} {} ({})",
-                    err.warn("skipped"),
+                    err.warn("Skipped"),
                     err.skill(&event.name),
                     err.muted(event.source.display()),
                     detail
@@ -401,13 +396,18 @@ fn dispatch_skill_harvest(cwd: &Path) -> Result<(), Error> {
             }
         }
     }
+    let home = home::resolve_home()?;
     println!(
-        "{} created={} unchanged={} skipped={}",
+        "{} {} {} · {} {} · {} {}",
         out.success("Harvest"),
         out.accent(report.created),
+        out.muted("harvested"),
         out.accent(report.unchanged),
-        out.accent(report.skipped)
+        out.muted("already present"),
+        out.accent(report.skipped),
+        out.muted("skipped")
     );
+    println!("{} {}", out.muted("Home"), out.accent(home.display()));
     Ok(())
 }
 
