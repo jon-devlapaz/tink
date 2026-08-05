@@ -12,8 +12,7 @@ from GitHub Releases via `tink update`.
 below has an automated test that passes on macOS with `git` on `PATH`.
 
 **Out of v1:** weekly GitHub update workflows, private GitHub auth, Windows,
-Linux CI as a gate, pruning the home stash, bare-name stash promote without
-`--stash`.
+Linux CI as a gate, pruning the home stash.
 
 **Dogfood:** Prefer an installed `tink` from this repo, or `cargo run -q -- …`.
 
@@ -25,8 +24,7 @@ Skill verbs live only under `tink skill`. There are no top-level `add` /
 | Command | Meaning |
 |---|---|
 | `tink init` | Create `.agents/skills/`; install `manage-tink` by default; optional ZEN + tink-skills; ensure `~/.tink` |
-| `tink skill add <source> [--skill <name>]` | Install one local or public GitHub skill |
-| `tink skill add --stash <name>` | Install one skill from the home stash (`$TINK_HOME/skills/<name>/`) |
+| `tink skill add <source> [--skill <name>]` | Install one local path, public GitHub skill, or home stash skill by name |
 | `tink skill list` | List project skills under `.agents/skills/` (read-only) |
 | `tink skill list --home` | List offline by-project catalog (`project`, `root`, `skill` TSV) |
 | `tink skill list --stash` | List skill names in the home stash (`skills/<name>/` with `SKILL.md`) |
@@ -72,7 +70,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | A3 | `skill add` when project target exists and differs | Exit ≠ 0; "Refusing to overwrite"; project target unchanged |
 | A4 | `skill add` skill tree containing a symlink | Exit ≠ 0; refuse |
 | A5 | `skill add` multi-skill source without `--skill` | Exit ≠ 0; lists choices |
-| A6 | `skill add` when home stash has same name but different tree (project missing) | Exit 0; installs project; repairs stash; warns on stderr |
+| A6 | `skill add` when home stash has same name but different tree (project missing) | Exit 0; installs project; repairs stash; warns on stderr that the home copy was updated |
 | A7 | `skill add` skill named `by-project` | Exit ≠ 0; reserved name; no project/stash write |
 | A8 | `skill add` same GitHub tip already stashed at home | Exit 0; installs project from stash (no clone); stdout notes stash |
 
@@ -109,9 +107,9 @@ Ids are stable. Tests must name or comment the id they prove.
 | Id | Action | Expect |
 |---|---|---|
 | H1 | `skill list --stash` after init+add | Exit 0; stdout includes stashed skill names (at least the added skill) |
-| H2 | `skill add --stash <name>` when stash has that skill and project lacks it | Exit 0; installs under `.agents/skills/<name>/`; catalogs name; **no** network; stdout notes stash |
-| H3 | `skill add --stash <missing>` | Exit ≠ 0; mentions not found / missing; **no** GitHub network fetch |
-| H4 | `skill add --stash <name>` when project skill exists and differs | Exit ≠ 0; "Refusing to overwrite"; project target unchanged |
+| H2 | `skill add <name>` when stash has that skill and project lacks it | Exit 0; installs under `.agents/skills/<name>/`; catalogs name; **no** network; stdout notes stash |
+| H3 | `skill add <missing-bare-name>` | Exit ≠ 0; mentions stash not found / missing; **no** GitHub network fetch |
+| H4 | `skill add <name>` when stash has skill and project skill exists and differs | Exit ≠ 0; "Refusing to overwrite"; project target unchanged |
 | H5 | `skill harvest` with fixture `$HOME/.agents/skills` + `$HOME/.claude/skills` + `TINK_HOME` | Copies complete skill trees into `$TINK_HOME/skills/`; no project `.agents` skill writes from harvest |
 | H6 | `skill harvest` when stash already identical | Exit 0; summary counts already present; no per-skill already-present lines |
 | H7 | `skill harvest` when stash diverges | Exit 0; stash unchanged; stderr skip warn |
@@ -144,7 +142,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | X2 | `skill remove <missing>` | Exit ≠ 0; mentions not found / missing; nothing deleted |
 | X3 | `skill remove` when `.agents` is a symlink | Exit ≠ 0; mentions symlink; tree unchanged |
 | X4 | Successful `skill remove <name>` | Does **not** delete `$TINK_HOME/skills/<name>/` |
-| X5 | `init` installs `manage-tink` | Embedded skill documents `tink skill remove NAME` as the only remove path; states remove drops the catalog name and destroy drops the project catalog entry; home stash remains unpruned |
+| X5 | `init` installs `manage-tink` | Embedded skill documents `tink skill remove NAME` as the only remove path; documents bare `tink skill add NAME` for stash promote (not `add --stash`); states remove drops the catalog name and destroy drops the project catalog entry; home stash remains unpruned |
 
 ### Destroy
 

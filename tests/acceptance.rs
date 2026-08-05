@@ -369,7 +369,7 @@ fn a6_add_repairs_divergent_home_archive_and_installs_project() {
         .args(["skill", "add", second.to_str().unwrap()])
         .assert()
         .success()
-        .stderr(predicate::str::contains("Repaired divergent stash"));
+        .stderr(predicate::str::contains("Updated home copy of"));
     assert!(Workspace::skill_path(&other, "demo-skill")
         .join("SKILL.md")
         .is_file());
@@ -735,7 +735,7 @@ fn h2_skill_add_stash_installs_into_project() {
         .assert()
         .success();
     ws.cmd(&app)
-        .args(["skill", "add", "--stash", "stash-skill"])
+        .args(["skill", "add", "stash-skill"])
         .assert()
         .success()
         .stdout(
@@ -757,7 +757,7 @@ fn h3_skill_add_stash_missing_refuses_without_github() {
         .assert()
         .success();
     ws.cmd(&project)
-        .args(["skill", "add", "--stash", "no-such-skill"])
+        .args(["skill", "add", "no-such-skill"])
         .assert()
         .failure()
         .stderr(
@@ -792,7 +792,7 @@ fn h4_skill_add_stash_refuses_overwrite_when_diverged() {
         "project local body",
     );
     ws.cmd(&app)
-        .args(["skill", "add", "--stash", "demo-skill"])
+        .args(["skill", "add", "demo-skill"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("Refusing to overwrite"));
@@ -1511,6 +1511,17 @@ fn x5_manage_tink_documents_remove_and_catalog_sync() {
     assert!(
         skill_md.contains("tink skill remove NAME"),
         "manage-tink must authorize skill remove"
+    );
+    assert!(
+        skill_md.contains("tink skill add NAME")
+            && skill_md.contains("bare stash")
+            && !skill_md.contains("add --stash"),
+        "manage-tink must teach bare-name stash promote, not add --stash: {skill_md}"
+    );
+    assert!(
+        commands.contains("tink skill add NAME")
+            && !commands.contains("add --stash"),
+        "commands.md must list bare-name stash promote, not add --stash: {commands}"
     );
     assert!(
         skill_md.contains("by-project catalog")

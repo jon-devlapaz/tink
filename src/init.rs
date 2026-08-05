@@ -84,11 +84,23 @@ fn opt_in_zen(explicit: Option<bool>) -> Result<bool, Error> {
         return Ok(false);
     }
     let style = CliStyle::auto_stdout();
-    let question = style.warn("Add tink's maintainability principles (ZEN.md)?");
-    let hint = style.muted("r = print ZEN.md without adding it");
+    let zen = style.rainbow("ZEN.md");
+    let r = style.rainbow("r");
+    let question = format!(
+        "{} ({})?",
+        style.warn("Add tink's maintainability principles"),
+        zen
+    );
+    let hint = format!("{r} = print {zen} without adding it");
+    let choices = format!(
+        "[{}/{}/{}] ",
+        style.accent("y"),
+        style.accent("N"),
+        r
+    );
     loop {
         println!("{hint}");
-        print!("{} {}", question, style.accent("[y/N/r] "));
+        print!("{question} {choices}");
         io::stdout()
             .flush()
             .map_err(|e| Error::msg(format!("prompt: {e}")))?;

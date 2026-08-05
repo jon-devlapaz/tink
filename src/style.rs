@@ -11,8 +11,11 @@ const GREEN: Ansi = Color::Ansi(AnsiColor::Green);
 const RED: Ansi = Color::Ansi(AnsiColor::Red);
 const YELLOW: Ansi = Color::Ansi(AnsiColor::Yellow);
 const CYAN: Ansi = Color::Ansi(AnsiColor::Cyan);
+const BLUE: Ansi = Color::Ansi(AnsiColor::Blue);
 const MAGENTA: Ansi = Color::Ansi(AnsiColor::Magenta);
 const WHITE: Ansi = Color::Ansi(AnsiColor::White);
+
+const RAINBOW: [Ansi; 6] = [RED, YELLOW, GREEN, CYAN, BLUE, MAGENTA];
 
 /// Clap help/error styles.
 pub const CLAP_STYLES: Styles = Styles::styled()
@@ -90,6 +93,28 @@ impl CliStyle {
         self.paint(Style::new().fg_color(Some(MAGENTA)).effects(Effects::BOLD), text)
     }
 
+    /// Per-character rainbow (init ZEN tease). Plain text when styling is off.
+    pub fn rainbow(self, text: impl std::fmt::Display) -> String {
+        let text = text.to_string();
+        if !self.enabled {
+            return text;
+        }
+        let mut out = String::with_capacity(text.len() * 12);
+        let mut color_i = 0usize;
+        for ch in text.chars() {
+            if ch.is_whitespace() {
+                out.push(ch);
+                continue;
+            }
+            let style = Style::new()
+                .fg_color(Some(RAINBOW[color_i % RAINBOW.len()]))
+                .effects(Effects::BOLD);
+            out.push_str(&format!("{}{}{}", style.render(), ch, style.render_reset()));
+            color_i += 1;
+        }
+        out
+    }
+
     /// Clickable terminal hyperlink (OSC 8). Plain label when styling is off.
     pub fn link(self, url: &str, text: impl std::fmt::Display) -> String {
         let label = text.to_string();
@@ -121,6 +146,7 @@ mod tests {
         assert_eq!(style.error("nope"), "nope");
         assert_eq!(style.accent("tui-design"), "tui-design");
         assert_eq!(style.skill("manage-tink"), "manage-tink");
+        assert_eq!(style.rainbow("ZEN.md"), "ZEN.md");
         assert_eq!(
             style.link("https://github.com/jon-devlapaz/tink-skills", "tink-skills"),
             "tink-skills"
@@ -138,6 +164,10 @@ mod tests {
         let skill = style.skill("manage-tink");
         assert!(skill.contains("manage-tink"), "{skill}");
         assert!(skill.contains('\u{1b}'), "{skill}");
+        let rainbow = style.rainbow("ZEN.md");
+        assert!(rainbow.contains('Z') && rainbow.contains('N'), "{rainbow}");
+        assert!(rainbow.contains('\u{1b}'), "{rainbow}");
+        assert_ne!(rainbow, "ZEN.md");
         let link = style.link("https://github.com/jon-devlapaz/tink-skills", "tink-skills");
         assert!(link.contains("tink-skills"), "{link}");
         assert!(

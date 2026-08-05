@@ -12,7 +12,7 @@ form for add, list, check, refresh, and remove.
 | Init without embedded manage-tink | add `--no-manage-tink` |
 | Add one skill | `tink skill add SOURCE` |
 | Add from multi-skill repo | `tink skill add SOURCE --skill NAME` |
-| Add from home stash | `tink skill add --stash NAME` |
+| Add from home stash | `tink skill add NAME` |
 | Harvest harness skills into home stash | `tink skill harvest` |
 | List (this project) | `tink skill list` |
 | List (home catalog) | `tink skill list --home` |
@@ -30,7 +30,7 @@ form for add, list, check, refresh, and remove.
 - Home (`$TINK_HOME` or `~/.tink`) is not an agent discovery root. Installs
   stash trees at `skills/<name>/`. List the stash with
   `tink skill list --stash`; promote into a project with
-  `tink skill add --stash NAME`. `tink skill harvest` copies complete trees
+  `tink skill add NAME` (bare stash skill name). `tink skill harvest` copies complete trees
   from known harness roots into the stash create-only (never overwrites a
   divergent stash entry). Global roots include `~/.agents/skills`,
   `~/.claude/skills`, `~/.codex/skills`, `~/.cursor/skills`,
