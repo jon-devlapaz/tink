@@ -142,7 +142,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | X2 | `skill remove <missing>` | Exit ≠ 0; mentions not found / missing; nothing deleted |
 | X3 | `skill remove` when `.agents` is a symlink | Exit ≠ 0; mentions symlink; tree unchanged |
 | X4 | Successful `skill remove <name>` | Does **not** delete `$TINK_HOME/skills/<name>/` |
-| X5 | `init` installs `manage-tink` | Embedded skill documents `tink skill remove NAME` as the only remove path; states remove drops the catalog name and destroy drops the project catalog entry; home stash remains unpruned |
+| X5 | `init` installs `manage-tink` | Embedded skill documents `tink skill remove NAME` as the only remove path; documents bare `tink skill add NAME` for stash promote (not `add --stash`); states remove drops the catalog name and destroy drops the project catalog entry; home stash remains unpruned |
 
 ### Destroy
 

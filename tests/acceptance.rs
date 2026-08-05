@@ -1513,6 +1513,17 @@ fn x5_manage_tink_documents_remove_and_catalog_sync() {
         "manage-tink must authorize skill remove"
     );
     assert!(
+        skill_md.contains("tink skill add NAME")
+            && skill_md.contains("bare stash")
+            && !skill_md.contains("add --stash"),
+        "manage-tink must teach bare-name stash promote, not add --stash: {skill_md}"
+    );
+    assert!(
+        commands.contains("tink skill add NAME")
+            && !commands.contains("add --stash"),
+        "commands.md must list bare-name stash promote, not add --stash: {commands}"
+    );
+    assert!(
         skill_md.contains("by-project catalog")
             && (skill_md.contains("drops") || skill_md.contains("drop")),
         "manage-tink must state remove/destroy sync the catalog: {skill_md}"

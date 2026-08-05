@@ -96,6 +96,7 @@ skill trees; catalog holds by-project **names** only.
 
 ```console
 tink skill add ../my-skill
+tink skill add skill-name
 tink skill add owner/repository --skill skill-name
 tink skill add jon-devlapaz/tink-skills --skill skill-eval-loop
 tink skill list
@@ -105,6 +106,7 @@ tink skill refresh skill-name
 tink skill remove skill-name
 ```
 
+- Bare `skill-name` promotes from the home stash (`tink skill list --stash`).
 - `--skill` when the source repo publishes several skills.
 - Refresh only clean GitHub imports; local edits are refused.
 - tink does not overwrite a project skill that differs from what it would
