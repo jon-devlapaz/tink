@@ -99,6 +99,26 @@ fn existing_home(home: Option<&Path>) -> Result<Option<PathBuf>, Error> {
     Ok(Some(home))
 }
 
+/// Whether withdraw/forget may mutate this basename entry for `project_root`.
+///
+/// Non-empty `meta.root` must canonicalize to `project_root` (already
+/// canonical). Missing/empty `root` keeps basename-keyed behavior for legacy
+/// metas. Unresolvable stored roots soft-refuse so a sibling basename cannot
+/// wipe another project's catalog.
+fn catalog_owned_by(value: &Value, project_root: &Path) -> bool {
+    let Some(stored) = value
+        .get("root")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+    else {
+        return true;
+    };
+    match Path::new(stored).canonicalize() {
+        Ok(canon) => canon == project_root,
+        Err(_) => false,
+    }
+}
+
 /// Record that `skill_name` is installed in `project_root`.
 ///
 /// Last writer wins on `meta.json` `root` when two projects share a basename.
@@ -146,7 +166,8 @@ pub(crate) fn deposit_skill_at(
 
 /// Drop `skill_name` from the by-project catalog for `project_root`.
 ///
-/// Soft success when home, project entry, or name is already absent. Never
+/// Soft success when home, project entry, or name is already absent, or when
+/// `meta.root` belongs to a different project sharing this basename. Never
 /// creates inventory. Preserves existing meta `name`/`root` when siblings
 /// remain. Removes the project catalog directory when no names remain.
 pub fn withdraw_skill(project_root: &Path, skill_name: &str) -> Result<(), Error> {
@@ -174,6 +195,9 @@ pub(crate) fn withdraw_skill_at(
     refuse_symlink(&meta_path)?;
 
     let value = parse_meta(&meta_path)?;
+    if !catalog_owned_by(&value, &project_root) {
+        return Ok(());
+    }
     let mut skills = skills_from_meta(&value);
     if !skills.remove(skill_name) {
         return Ok(());
@@ -208,7 +232,8 @@ pub(crate) fn withdraw_skill_at(
 
 /// Remove this project's by-project catalog entry entirely.
 ///
-/// Soft success when absent. Does not create inventory or touch stash trees.
+/// Soft success when absent, or when `meta.root` belongs to a different
+/// project sharing this basename. Does not create inventory or touch stash.
 pub fn forget_project(project_root: &Path) -> Result<(), Error> {
     forget_project_at(None, project_root)
 }
@@ -223,6 +248,14 @@ pub(crate) fn forget_project_at(home: Option<&Path>, project_root: &Path) -> Res
         return Ok(());
     };
     let catalog = project_catalog_dir(&home, &project_root)?;
+    let meta_path = catalog.join("meta.json");
+    if meta_path.is_file() {
+        refuse_symlink(&meta_path)?;
+        let value = parse_meta(&meta_path)?;
+        if !catalog_owned_by(&value, &project_root) {
+            return Ok(());
+        }
+    }
     remove_catalog_dir(&catalog)
 }
 
@@ -415,11 +448,10 @@ mod tests {
         let catalog = deposit_skill_at(Some(&home), &app, "keep").unwrap();
         deposit_skill_at(Some(&home), &app, "drop").unwrap();
 
-        // Simulate a divergent root already stored; withdraw must not rewrite it.
+        // Custom name with matching root: withdraw must preserve name/root.
         let before: Value =
             serde_json::from_str(&fs::read_to_string(catalog.join("meta.json")).unwrap()).unwrap();
         let mut patched = before.clone();
-        patched["root"] = json!("/preserved/root");
         patched["name"] = json!("preserved-name");
         write_meta(&catalog.join("meta.json"), &patched).unwrap();
 
@@ -427,7 +459,7 @@ mod tests {
         let after: Value =
             serde_json::from_str(&fs::read_to_string(catalog.join("meta.json")).unwrap()).unwrap();
         assert_eq!(after["name"], "preserved-name");
-        assert_eq!(after["root"], "/preserved/root");
+        assert_eq!(after["root"], before["root"]);
         assert_eq!(
             after["skills"]
                 .as_array()
@@ -436,6 +468,38 @@ mod tests {
                 .filter_map(|s| s.as_str())
                 .collect::<Vec<_>>(),
             vec!["keep"]
+        );
+    }
+
+    #[test]
+    fn withdraw_and_forget_skip_foreign_basename_entry() {
+        let temp = TempDir::new().unwrap();
+        let home = temp.path().join("home");
+        let clone_a = temp.path().join("clone-a").join("app");
+        let clone_b = temp.path().join("clone-b").join("app");
+        fs::create_dir_all(&clone_a).unwrap();
+        fs::create_dir_all(&clone_b).unwrap();
+        deposit_skill_at(Some(&home), &clone_a, "alpha").unwrap();
+        deposit_skill_at(Some(&home), &clone_a, "beta").unwrap();
+
+        withdraw_skill_at(Some(&home), &clone_b, "alpha").unwrap();
+        assert_eq!(
+            list_catalog(Some(&home))
+                .unwrap()
+                .iter()
+                .map(|e| e.skill.as_str())
+                .collect::<Vec<_>>(),
+            vec!["alpha", "beta"]
+        );
+
+        forget_project_at(Some(&home), &clone_b).unwrap();
+        assert_eq!(
+            list_catalog(Some(&home))
+                .unwrap()
+                .iter()
+                .map(|e| e.skill.as_str())
+                .collect::<Vec<_>>(),
+            vec!["alpha", "beta"]
         );
     }
 
