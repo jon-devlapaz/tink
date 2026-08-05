@@ -26,6 +26,9 @@ Successful installs:
 - stash skill trees under `skills/<name>/` (divergent entries are repaired)
 - record skill **names** under `catalog/by-project/<project>/meta.json`
 
+`skill remove` and `destroy` update that name catalog; they do not delete
+stash trees.
+
 Default location: `~/.tink` (override with `TINK_HOME`).
 ";
 

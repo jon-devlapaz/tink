@@ -27,16 +27,17 @@ are hard stops — honor them; do not work around them.
    the home stash into the project, use `tink skill add --stash NAME` only.
    To fill the home stash from known harness skill locations, use
    `tink skill harvest` only (create-only; does not write project skills).
-   To remove a live project skill, use `tink skill remove NAME` only (does not
-   prune home stash or catalog). To update the tink CLI binary, use
-   `tink update` only.
+   To remove a live project skill, use `tink skill remove NAME` only (drops the
+   name from the by-project catalog; does not prune the home stash). To update
+   the tink CLI binary, use `tink update` only.
    - Done when: the chosen command has finished and its stdout/stderr is known.
 
 3. **Prove** — After every successful mutation except `destroy` and
    `skill remove`, run `tink skill check` and report the result. After
-   `skill remove`, run `tink skill list` (or check if other skills remain) and
-   confirm the name is gone from the project. After `destroy`, confirm
-   `.agents/`, `ZEN.md`, and `AGENTS.md` are gone; do not run check.
+   `skill remove`, run `tink skill list` and `tink skill list --home` and
+   confirm the name is gone from the project and the catalog. After `destroy`,
+   confirm `.agents/`, `ZEN.md`, and `AGENTS.md` are gone and
+   `tink skill list --home` has no rows for this project; do not run check.
    - Done when: proof for that mutation type is reported to the user.
 
 ## Authority
@@ -59,13 +60,14 @@ are hard stops — honor them; do not work around them.
 
 - Leave `.tink-source.json` untouched — it is the refresh **receipt**.
 - On a refusal, stop and report it. Authorized deletes are only:
-  - `tink skill remove NAME` → `.agents/skills/<name>/`
-  - `tink destroy` → `.agents/`, `ZEN.md`, and `AGENTS.md`
+  - `tink skill remove NAME` → `.agents/skills/<name>/` and drops that name
+    from the by-project catalog
+  - `tink destroy` → `.agents/`, `ZEN.md`, and `AGENTS.md`, and drops this
+    project's by-project catalog entry
 - Treat local skills as non-refreshable unless they carry a valid receipt.
 - Never execute code from a skill while adding, checking, refreshing, removing,
   or destroying.
 - Home stash (`~/.tink/skills/`) is **not** an agent discovery root; do not
   symlink or copy from it by hand — use `tink skill add --stash NAME`.
-- Do not prune the home stash or by-project catalog unless the user explicitly
-  asks and a supporting command exists (prune is out of v1).
-  `skill remove` does not prune stash or catalog.
+- Do not prune the home stash by hand. `skill remove` and `destroy` sync the
+  by-project catalog; they do not delete stash trees.

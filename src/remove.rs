@@ -3,6 +3,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::catalog;
 use crate::error::Error;
 use crate::paths::{map_io, refuse_symlink};
 use crate::skills;
@@ -12,9 +13,8 @@ pub struct RemoveReport {
     pub removed: PathBuf,
 }
 
-/// Delete `<project>/.agents/skills/<name>/` only.
-///
-/// Does not touch `$TINK_HOME` stash trees or the by-project catalog.
+/// Delete `<project>/.agents/skills/<name>/` and drop that name from the
+/// by-project catalog. Does not touch `$TINK_HOME` stash trees.
 pub fn remove_skill(project_root: &Path, name: &str) -> Result<RemoveReport, Error> {
     if !skills::valid_skill_name(name) {
         return Err(Error::msg(format!("Invalid skill name: {name}")));
@@ -43,5 +43,6 @@ pub fn remove_skill(project_root: &Path, name: &str) -> Result<RemoveReport, Err
     }
 
     fs::remove_dir_all(&target).map_err(|e| map_io(&target, e))?;
+    catalog::withdraw_skill(project_root, name)?;
     Ok(RemoveReport { removed: target })
 }

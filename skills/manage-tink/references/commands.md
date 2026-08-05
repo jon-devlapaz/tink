@@ -49,7 +49,9 @@ form for add, list, check, refresh, and remove.
   `skill add`. Names are recorded in
   `catalog/by-project/<project>/meta.json`. List the catalog with
   `tink skill list --home` (TSV with header `project`, `root`, `skill`).
-  Do not hand-parse `meta.json` when the CLI is available. Destroy does not
-  delete home or prune that catalog or stash. `skill remove` deletes only
-  the project skill directory; it does not prune stash or catalog.
+  Do not hand-parse `meta.json` when the CLI is available. `skill remove`
+  deletes the project skill directory and drops that name from the by-project
+  catalog; it does not prune the home stash. `destroy` removes project
+  scaffolding and this project's catalog entry; it does not delete home stash
+  trees or other projects' catalog rows.
   Project skill overwrites are still refused.

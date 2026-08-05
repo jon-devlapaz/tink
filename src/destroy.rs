@@ -4,6 +4,7 @@ use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
+use crate::catalog;
 use crate::error::Error;
 use crate::paths::{map_io, refuse_symlink};
 use crate::style::CliStyle;
@@ -13,10 +14,10 @@ pub struct DestroyReport {
     pub removed: Vec<PathBuf>,
 }
 
-/// Remove `.agents/`, `ZEN.md`, and `AGENTS.md` from the project root.
-///
-/// Does not touch `~/.tink` or the by-project name catalog. Refuses symlinks.
-/// Requires `--yes` or an interactive `y` confirmation (default no).
+/// Remove `.agents/`, `ZEN.md`, and `AGENTS.md` from the project root, and drop
+/// this project's by-project catalog entry. Does not touch the home stash.
+/// Refuses symlinks. Requires `--yes` or an interactive `y` confirmation
+/// (default no).
 pub fn destroy_project(project_root: &Path, yes: bool) -> Result<DestroyReport, Error> {
     if !yes {
         confirm_destroy()?;
@@ -52,6 +53,7 @@ pub fn destroy_project(project_root: &Path, yes: bool) -> Result<DestroyReport, 
         removed.push(path);
     }
 
+    catalog::forget_project(project_root)?;
     Ok(DestroyReport { removed })
 }
 

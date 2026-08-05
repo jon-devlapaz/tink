@@ -71,7 +71,7 @@ pub enum Command {
         #[command(subcommand)]
         command: SkillCommand,
     },
-    /// Remove `.agents/`, `ZEN.md`, and `AGENTS.md` from this project
+    /// Remove `.agents/`, `ZEN.md`, `AGENTS.md`, and this project's catalog entry (not home stash)
     Destroy {
         /// Skip the confirmation prompt
         #[arg(long)]
@@ -110,7 +110,7 @@ pub enum SkillCommand {
         /// Optional skill name; default refreshes all imported skills
         name: Option<String>,
     },
-    /// Delete one project skill directory (not home stash or catalog)
+    /// Delete one project skill directory and drop it from the by-project catalog (not home stash)
     Remove {
         /// Skill directory name under `.agents/skills/`
         name: String,

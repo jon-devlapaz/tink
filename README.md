@@ -130,8 +130,9 @@ tink update
 
 If the GitHub tip is already in the stash and matches the tip byte-for-byte,
 `skill add` may install from the stash. If the stash differs, tink repairs it
-and warns. `skill remove` deletes only the project skill directory, not stash
-or catalog.
+and warns. `skill remove` deletes the project skill directory and drops that
+name from the by-project catalog; it does not delete home stash trees.
+`destroy` also drops this project's catalog entry.
 
 ### Uninstall the CLI
 
