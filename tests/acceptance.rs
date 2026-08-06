@@ -51,7 +51,7 @@ impl Workspace {
             .join("meta.json")
     }
 
-    fn stash_skill(&self, skill: &str) -> PathBuf {
+    fn library_skill(&self, skill: &str) -> PathBuf {
         self.inventory.join("skills").join(skill)
     }
 
@@ -63,8 +63,8 @@ impl Workspace {
             "expected {skill} in catalog: {raw}"
         );
         assert!(
-            self.stash_skill(skill).join("SKILL.md").is_file(),
-            "expected home stash at skills/{skill}"
+            self.library_skill(skill).join("SKILL.md").is_file(),
+            "expected library at skills/{skill}"
         );
         assert!(
             !self
@@ -223,6 +223,35 @@ fn i7_init_no_manage_tink_skips_embedded_skill() {
     assert!(!Workspace::skill_path(&project, "manage-tink").exists());
 }
 
+#[test]
+fn i8_relative_tink_home_resolves_absolute_not_nested() {
+    // I8: relative TINK_HOME is absolutized against cwd; must not nest under project.
+    let root = tempfile::TempDir::new().unwrap();
+    let root = root.path().canonicalize().unwrap_or_else(|_| root.path().to_path_buf());
+    let project = root.join("app");
+    fs::create_dir_all(&project).unwrap();
+    let expected_home = root.join("tink-home");
+
+    Command::cargo_bin("tink")
+        .unwrap()
+        .current_dir(&project)
+        .env("TINK_HOME", "../tink-home")
+        .env("HOME", root.join("unused-unix-home"))
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(expected_home.display().to_string()));
+
+    assert!(
+        expected_home.join("layout.json").is_file(),
+        "home should live at absolutized sibling"
+    );
+    assert!(
+        !project.join("tink-home").exists(),
+        "home must not nest under project cwd"
+    );
+}
+
 // --- A*: local add ---
 
 #[test]
@@ -337,11 +366,11 @@ fn a7_add_refuses_reserved_by_project_name() {
                 .or(predicate::str::contains("by-project")),
         );
     assert!(!Workspace::skill_path(&project, "by-project").exists());
-    assert!(!ws.stash_skill("by-project").exists());
+    assert!(!ws.library_skill("by-project").exists());
 }
 
 #[test]
-fn a6_add_repairs_divergent_home_archive_and_installs_project() {
+fn a6_add_repairs_divergent_library_and_installs_project() {
     let ws = Workspace::new();
     let app = ws.project("app");
     let other = ws.project("other");
@@ -363,7 +392,7 @@ fn a6_add_repairs_divergent_home_archive_and_installs_project() {
         .args(["skill", "add", first.to_str().unwrap()])
         .assert()
         .success();
-    assert!(ws.stash_skill("demo-skill").join("SKILL.md").is_file());
+    assert!(ws.library_skill("demo-skill").join("SKILL.md").is_file());
 
     ws.cmd(&other)
         .args(["skill", "add", second.to_str().unwrap()])
@@ -378,13 +407,13 @@ fn a6_add_repairs_divergent_home_archive_and_installs_project() {
     )
     .unwrap();
     assert!(project.contains("from other"));
-    let archived = fs::read_to_string(ws.stash_skill("demo-skill").join("SKILL.md")).unwrap();
+    let archived = fs::read_to_string(ws.library_skill("demo-skill").join("SKILL.md")).unwrap();
     assert!(archived.contains("from other"));
     assert!(!archived.contains("from app"));
 }
 
 #[test]
-fn a8_add_uses_home_archive_when_remote_tip_matches() {
+fn a8_add_uses_library_when_remote_tip_matches() {
     let ws = Workspace::new();
     let app = ws.project("app");
     let other = ws.project("other");
@@ -419,7 +448,7 @@ fn a8_add_uses_home_archive_when_remote_tip_matches() {
     second
         .assert()
         .success()
-        .stdout(predicate::str::contains("from stash"));
+        .stdout(predicate::str::contains("from library"));
     assert!(Workspace::skill_path(&other, "root-skill")
         .join(".tink-source.json")
         .is_file());
@@ -632,7 +661,7 @@ fn l2_skill_list_fails_without_skills_dir() {
 }
 
 #[test]
-fn l3_skill_list_home_prints_catalog_tsv() {
+fn l3_skill_list_catalog_prints_tsv() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project).arg("init").assert().success();
@@ -645,7 +674,7 @@ fn l3_skill_list_home_prints_catalog_tsv() {
     let root = project.canonicalize().unwrap();
     let root_s = root.to_str().unwrap();
     ws.cmd(&project)
-        .args(["skill", "list", "--home"])
+        .args(["skill", "list", "--catalog"])
         .assert()
         .success()
         .stdout(
@@ -655,6 +684,23 @@ fn l3_skill_list_home_prints_catalog_tsv() {
                 .and(predicate::str::contains("demo-skill"))
                 .and(predicate::str::contains("manage-tink")),
         );
+}
+
+#[test]
+fn l5_skill_list_rejects_removed_stash_and_home_flags() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+    for flag in ["--stash", "--home"] {
+        ws.cmd(&project)
+            .args(["skill", "list", flag])
+            .assert()
+            .failure()
+            .stderr(
+                predicate::str::contains(flag)
+                    .or(predicate::str::contains("unexpected argument")),
+            );
+    }
 }
 
 #[test]
@@ -690,10 +736,10 @@ fn l4_skill_list_warns_on_zen_without_agents_still_lists() {
         ));
 }
 
-// --- H*: home stash ---
+// --- H*: library ---
 
 #[test]
-fn h1_skill_list_stash_includes_archived_names() {
+fn h1_skill_list_library_includes_archived_names() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
@@ -707,14 +753,14 @@ fn h1_skill_list_stash_includes_archived_names() {
         .assert()
         .success();
     ws.cmd(&project)
-        .args(["skill", "list", "--stash"])
+        .args(["skill", "list", "--library"])
         .assert()
         .success()
         .stdout(predicate::str::contains("demo-skill"));
 }
 
 #[test]
-fn h2_skill_add_stash_installs_into_project() {
+fn h2_skill_add_library_installs_into_project() {
     let ws = Workspace::new();
     let donor = ws.project("donor");
     let app = ws.project("app");
@@ -728,7 +774,7 @@ fn h2_skill_add_stash_installs_into_project() {
         .args(["skill", "add", source.to_str().unwrap()])
         .assert()
         .success();
-    assert!(ws.stash_skill("stash-skill").join("SKILL.md").is_file());
+    assert!(ws.library_skill("stash-skill").join("SKILL.md").is_file());
 
     ws.cmd(&app)
         .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
@@ -740,7 +786,7 @@ fn h2_skill_add_stash_installs_into_project() {
         .success()
         .stdout(
             predicate::str::contains("stash-skill")
-                .and(predicate::str::contains("from stash")),
+                .and(predicate::str::contains("from library")),
         );
     assert!(Workspace::skill_path(&app, "stash-skill")
         .join("SKILL.md")
@@ -749,7 +795,7 @@ fn h2_skill_add_stash_installs_into_project() {
 }
 
 #[test]
-fn h3_skill_add_stash_missing_refuses_without_github() {
+fn h3_skill_add_library_missing_refuses_without_github() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
@@ -761,13 +807,13 @@ fn h3_skill_add_stash_missing_refuses_without_github() {
         .assert()
         .failure()
         .stderr(
-            predicate::str::contains("Stash skill not found")
+            predicate::str::contains("Library skill not found")
                 .or(predicate::str::contains("not found")),
         );
 }
 
 #[test]
-fn h4_skill_add_stash_refuses_overwrite_when_diverged() {
+fn h4_skill_add_library_refuses_overwrite_when_diverged() {
     let ws = Workspace::new();
     let donor = ws.project("donor");
     let app = ws.project("app");
@@ -802,7 +848,7 @@ fn h4_skill_add_stash_refuses_overwrite_when_diverged() {
 }
 
 #[test]
-fn h5_skill_harvest_copies_harness_skills_into_stash() {
+fn h5_skill_harvest_copies_harness_skills_into_library() {
     let ws = Workspace::new();
     let home = ws.root.join("home");
     let project = ws.project("app");
@@ -839,9 +885,9 @@ fn h5_skill_harvest_copies_harness_skills_into_stash() {
                 .and(predicate::str::contains("nested-skill")),
         );
 
-    assert!(ws.stash_skill("agents-skill").join("SKILL.md").is_file());
-    assert!(ws.stash_skill("claude-skill").join("SKILL.md").is_file());
-    assert!(ws.stash_skill("nested-skill").join("SKILL.md").is_file());
+    assert!(ws.library_skill("agents-skill").join("SKILL.md").is_file());
+    assert!(ws.library_skill("claude-skill").join("SKILL.md").is_file());
+    assert!(ws.library_skill("nested-skill").join("SKILL.md").is_file());
     assert!(
         !project.join(".agents").exists(),
         "harvest must not create project .agents"
@@ -882,9 +928,9 @@ fn h7_skill_harvest_divergent_skips_without_repair() {
         "demo-skill",
         "harness body",
     );
-    // Pre-seed divergent stash.
-    write_skill(ws.stash_skill("demo-skill").as_path(), "demo-skill", "stash body");
-    let before = fs::read_to_string(ws.stash_skill("demo-skill").join("SKILL.md")).unwrap();
+    // Pre-seed divergent library.
+    write_skill(ws.library_skill("demo-skill").as_path(), "demo-skill", "stash body");
+    let before = fs::read_to_string(ws.library_skill("demo-skill").join("SKILL.md")).unwrap();
 
     ws.cmd(&project)
         .env("HOME", &home)
@@ -893,8 +939,8 @@ fn h7_skill_harvest_divergent_skips_without_repair() {
         .success()
         .stderr(predicate::str::contains("Skipped").and(predicate::str::contains("demo-skill")));
 
-    let after = fs::read_to_string(ws.stash_skill("demo-skill").join("SKILL.md")).unwrap();
-    assert_eq!(before, after, "create-only must not repair divergent stash");
+    let after = fs::read_to_string(ws.library_skill("demo-skill").join("SKILL.md")).unwrap();
+    assert_eq!(before, after, "create-only must not repair divergent library");
     assert!(after.contains("stash body"));
 }
 
@@ -926,14 +972,14 @@ fn h8_skill_harvest_skips_tink_home_and_unsafe_trees() {
         .assert()
         .success();
     write_skill(
-        ws.stash_skill("from-home").as_path(),
+        ws.library_skill("from-home").as_path(),
         "from-home",
         "stash resident",
     );
-    // Harness entry that realpaths into the stash — must be skipped as a source.
+    // Harness entry that realpaths into the library — must be skipped as a source.
     fs::create_dir_all(home.join(".cursor").join("skills")).unwrap();
     std::os::unix::fs::symlink(
-        ws.stash_skill("from-home"),
+        ws.library_skill("from-home"),
         home.join(".cursor").join("skills").join("from-home"),
     )
     .unwrap();
@@ -952,10 +998,10 @@ fn h8_skill_harvest_skips_tink_home_and_unsafe_trees() {
                 .and(predicate::str::contains("from-home")),
         );
 
-    assert!(ws.stash_skill("good-skill").join("SKILL.md").is_file());
-    assert!(ws.stash_skill("nested-home-skill").join("SKILL.md").is_file());
-    assert!(!ws.stash_skill("bad-skill").exists());
-    let home_body = fs::read_to_string(ws.stash_skill("from-home").join("SKILL.md")).unwrap();
+    assert!(ws.library_skill("good-skill").join("SKILL.md").is_file());
+    assert!(ws.library_skill("nested-home-skill").join("SKILL.md").is_file());
+    assert!(!ws.library_skill("bad-skill").exists());
+    let home_body = fs::read_to_string(ws.library_skill("from-home").join("SKILL.md")).unwrap();
     assert!(home_body.contains("stash resident"));
 }
 
@@ -1081,7 +1127,7 @@ fn p2_refresh_refuses_local_modifications() {
 }
 
 #[test]
-fn p3_refresh_backfills_missing_home_archive_on_noop() {
+fn p3_refresh_backfills_missing_library_on_noop() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project).arg("init").assert().success();
@@ -1103,7 +1149,7 @@ fn p3_refresh_backfills_missing_home_archive_on_noop() {
         add.env(k, v);
     }
     add.assert().success();
-    fs::remove_dir_all(ws.stash_skill("remote-skill")).unwrap();
+    fs::remove_dir_all(ws.library_skill("remote-skill")).unwrap();
 
     let mut refresh = ws.cmd(&project);
     refresh.args(["skill", "refresh", "remote-skill"]);
@@ -1111,7 +1157,7 @@ fn p3_refresh_backfills_missing_home_archive_on_noop() {
         refresh.env(k, v);
     }
     refresh.assert().success();
-    assert!(ws.stash_skill("remote-skill").join("SKILL.md").is_file());
+    assert!(ws.library_skill("remote-skill").join("SKILL.md").is_file());
 }
 
 #[test]
@@ -1137,7 +1183,7 @@ fn p4_refresh_allows_archive_missing_only_receipt() {
         add.env(k, v);
     }
     add.assert().success();
-    fs::remove_file(ws.stash_skill("remote-skill").join(".tink-source.json")).unwrap();
+    fs::remove_file(ws.library_skill("remote-skill").join(".tink-source.json")).unwrap();
 
     write_skill(
         &remote.join("skills").join("remote-skill"),
@@ -1153,14 +1199,14 @@ fn p4_refresh_allows_archive_missing_only_receipt() {
     }
     refresh.assert().success();
     assert!(
-        fs::read_to_string(ws.stash_skill("remote-skill").join("SKILL.md"))
+        fs::read_to_string(ws.library_skill("remote-skill").join("SKILL.md"))
             .unwrap()
             .contains("v2")
     );
 }
 
 #[test]
-fn p5_refresh_refuses_divergent_home_archive() {
+fn p5_refresh_refuses_divergent_library() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project).arg("init").assert().success();
@@ -1182,7 +1228,7 @@ fn p5_refresh_refuses_divergent_home_archive() {
         add.env(k, v);
     }
     add.assert().success();
-    write_skill(ws.stash_skill("remote-skill").as_path(), "remote-skill", "other");
+    write_skill(ws.library_skill("remote-skill").as_path(), "remote-skill", "other");
 
     write_skill(
         &remote.join("skills").join("remote-skill"),
@@ -1202,7 +1248,7 @@ fn p5_refresh_refuses_divergent_home_archive() {
     refresh
         .assert()
         .failure()
-        .stderr(predicate::str::contains("stash diverges"));
+        .stderr(predicate::str::contains("library diverges"));
     let after =
         fs::read_to_string(Workspace::skill_path(&project, "remote-skill").join("SKILL.md"))
             .unwrap();
@@ -1247,8 +1293,8 @@ fn p7_refresh_repairs_stale_archive_when_project_already_new() {
     }
     refresh.assert().success();
 
-    // Simulate failed stash deposit: project at v2, stash rolled back to v1.
-    write_skill(ws.stash_skill("remote-skill").as_path(), "remote-skill", "v1");
+    // Simulate failed library deposit: project at v2, library rolled back to v1.
+    write_skill(ws.library_skill("remote-skill").as_path(), "remote-skill", "v1");
 
     let mut repair = ws.cmd(&project);
     repair.args(["skill", "refresh", "remote-skill"]);
@@ -1257,10 +1303,10 @@ fn p7_refresh_repairs_stale_archive_when_project_already_new() {
     }
     repair.assert().success();
     assert!(
-        fs::read_to_string(ws.stash_skill("remote-skill").join("SKILL.md"))
+        fs::read_to_string(ws.library_skill("remote-skill").join("SKILL.md"))
             .unwrap()
             .contains("v2"),
-        "noop refresh must repair stale stash from project"
+        "noop refresh must repair stale library from project"
     );
 }
 
@@ -1311,7 +1357,7 @@ fn p6_refresh_identical_tree_new_revision_bumps_receipts() {
     .unwrap();
     assert!(project_receipt.contains(&new_rev));
     let archive_receipt =
-        fs::read_to_string(ws.stash_skill("remote-skill").join(".tink-source.json")).unwrap();
+        fs::read_to_string(ws.library_skill("remote-skill").join(".tink-source.json")).unwrap();
     assert!(archive_receipt.contains(&new_rev));
 }
 
@@ -1348,15 +1394,15 @@ fn d1_destroy_yes_removes_agents_zen_agents_md() {
     assert!(!project.join("AGENTS.md").exists());
     assert!(ws.inventory.join("layout.json").is_file());
     assert!(
-        ws.stash_skill("manage-tink").join("SKILL.md").is_file(),
-        "home stash must remain after destroy"
+        ws.library_skill("manage-tink").join("SKILL.md").is_file(),
+        "library must remain after destroy"
     );
     assert!(
-        ws.stash_skill("extra-skill").join("SKILL.md").is_file(),
-        "home stash must remain after destroy"
+        ws.library_skill("extra-skill").join("SKILL.md").is_file(),
+        "library must remain after destroy"
     );
     ws.cmd(&project)
-        .args(["skill", "list", "--home"])
+        .args(["skill", "list", "--catalog"])
         .assert()
         .success()
         .stdout(
@@ -1397,7 +1443,7 @@ fn d3_destroy_refuses_agents_symlink() {
 // --- X*: skill remove ---
 
 #[test]
-fn x1_remove_deletes_project_skill_keeps_stash_drops_catalog() {
+fn x1_remove_deletes_project_skill_keeps_library_drops_catalog() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project).arg("init").assert().success();
@@ -1423,11 +1469,11 @@ fn x1_remove_deletes_project_skill_keeps_stash_drops_catalog() {
         .success()
         .stdout(predicate::str::contains("demo-skill").not());
     assert!(
-        ws.stash_skill("demo-skill").join("SKILL.md").is_file(),
-        "home stash must remain after project remove"
+        ws.library_skill("demo-skill").join("SKILL.md").is_file(),
+        "library must remain after project remove"
     );
     ws.cmd(&project)
-        .args(["skill", "list", "--home"])
+        .args(["skill", "list", "--catalog"])
         .assert()
         .success()
         .stdout(
@@ -1472,7 +1518,7 @@ fn x3_remove_refuses_agents_symlink() {
 }
 
 #[test]
-fn x4_remove_does_not_delete_home_stash() {
+fn x4_remove_does_not_delete_library() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project).arg("init").assert().success();
@@ -1482,14 +1528,14 @@ fn x4_remove_does_not_delete_home_stash() {
         .args(["skill", "add", source.to_str().unwrap()])
         .assert()
         .success();
-    let stash_md = ws.stash_skill("keep-stash").join("SKILL.md");
-    let before = fs::read(&stash_md).unwrap();
+    let library_md = ws.library_skill("keep-stash").join("SKILL.md");
+    let before = fs::read(&library_md).unwrap();
     ws.cmd(&project)
         .args(["skill", "remove", "keep-stash"])
         .assert()
         .success();
     assert!(!Workspace::skill_path(&project, "keep-stash").exists());
-    let after = fs::read(&stash_md).unwrap();
+    let after = fs::read(&library_md).unwrap();
     assert_eq!(before, after);
 }
 
@@ -1514,14 +1560,14 @@ fn x5_manage_tink_documents_remove_and_catalog_sync() {
     );
     assert!(
         skill_md.contains("tink skill add NAME")
-            && skill_md.contains("bare stash")
-            && !skill_md.contains("add --stash"),
-        "manage-tink must teach bare-name stash promote, not add --stash: {skill_md}"
+            && skill_md.contains("bare library")
+            && !skill_md.contains("add --library"),
+        "manage-tink must teach bare-name library promote, not add --library: {skill_md}"
     );
     assert!(
         commands.contains("tink skill add NAME")
-            && !commands.contains("add --stash"),
-        "commands.md must list bare-name stash promote, not add --stash: {commands}"
+            && !commands.contains("add --library"),
+        "commands.md must list bare-name library promote, not add --library: {commands}"
     );
     assert!(
         skill_md.contains("by-project catalog")

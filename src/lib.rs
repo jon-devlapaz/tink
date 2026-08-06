@@ -18,7 +18,7 @@ mod refresh;
 mod remove;
 mod skills;
 mod sources;
-mod stash;
+mod library;
 mod style;
 mod templates;
 mod update;
@@ -71,7 +71,7 @@ pub enum Command {
         #[command(subcommand)]
         command: SkillCommand,
     },
-    /// Remove `.agents/`, `ZEN.md`, `AGENTS.md`, and this project's catalog entry (not home stash)
+    /// Remove `.agents/`, `ZEN.md`, `AGENTS.md`, and this project's catalog entry (not library)
     Destroy {
         /// Skip the confirmation prompt
         #[arg(long)]
@@ -85,20 +85,20 @@ pub enum Command {
 pub enum SkillCommand {
     /// Copy one complete skill into the project
     Add {
-        /// Local path, `owner/repo`, public GitHub HTTPS URL, or home stash skill name
+        /// Local path, `owner/repo`, public GitHub HTTPS URL, or library skill name
         source: String,
         /// Skill name when the source contains several skills
         #[arg(long)]
         skill: Option<String>,
     },
-    /// List installed project skills, the home by-project catalog, or the home stash
+    /// List installed project skills, the by-project catalog, or the library
     List {
         /// List offline catalog under `$TINK_HOME` / `~/.tink` as `project\\troot\\tskill` TSV
         #[arg(long, group = "list_source")]
-        home: bool,
-        /// List skill names in the home stash (`skills/<name>/`)
+        catalog: bool,
+        /// List skill names in the library (`skills/<name>/`)
         #[arg(long, group = "list_source")]
-        stash: bool,
+        library: bool,
     },
     /// Validate project skills without changing anything
     Check,
@@ -107,12 +107,12 @@ pub enum SkillCommand {
         /// Optional skill name; default refreshes all imported skills
         name: Option<String>,
     },
-    /// Delete one project skill directory and drop it from the by-project catalog (not home stash)
+    /// Delete one project skill directory and drop it from the by-project catalog (not library)
     Remove {
         /// Skill directory name under `.agents/skills/`
         name: String,
     },
-    /// Copy harness skill trees into the home stash (create-only)
+    /// Copy harness skill trees into the library (create-only)
     Harvest,
 }
 
@@ -181,11 +181,11 @@ fn dispatch_skill(cwd: &Path, command: SkillCommand) -> Result<(), Error> {
         SkillCommand::Add { source, skill } => {
             dispatch_skill_add(cwd, &source, skill.as_deref())
         }
-        SkillCommand::List { home, stash } => {
-            if home {
-                dispatch_skill_list_home()
-            } else if stash {
-                dispatch_skill_list_stash()
+        SkillCommand::List { catalog, library } => {
+            if catalog {
+                dispatch_skill_list_catalog()
+            } else if library {
+                dispatch_skill_list_library()
             } else {
                 dispatch_skill_list(cwd)
             }
@@ -299,7 +299,7 @@ fn dispatch_skill_list(cwd: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-fn dispatch_skill_list_home() -> Result<(), Error> {
+fn dispatch_skill_list_catalog() -> Result<(), Error> {
     let style = CliStyle::auto_stdout();
     let entries = catalog::list_catalog(None)?;
     if entries.is_empty() {
@@ -324,11 +324,11 @@ fn dispatch_skill_list_home() -> Result<(), Error> {
     Ok(())
 }
 
-fn dispatch_skill_list_stash() -> Result<(), Error> {
+fn dispatch_skill_list_library() -> Result<(), Error> {
     let style = CliStyle::auto_stdout();
-    let names = stash::list_names(None)?;
+    let names = library::list_names(None)?;
     if names.is_empty() {
-        println!("{}", style.muted("(no stash skills)"));
+        println!("{}", style.muted("(no library skills)"));
     } else {
         for name in &names {
             println!("{}", style.skill(name));

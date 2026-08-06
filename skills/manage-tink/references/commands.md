@@ -12,27 +12,28 @@ form for add, list, check, refresh, and remove.
 | Init without embedded manage-tink | add `--no-manage-tink` |
 | Add one skill | `tink skill add SOURCE` |
 | Add from multi-skill repo | `tink skill add SOURCE --skill NAME` |
-| Add from home stash | `tink skill add NAME` |
-| Harvest harness skills into home stash | `tink skill harvest` |
+| Add from library | `tink skill add NAME` |
+| Harvest harness skills into library | `tink skill harvest` |
 | List (this project) | `tink skill list` |
-| List (home catalog) | `tink skill list --home` |
-| List (home stash) | `tink skill list --stash` |
+| List (catalog) | `tink skill list --catalog` |
+| List (library) | `tink skill list --library` |
 | Check | `tink skill check` |
 | Refresh all clean imports | `tink skill refresh` |
 | Refresh one | `tink skill refresh NAME` |
 | Remove one project skill | `tink skill remove NAME` |
 | Update the tink CLI binary | `tink update` |
+| Refresh live manage-tink after major upgrade | `tink skill remove manage-tink` then `tink init --no-zen --no-tink-skills` |
 | Destroy scaffolding | `tink destroy --yes` (non-TTY/scripts) or `tink destroy` (TTY, confirm `y`) |
 
 ## Layout facts
 
 - Live skills: `<project>/.agents/skills/<name>/` with `SKILL.md`.
 - Home (`$TINK_HOME` or `~/.tink`) is not an agent discovery root. Installs
-  stash trees at `skills/<name>/`. List the stash with
-  `tink skill list --stash`; promote into a project with
-  `tink skill add NAME` (bare stash skill name). `tink skill harvest` copies complete trees
-  from known harness roots into the stash create-only (never overwrites a
-  divergent stash entry). Global roots include `~/.agents/skills`,
+  library trees at `skills/<name>/`. List the library with
+  `tink skill list --library`; promote into a project with
+  `tink skill add NAME` (bare library skill name). `tink skill harvest` copies complete trees
+  from known harness roots into the library create-only (never overwrites a
+  divergent library entry). Global roots include `~/.agents/skills`,
   `~/.claude/skills`, `~/.codex/skills`, `~/.cursor/skills`,
   `~/.cursor/skills-cursor`, `~/.copilot/skills`, `~/.github/skills`,
   `~/.codeium/windsurf/skills`, `~/.cline/skills`, `~/.aider/skills`,
@@ -45,13 +46,13 @@ form for add, list, check, refresh, and remove.
   `.gemini/skills`, `.agent/skills`, `.roo/skills`, `.kilocode/skills`,
   `.amazonq/skills`, `.augment/skills`, `.tabnine/skills`, `.opencode/skills`,
   and `.sourcegraph/skills`. Matching GitHub tips install into the project
-  from that stash; divergent stash trees are repaired with a warning on
+  from that library; divergent library trees are repaired with a warning on
   `skill add`. Names are recorded in
   `catalog/by-project/<project>/meta.json`. List the catalog with
-  `tink skill list --home` (TSV with header `project`, `root`, `skill`).
+  `tink skill list --catalog` (TSV with header `project`, `root`, `skill`).
   Do not hand-parse `meta.json` when the CLI is available. `skill remove`
   deletes the project skill directory and drops that name from the by-project
-  catalog; it does not prune the home stash. `destroy` removes project
-  scaffolding and this project's catalog entry; it does not delete home stash
+  catalog; it does not prune the library. `destroy` removes project
+  scaffolding and this project's catalog entry; it does not delete library
   trees or other projects' catalog rows.
   Project skill overwrites are still refused.

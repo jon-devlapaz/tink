@@ -14,7 +14,7 @@ pub struct RemoveReport {
 }
 
 /// Drop `<name>` from the by-project catalog, then delete
-/// `<project>/.agents/skills/<name>/`. Does not touch `$TINK_HOME` stash trees.
+/// `<project>/.agents/skills/<name>/`. Does not touch `$TINK_HOME` library trees.
 /// Catalog sync runs before disk delete; sync errors leave the skill tree intact.
 pub fn remove_skill(project_root: &Path, name: &str) -> Result<RemoveReport, Error> {
     if !skills::valid_skill_name(name) {

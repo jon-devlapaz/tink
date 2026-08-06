@@ -1,7 +1,7 @@
-//! `tink skill harvest` — copy harness skill trees into the home stash.
+//! `tink skill harvest` — copy harness skill trees into the library.
 //!
-//! Create-only: never repair divergent or receipt-backed stash entries.
-//! Stash remains offline inventory, not an agent discovery root.
+//! Create-only: never repair divergent or receipt-backed library entries.
+//! Library remains offline inventory, not an agent discovery root.
 //!
 //! Root tables track documented Agent Skills (`SKILL.md`) locations from:
 //! - agentskills.io client guidance (`.agents/skills` + client-specific)
@@ -16,10 +16,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::error::Error;
-use crate::home::{ensure_inventory_root, skills_stash_path};
+use crate::home::{ensure_inventory_root, skills_library_path};
 use crate::paths::{map_io, refuse_symlink};
 use crate::skills;
-use crate::stash::{self, CreateOnlyWrite};
+use crate::library::{self, CreateOnlyWrite};
 
 /// Relative skill roots under `$HOME` (user/global harness locations).
 ///
@@ -229,11 +229,11 @@ fn map_create_only(write: CreateOnlyWrite) -> (HarvestAction, Option<String>) {
     }
 }
 
-/// Scan harness skill locations and create missing trees in the home stash.
+/// Scan harness skill locations and create missing trees in the library.
 pub fn harvest(cwd: &Path) -> Result<HarvestReport, Error> {
     let (tink_home, _) = ensure_inventory_root(None)?;
-    let stash = skills_stash_path(&tink_home);
-    let stash_canon = stash.canonicalize().unwrap_or_else(|_| stash.clone());
+    let library = skills_library_path(&tink_home);
+    let library_canon = library.canonicalize().unwrap_or_else(|_| library.clone());
 
     let mut skill_paths = Vec::new();
     for root in candidate_roots(cwd)? {
@@ -247,9 +247,9 @@ pub fn harvest(cwd: &Path) -> Result<HarvestReport, Error> {
     let mut report = HarvestReport::default();
 
     for path in skill_paths {
-        // Skip only the stash inventory — not the whole TINK_HOME tree
+        // Skip only the library inventory — not the whole TINK_HOME tree
         // (a workspace nested under TINK_HOME remains harvestable).
-        if is_under(&path, &stash_canon) || is_under(&path, &stash) {
+        if is_under(&path, &library_canon) || is_under(&path, &library) {
             report.events.push(HarvestEvent {
                 name: path
                     .file_name()
@@ -257,7 +257,7 @@ pub fn harvest(cwd: &Path) -> Result<HarvestReport, Error> {
                     .unwrap_or_else(|| path.display().to_string()),
                 source: path,
                 action: HarvestAction::Skipped,
-                detail: Some("under home stash".into()),
+                detail: Some("under library".into()),
             });
             report.skipped += 1;
             continue;
@@ -305,7 +305,7 @@ pub fn harvest(cwd: &Path) -> Result<HarvestReport, Error> {
             continue;
         }
 
-        let (_, write) = stash::deposit_create_only(&skill)?;
+        let (_, write) = library::deposit_create_only(&skill)?;
         let (action, detail) = map_create_only(write);
         match action {
             HarvestAction::Created => {
