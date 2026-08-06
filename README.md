@@ -79,17 +79,17 @@ flowchart LR
   agent["Agent harness"]
   tink["tink CLI"]
   live[".agents/skills/"]
-  stash["~/.tink/skills/"]
+  library["~/.tink/skills/"]
   catalog["~/.tink/catalog/"]
 
   agent -->|"discovers"| live
   tink -->|"add / remove"| live
-  tink -->|"copies on add"| stash
+  tink -->|"copies on add"| library
   tink -->|"records names"| catalog
-  tink -->|"add <stash-name>"| live
+  tink -->|"add <library-name>"| live
 ```
 
-Home (`~/.tink` or `$TINK_HOME`) is **not** an agent discovery root. Stash holds
+Home (`~/.tink` or `$TINK_HOME`) is **not** an agent discovery root. Library holds
 skill trees; catalog holds by-project **names** only.
 
 ## Use (everyday)
@@ -106,7 +106,7 @@ tink skill refresh skill-name
 tink skill remove skill-name
 ```
 
-- Bare `skill-name` promotes from the home stash (`tink skill list --stash`).
+- Bare `skill-name` promotes from the library (`tink skill list --library`).
 - `--skill` when the source repo publishes several skills.
 - Refresh only clean GitHub imports; local edits are refused.
 - tink does not overwrite a project skill that differs from what it would
@@ -115,13 +115,13 @@ tink skill remove skill-name
 
 ## Power
 
-Stash, catalog, init flags, and destroy:
+Library, catalog, init flags, and destroy:
 
 ```console
-tink skill list --stash
+tink skill list --library
 tink skill add skill-name
 tink skill harvest
-tink skill list --home
+tink skill list --catalog
 
 tink init --with-zen --with-tink-skills
 tink init --no-zen --no-tink-skills --no-manage-tink
@@ -130,12 +130,14 @@ tink destroy --yes
 tink update
 ```
 
-If the GitHub tip is already in the stash and matches the tip byte-for-byte,
-`skill add` may install from the stash. If the stash differs, tink repairs it
+**Breaking in 0.3.0:** `skill list --home` → `--catalog`; `skill list --stash` → `--library`. On-disk layout is still `$TINK_HOME/skills/` and `catalog/by-project/`. After a major CLI upgrade, refresh the live project skill: `tink skill remove manage-tink && tink init --no-zen --no-tink-skills`.
+
+If the GitHub tip is already in the library and matches the tip byte-for-byte,
+`skill add` may install from the library. If the library differs, tink repairs it
 and warns. A bare skill name (not a path and not `owner/repo`) promotes from
-the home stash into the project. `skill remove` deletes the project skill
+the library into the project. `skill remove` deletes the project skill
 directory and drops that name from the by-project catalog; it does not delete
-home stash trees. `destroy` also drops this project's catalog entry.
+library trees. `destroy` also drops this project's catalog entry.
 
 ### Uninstall the CLI
 
@@ -162,7 +164,7 @@ cargo uninstall tink
 ```console
 cargo test
 ./tink-test init
-./tink-test skill list --home
+./tink-test skill list --catalog
 ```
 
 `./tink-test` builds this checkout and runs `target/debug/tink` (not

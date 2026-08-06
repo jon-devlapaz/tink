@@ -5,7 +5,7 @@
 
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::error::Error;
 use crate::paths::{map_io, mkdir_p, refuse_symlink, require_file};
@@ -23,24 +23,52 @@ Tink home directory. This is **not** an agent skill discovery root. Agents load
 skills only from a project's `.agents/skills/`.
 
 Successful installs:
-- stash skill trees under `skills/<name>/` (divergent entries are repaired)
+- copy skill trees into the library under `skills/<name>/` (divergent entries are repaired)
 - record skill **names** under `catalog/by-project/<project>/meta.json`
 
 `skill remove` and `destroy` update that name catalog; they do not delete
-stash trees.
+library trees.
 
-Default location: `~/.tink` (override with `TINK_HOME`).
+Default location: `~/.tink` (override with `TINK_HOME`; relative values
+resolve against the process working directory to an absolute path).
 ";
+
+/// Make `path` absolute without requiring it to exist (no symlink follow).
+/// Collapses `.` / `..` lexically so display and layout stay stable across cwd.
+fn absolutize(path: PathBuf) -> Result<PathBuf, Error> {
+    let absolute = if path.is_absolute() {
+        path
+    } else {
+        let cwd = env::current_dir().map_err(|e| Error::msg(format!("current_dir: {e}")))?;
+        cwd.join(path)
+    };
+    Ok(normalize_lexically(&absolute))
+}
+
+fn normalize_lexically(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(_) | Component::RootDir => out.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::Normal(part) => out.push(part),
+        }
+    }
+    out
+}
 
 /// Resolve the offline inventory root.
 pub fn resolve_home() -> Result<PathBuf, Error> {
     if let Ok(custom) = env::var(TINK_HOME_ENV) {
         if !custom.is_empty() {
-            return Ok(PathBuf::from(custom));
+            return absolutize(PathBuf::from(custom));
         }
     }
     let home = env::var_os("HOME").ok_or_else(|| Error::msg("HOME is not set"))?;
-    Ok(PathBuf::from(home).join(TINK_HOME_NAME))
+    absolutize(PathBuf::from(home).join(TINK_HOME_NAME))
 }
 
 /// Path to `catalog/by-project` under a home root.
@@ -48,18 +76,19 @@ pub fn by_project_path(home: &Path) -> PathBuf {
     home.join("catalog").join(BY_PROJECT)
 }
 
-/// Path to the skill-tree stash root (`skills/`).
-pub fn skills_stash_path(home: &Path) -> PathBuf {
+/// Path to the skill-tree library root (`skills/`).
+pub fn skills_library_path(home: &Path) -> PathBuf {
     home.join("skills")
 }
 
-/// Ensure inventory root + stash dir + catalog + layout marker.
+/// Ensure inventory root + library dir + catalog + layout marker.
 ///
 /// Returns `(path, created)` where `created` is true only when the root
-/// directory did not exist before this call.
+/// directory did not exist before this call. Relative roots are absolutized
+/// against the process cwd before create/refuse checks.
 pub fn ensure_inventory_root(root: Option<&Path>) -> Result<(PathBuf, bool), Error> {
     let root = match root {
-        Some(path) => path.to_path_buf(),
+        Some(path) => absolutize(path.to_path_buf())?,
         None => resolve_home()?,
     };
     refuse_symlink(&root)?;
@@ -71,7 +100,7 @@ pub fn ensure_inventory_root(root: Option<&Path>) -> Result<(PathBuf, bool), Err
         )));
     }
     mkdir_p(&root)?;
-    mkdir_p(&skills_stash_path(&root))?;
+    mkdir_p(&skills_library_path(&root))?;
     migrate_catalog_if_needed(&root)?;
     mkdir_p(&by_project_path(&root))?;
     write_layout_marker(&root)?;
@@ -84,7 +113,7 @@ pub(crate) fn looks_like_legacy_catalog(path: &Path) -> bool {
 }
 
 /// Older homes kept the name catalog at `skills/by-project/`; move it out so
-/// `skills/<name>/` can hold stashed trees.
+/// `skills/<name>/` can hold library trees.
 fn migrate_catalog_if_needed(home: &Path) -> Result<(), Error> {
     let old = home.join("skills").join(BY_PROJECT);
     let new = by_project_path(home);
@@ -103,7 +132,7 @@ fn migrate_catalog_if_needed(home: &Path) -> Result<(), Error> {
             old.display()
         )));
     }
-    // A skill tree mistakenly stashed as by-project has SKILL.md — leave it.
+    // A skill tree mistakenly placed as by-project has SKILL.md — leave it.
     if !looks_like_legacy_catalog(&old) {
         return Ok(());
     }
@@ -163,7 +192,7 @@ mod tests {
         assert_eq!(path, root);
         assert!(root.join("layout.json").is_file());
         assert!(by_project_path(&root).is_dir());
-        assert!(skills_stash_path(&root).is_dir());
+        assert!(skills_library_path(&root).is_dir());
         assert!(!root.join("skills").join(BY_PROJECT).exists());
         let (_, created_again) = ensure_inventory_root(Some(&root)).unwrap();
         assert!(!created_again);

@@ -16,7 +16,7 @@ pub struct DestroyReport {
 
 /// Drop this project's by-project catalog entry, then remove `.agents/`,
 /// `ZEN.md`, and `AGENTS.md` from the project root. Does not touch the home
-/// stash. Catalog sync runs before disk deletes; sync errors leave project
+/// library. Catalog sync runs before disk deletes; sync errors leave project
 /// files intact. Refuses symlinks. Requires `--yes` or an interactive `y`
 /// confirmation (default no).
 pub fn destroy_project(project_root: &Path, yes: bool) -> Result<DestroyReport, Error> {

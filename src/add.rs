@@ -9,15 +9,15 @@ use crate::init;
 use crate::provenance::Provenance;
 use crate::skills::{self, Skill};
 use crate::sources::{self, RemoteSource};
-use crate::stash::{self, StashWrite};
+use crate::library::{self, LibraryWrite};
 use crate::style::CliStyle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AddOrigin {
     /// Installed from a local path or fresh remote checkout.
     Source,
-    /// Installed from the home stash (`skills/<name>/`), including tip reuse.
-    Stash,
+    /// Installed from the library (`skills/<name>/`), including tip reuse.
+    Library,
 }
 
 #[derive(Debug)]
@@ -34,12 +34,12 @@ fn place_skill(
     destination_root: &Path,
     provenance: Option<&Provenance>,
 ) -> Result<AddOutcome, Error> {
-    // Protect the project tree first. Stash is a rebuildable dump: repair on
+    // Protect the project tree first. Library is a rebuildable collection: repair on
     // diverge, then install project (re-add recovers if that fails).
     skills::preflight_install(skill, destination_root, provenance)?
         .require_compatible(&skill.name, destination_root)?;
-    let (_, write) = stash::deposit(skill, provenance)?;
-    if write == StashWrite::Repaired {
+    let (_, write) = library::deposit(skill, provenance)?;
+    if write == LibraryWrite::Repaired {
         let err = CliStyle::auto_stderr();
         eprintln!(
             "{}",
@@ -57,8 +57,8 @@ fn place_skill(
     })
 }
 
-/// Install into the project from an already-complete stash tree (receipt included).
-fn place_from_stash(
+/// Install into the project from an already-complete library tree (receipt included).
+fn place_from_library(
     project_root: &Path,
     skill: &Skill,
     destination_root: &Path,
@@ -71,7 +71,7 @@ fn place_from_stash(
         name: skill.name.clone(),
         created,
         project_path: installed,
-        origin: AddOrigin::Stash,
+        origin: AddOrigin::Library,
     })
 }
 
@@ -141,8 +141,8 @@ fn install_from_checkout(
         }
         _ => None,
     };
-    if let Some(cached) = stash::matching(&skill, provenance.as_ref())? {
-        return place_from_stash(project_root, &cached, destination_root);
+    if let Some(cached) = library::matching(&skill, provenance.as_ref())? {
+        return place_from_library(project_root, &cached, destination_root);
     }
     place_skill(project_root, &skill, destination_root, provenance.as_ref())
 }
@@ -194,7 +194,7 @@ fn add_skill_inner(
     if looks_like_filesystem_path(source_value) {
         return Err(Error::msg(format!("Path does not exist: {source_value}")));
     }
-    // Slash or URL → remote only. Bare name → home stash promote.
+    // Slash or URL → remote only. Bare name → library promote.
     if looks_like_remote_source(source_value) {
         let remote = sources::parse_remote(source_value)?;
         let outcome = add_from_remote(project_root, &destination_root, &remote, selected_name)?;
@@ -205,11 +205,11 @@ fn add_skill_inner(
     }
     if selected_name.is_some() {
         return Err(Error::msg(
-            "Do not combine --skill with a stash skill name; pass only the stash name",
+            "Do not combine --skill with a library skill name; pass only the library name",
         ));
     }
-    let skill = stash::load(source_value)?;
-    let outcome = place_from_stash(project_root, &skill, &destination_root)?;
+    let skill = library::load(source_value)?;
+    let outcome = place_from_library(project_root, &skill, &destination_root)?;
     if report {
         report_add(&outcome);
     }
@@ -232,12 +232,12 @@ fn looks_like_filesystem_path(value: &str) -> bool {
 fn report_add(outcome: &AddOutcome) {
     let style = CliStyle::auto_stdout();
     match (outcome.created, outcome.origin) {
-        (true, AddOrigin::Stash) => println!(
+        (true, AddOrigin::Library) => println!(
             "{} {} → {} {}",
             style.success("Installed"),
             style.skill(&outcome.name),
             style.accent(outcome.project_path.display()),
-            style.muted("(from stash)")
+            style.muted("(from library)")
         ),
         (true, AddOrigin::Source) => println!(
             "{} {} → {}",
@@ -259,10 +259,10 @@ fn add_from_remote(
     remote: &RemoteSource,
     selected_name: Option<&str>,
 ) -> Result<AddOutcome, Error> {
-    // Cheap tip check: if stash already has this exact remote revision, copy it.
+    // Cheap tip check: if library already has this exact remote revision, copy it.
     let tip = git::remote_head(remote)?;
-    if let Some(cached) = stash::for_remote_tip(&remote.url, &tip, selected_name)? {
-        return place_from_stash(project_root, &cached, destination_root);
+    if let Some(cached) = library::for_remote_tip(&remote.url, &tip, selected_name)? {
+        return place_from_library(project_root, &cached, destination_root);
     }
     let (_temp, source_root, revision) = git::checkout(remote)?;
     install_from_checkout(

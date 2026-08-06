@@ -10,7 +10,7 @@ use crate::git;
 use crate::provenance::{self, Provenance};
 use crate::skills::{self, Skill};
 use crate::sources;
-use crate::stash;
+use crate::library;
 
 fn skill_at(repository: &Path, source_path: &str) -> Result<PathBuf, Error> {
     let mut path = repository.to_path_buf();
@@ -81,8 +81,8 @@ fn refresh_one(installed: &Skill) -> Result<Option<bool>, Error> {
     }
 
     if current_revision == provenance["revision"] {
-        // No upstream move — still keep the home stash honest.
-        stash::sync_from_installed(installed)?;
+        // No upstream move — still keep the library honest.
+        library::sync_from_installed(installed)?;
         return Ok(Some(false));
     }
 
@@ -101,9 +101,9 @@ fn refresh_one(installed: &Skill) -> Result<Option<bool>, Error> {
     next.insert("revision".into(), current_revision);
 
     let tree_changed = !skills::skill_contents_equal(&old_skill.path, &new_skill.path)?;
-    stash::preflight_refresh(&installed.path, &new_skill, &next)?;
+    library::preflight_refresh(&installed.path, &new_skill, &next)?;
     let _installed = skills::replace_verified(&new_skill, &destination_root, &next)?;
-    stash::deposit_refresh(&new_skill, &next)?;
+    library::deposit_refresh(&new_skill, &next)?;
     Ok(Some(tree_changed))
 }
 

@@ -233,7 +233,7 @@ pub(crate) fn withdraw_skill_at(
 /// Remove this project's by-project catalog entry entirely.
 ///
 /// Soft success when absent, or when `meta.root` belongs to a different
-/// project sharing this basename. Does not create inventory or touch stash.
+/// project sharing this basename. Does not create inventory or touch library.
 pub fn forget_project(project_root: &Path) -> Result<(), Error> {
     forget_project_at(None, project_root)
 }
