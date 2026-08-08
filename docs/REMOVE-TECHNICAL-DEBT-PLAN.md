@@ -36,6 +36,7 @@ Optional phases (system-design, ddia-systems, team-topologies) are added as rows
 | 2026-08-07 | Phase 6 | Hardened CLI entrypoint by converting startup `current_dir` panic into an explicit error return path (`src/main.rs`). | Keeps failure-mode handling explicit at process boundaries and avoids hidden crash modes. |
 | 2026-08-07 | Phase 7 | Hardened integration points by adding bounded transport settings, retry budgets, and update-time hardening in `src/git.rs`, `src/update.rs`, and entrypoint startup failure handling. | Adds deterministic failure behavior for outbound/IO boundaries and codifies reliability policy for future updates. |
 | 2026-08-07 | Phase 8 | Introduced catalog-domain aggregate `CatalogMeta` in `src/catalog.rs` to model by-project catalog persistence (`name`, `root`, `skills`) and make ownership / mutation rules explicit while preserving write/read behavior. | Clarifies catalog as a domain aggregate boundary; behavior remains unchanged with existing compatibility contracts. |
+| 2026-08-08 | Validation | Characterized and implemented receipt-only repair for unchanged installed skill bodies with stale or malformed `.tink-source.json` sidecars. | Recovery updates only the reserved receipt; body divergence still preserves the refusal contract. |
 
 ## Next Actions
 - [x] Create `docs/TESTING.md` with phase-1 safety net and characterization matrix.

@@ -305,12 +305,14 @@ pub enum PreflightOutcome {
     Ready,
     /// Target already matches (including optional receipt) — noop.
     Identical,
-    /// Target exists and differs — caller decides refuse vs repair.
+    /// Skill body matches; only `.tink-source.json` presence or bytes differ.
+    ReceiptMismatch,
+    /// Target exists and body differs — caller decides refuse vs repair.
     Divergent,
 }
 
 impl PreflightOutcome {
-    /// Project installs refuse divergence; keep the historical error text.
+    /// Project installs refuse body divergence; receipt-only drift may repair.
     pub fn require_compatible(
         self,
         skill_name: &str,
@@ -326,12 +328,10 @@ impl PreflightOutcome {
     }
 }
 
-/// Compare candidate skill to `destination_root/<name>` without writing.
-pub fn preflight_install(
+fn expected_install_tree(
     skill: &Skill,
-    destination_root: &Path,
     provenance: Option<&Provenance>,
-) -> Result<PreflightOutcome, Error> {
+) -> Result<BTreeMap<String, EntryKind>, Error> {
     let mut expected = require_safe_tree(&skill.path)?;
     if let Some(provenance) = provenance {
         if expected.contains_key(provenance::SIDECAR_FILE) {
@@ -345,6 +345,52 @@ pub fn preflight_install(
             EntryKind::File(provenance::to_bytes(provenance)?),
         );
     }
+    Ok(expected)
+}
+
+fn equal_except_receipt(
+    left: &BTreeMap<String, EntryKind>,
+    right: &BTreeMap<String, EntryKind>,
+) -> bool {
+    left.iter()
+        .filter(|(key, _)| key.as_str() != provenance::SIDECAR_FILE)
+        .eq(right
+            .iter()
+            .filter(|(key, _)| key.as_str() != provenance::SIDECAR_FILE))
+}
+
+/// Align destination receipt to `expected` without rewriting skill body files.
+fn repair_receipt(target: &Path, expected: &BTreeMap<String, EntryKind>) -> Result<(), Error> {
+    refuse_symlink(target)?;
+    let sidecar = target.join(provenance::SIDECAR_FILE);
+    match expected.get(provenance::SIDECAR_FILE) {
+        Some(EntryKind::File(bytes)) => {
+            refuse_symlink(&sidecar)?;
+            fs::write(&sidecar, bytes).map_err(|e| map_io(&sidecar, e))?;
+        }
+        Some(EntryKind::Dir) => {
+            return Err(Error::msg(format!(
+                "Invalid receipt entry (directory): {}",
+                sidecar.display()
+            )));
+        }
+        None => {
+            if sidecar.exists() || sidecar.is_symlink() {
+                refuse_symlink(&sidecar)?;
+                fs::remove_file(&sidecar).map_err(|e| map_io(&sidecar, e))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Compare candidate skill to `destination_root/<name>` without writing.
+pub fn preflight_install(
+    skill: &Skill,
+    destination_root: &Path,
+    provenance: Option<&Provenance>,
+) -> Result<PreflightOutcome, Error> {
+    let expected = expected_install_tree(skill, provenance)?;
     let target = destination_root.join(&skill.name);
     if !target.exists() && !target.is_symlink() {
         return Ok(PreflightOutcome::Ready);
@@ -353,6 +399,9 @@ pub fn preflight_install(
         if let Some(existing) = tree_contents(&target)? {
             if existing == expected {
                 return Ok(PreflightOutcome::Identical);
+            }
+            if equal_except_receipt(&existing, &expected) {
+                return Ok(PreflightOutcome::ReceiptMismatch);
             }
         }
     }
@@ -368,20 +417,28 @@ pub fn install_local(
     let outcome = preflight_install(skill, destination_root, provenance)?
         .require_compatible(&skill.name, destination_root)?;
     let target = destination_root.join(&skill.name);
-    if outcome == PreflightOutcome::Identical {
-        return Ok((target, false));
+    match outcome {
+        PreflightOutcome::Identical => Ok((target, false)),
+        PreflightOutcome::ReceiptMismatch => {
+            let expected = expected_install_tree(skill, provenance)?;
+            repair_receipt(&target, &expected)?;
+            Ok((target, false))
+        }
+        PreflightOutcome::Ready => {
+            let staging = tempfile::Builder::new()
+                .prefix(".tink-stage-")
+                .tempdir_in(destination_root)
+                .map_err(|e| Error::msg(format!("staging dir: {e}")))?;
+            let staged = staging.path().join(&skill.name);
+            copy_skill_tree(&skill.path, &staged, &[".git"])?;
+            if let Some(provenance) = provenance {
+                provenance::write_file(&staged.join(provenance::SIDECAR_FILE), provenance)?;
+            }
+            fs::rename(&staged, &target).map_err(|e| map_io(&target, e))?;
+            Ok((target, true))
+        }
+        PreflightOutcome::Divergent => unreachable!("require_compatible rejects Divergent"),
     }
-    let staging = tempfile::Builder::new()
-        .prefix(".tink-stage-")
-        .tempdir_in(destination_root)
-        .map_err(|e| Error::msg(format!("staging dir: {e}")))?;
-    let staged = staging.path().join(&skill.name);
-    copy_skill_tree(&skill.path, &staged, &[".git"])?;
-    if let Some(provenance) = provenance {
-        provenance::write_file(&staged.join(provenance::SIDECAR_FILE), provenance)?;
-    }
-    fs::rename(&staged, &target).map_err(|e| map_io(&target, e))?;
-    Ok((target, true))
 }
 
 /// Replace an existing imported skill after dirty-tree preflight elsewhere.

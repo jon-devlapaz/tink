@@ -322,6 +322,28 @@ fn a3_add_refuses_overwrite_when_diverged() {
 }
 
 #[test]
+fn a3b_add_local_repair_sidecar_only_divergence() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+    let source = ws.root.join("demo-skill");
+    write_skill(&source, "demo-skill", "content");
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let installed = Workspace::skill_path(&project, "demo-skill");
+    fs::write(installed.join(".tink-source.json"), "{\"bad\": true}\n").expect("stale sidecar");
+
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .success();
+    assert!(!installed.join(".tink-source.json").exists());
+}
+
+#[test]
 fn a4_add_refuses_symlink_in_skill_tree() {
     let ws = Workspace::new();
     let project = ws.project("app");
