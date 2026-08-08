@@ -1258,6 +1258,80 @@ fn h8_skill_harvest_skips_tink_home_and_unsafe_trees() {
     assert!(home_body.contains("stash resident"));
 }
 
+#[test]
+fn h9_completion_offers_current_library_matches_without_creating_home() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+
+    ws.cmd(&project)
+        .env("COMPLETE", "zsh")
+        .env("_CLAP_COMPLETE_INDEX", "3")
+        .env("_CLAP_IFS", "\n")
+        .args(["--", "tink", "skill", "add", "de"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+    assert!(
+        !ws.inventory.exists(),
+        "completion must not create the Tink home"
+    );
+
+    write_skill(
+        project.join("demo-local").as_path(),
+        "demo-local",
+        "local path fixture",
+    );
+    ws.cmd(&project)
+        .env("COMPLETE", "zsh")
+        .env("_CLAP_COMPLETE_INDEX", "3")
+        .env("_CLAP_IFS", "\n")
+        .args(["--", "tink", "skill", "add", "./de"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("./demo-local/"));
+
+    ws.cmd(&project)
+        .env("COMPLETE", "zsh")
+        .env("_CLAP_COMPLETE_INDEX", "1")
+        .env("_CLAP_IFS", "\n")
+        .args(["--", "tink", "sk"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("skill"));
+
+    ws.cmd(&project)
+        .env("COMPLETE", "zsh")
+        .env("_CLAP_COMPLETE_INDEX", "4")
+        .env("_CLAP_IFS", "\n")
+        .args(["--", "tink", "skill", "add", "demo-local", "--s"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--skill"));
+
+    write_skill(
+        ws.library_skill("demo-skill").as_path(),
+        "demo-skill",
+        "completion fixture",
+    );
+    write_skill(
+        ws.library_skill("other-skill").as_path(),
+        "other-skill",
+        "non-matching fixture",
+    );
+
+    ws.cmd(&project)
+        .env("COMPLETE", "zsh")
+        .env("_CLAP_COMPLETE_INDEX", "3")
+        .env("_CLAP_IFS", "\n")
+        .args(["--", "tink", "skill", "add", "de"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("demo-skill")
+                .and(predicate::str::contains("other-skill").not()),
+        );
+}
+
 // --- V*: CLI surface (skill nest) ---
 
 #[test]

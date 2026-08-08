@@ -41,6 +41,30 @@ From a checkout:
 cargo install --path . --root ~/.local --force
 ```
 
+## Tab completion
+
+Tink can complete commands, flags, and live library skill names. Add the line
+for your shell to its startup file, then open a new shell:
+
+```sh
+# zsh (~/.zshrc)
+autoload -Uz compinit
+compinit
+source <(COMPLETE=zsh tink)
+
+# bash (~/.bashrc)
+source <(COMPLETE=bash tink)
+```
+
+For Fish, save this as `~/.config/fish/completions/tink.fish`:
+
+```fish
+COMPLETE=fish tink | source
+```
+
+Then type `tink skill add ` and press Tab. The matches come from the current
+Tink library, including skills added after completion was enabled.
+
 ## First success
 
 In an empty project directory:

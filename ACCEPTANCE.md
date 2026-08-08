@@ -116,6 +116,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | H6 | `skill harvest` when library already identical | Exit 0; summary counts already present; no per-skill already-present lines |
 | H7 | `skill harvest` when library diverges | Exit 0; library unchanged; stderr skip warn |
 | H8 | `skill harvest` skips library sources and unsafe (symlink-inside) skill trees; still harvests cwd skills under `TINK_HOME` outside `skills/` | Library/unsafe omitted; non-library path under home deposited |
+| H9 | Shell completion for `tink skill add <prefix>` | Offers matching names from the current library without creating the home or library |
 
 ### CLI surface
 
