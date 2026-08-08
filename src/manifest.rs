@@ -3,7 +3,8 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::io::Write;
+use std::path::{Component, Path, PathBuf};
 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -105,6 +106,32 @@ fn validate_name(name: &str, kind: &str, names: &mut BTreeMap<String, ()>) -> Re
     Ok(())
 }
 
+fn normalize_project_path(path: &Path, name: &str) -> Result<String, Error> {
+    if path.as_os_str().is_empty() || path.to_string_lossy().contains('\\') {
+        return Err(Error::msg(format!(
+            "Project source must be a non-empty relative path: {name}"
+        )));
+    }
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => normalized.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(Error::msg(format!(
+                    "Project source must stay inside project: {name}"
+                )));
+            }
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        return Err(Error::msg(format!(
+            "Project source must be a non-empty relative path: {name}"
+        )));
+    }
+    Ok(normalized.to_string_lossy().replace('\\', "/"))
+}
+
 fn validate_source(
     source: &str,
     path: Option<&str>,
@@ -120,7 +147,9 @@ fn validate_source(
         }
         let revision = revision
             .ok_or_else(|| Error::msg(format!("Remote lock entry missing revision: {name}")))?;
-        if revision.len() != 40 || !revision.chars().all(|c| c.is_ascii_hexdigit()) {
+        if !(revision.len() == 40 || revision.len() == 64)
+            || !revision.chars().all(|c| c.is_ascii_hexdigit())
+        {
             return Err(Error::msg(format!(
                 "Invalid revision for project lockfile skill: {name}"
             )));
@@ -139,12 +168,7 @@ fn validate_source(
                 "Local lock entry has remote fields: {name}"
             )));
         }
-        let source_path = Path::new(source);
-        if source_path.is_absolute() || source == ".." || source.starts_with("../") {
-            return Err(Error::msg(format!(
-                "Project source must be relative: {name}"
-            )));
-        }
+        normalize_project_path(Path::new(source), name)?;
     }
     Ok(())
 }
@@ -228,12 +252,17 @@ pub fn lock(root: &Path, source_args: &[String]) -> Result<usize, Error> {
                 Some(receipt["path"].clone()),
             )
         } else {
-            let source = local_sources.remove(&skill.name).ok_or_else(|| {
-                Error::msg(format!(
-                    "Local skill needs --source {}=PATH to write the manifest",
-                    skill.name
-                ))
-            })?;
+            let source = if skill.name == "manage-tink" {
+                // Embedded by `tink init`; it has no user-facing source path.
+                "tink:embedded/manage-tink".to_string()
+            } else {
+                local_sources.remove(&skill.name).ok_or_else(|| {
+                    Error::msg(format!(
+                        "Local skill needs --source {}=PATH to write the manifest",
+                        skill.name
+                    ))
+                })?
+            };
             let source_path = Path::new(&source);
             let source_path = if source_path.is_absolute() {
                 source_path
@@ -248,7 +277,7 @@ pub fn lock(root: &Path, source_args: &[String]) -> Result<usize, Error> {
             } else {
                 source_path.to_path_buf()
             };
-            let source = source_path.to_string_lossy().replace('\\', "/");
+            let source = normalize_project_path(&source_path, &skill.name)?;
             (source, None, None)
         };
         let sha256 = tree_sha256(&skill.path)?;
@@ -332,15 +361,38 @@ fn write_atomic(root: &Path, manifest: &str, lock: &str) -> Result<(), Error> {
     let lock_path = directory.join(LOCK_FILE);
     refuse_symlink(&manifest_path)?;
     refuse_symlink(&lock_path)?;
-    let manifest_temp = directory.join(format!(".{MANIFEST_FILE}.tmp"));
-    let lock_temp = directory.join(format!(".{LOCK_FILE}.tmp"));
-    fs::write(&manifest_temp, manifest).map_err(|e| map_io(&manifest_temp, e))?;
-    fs::write(&lock_temp, lock).map_err(|e| map_io(&lock_temp, e))?;
-    fs::rename(&manifest_temp, &manifest_path).map_err(|e| map_io(&manifest_path, e))?;
-    if let Err(error) = fs::rename(&lock_temp, &lock_path) {
-        // Leave the manifest in place so a failed second rename cannot delete
-        // user data. `skill verify` detects the partial pair; rerun `skill lock`
-        // to repair it.
+    let previous_manifest = if manifest_path.is_file() {
+        Some(fs::read(&manifest_path).map_err(|e| map_io(&manifest_path, e))?)
+    } else {
+        None
+    };
+    let mut manifest_temp = tempfile::Builder::new()
+        .prefix(".skills-toml-")
+        .tempfile_in(&directory)
+        .map_err(|e| map_io(&directory, e))?;
+    let mut lock_temp = tempfile::Builder::new()
+        .prefix(".skills-lock-")
+        .tempfile_in(&directory)
+        .map_err(|e| map_io(&directory, e))?;
+    manifest_temp
+        .write_all(manifest.as_bytes())
+        .map_err(|e| map_io(manifest_temp.path(), e))?;
+    lock_temp
+        .write_all(lock.as_bytes())
+        .map_err(|e| map_io(lock_temp.path(), e))?;
+    let manifest_temp_path = manifest_temp.path().to_path_buf();
+    let lock_temp_path = lock_temp.path().to_path_buf();
+    fs::rename(&manifest_temp_path, &manifest_path).map_err(|e| map_io(&manifest_path, e))?;
+    if let Err(error) = fs::rename(&lock_temp_path, &lock_path) {
+        // Roll the first rename back so the pair remains consistent.
+        match previous_manifest {
+            Some(previous) => {
+                let _ = fs::write(&manifest_path, previous);
+            }
+            None => {
+                let _ = fs::remove_file(&manifest_path);
+            }
+        }
         return Err(map_io(&lock_path, error));
     }
     Ok(())
@@ -373,6 +425,24 @@ pub fn verify(root: &Path) -> Result<usize, Error> {
             .ok_or_else(|| Error::msg(format!("Manifest skill is not installed: {name}")))?;
         if tree_sha256(&skill.path)? != pin.sha256.to_ascii_lowercase() {
             return Err(Error::msg(format!("Skill content hash mismatch: {name}")));
+        }
+        let receipt = provenance::read(skill)?;
+        match (&pin.revision, receipt) {
+            (Some(revision), Some(receipt))
+                if receipt.get("source") == Some(&pin.source)
+                    && receipt.get("revision") == Some(revision)
+                    && receipt.get("path") == pin.path.as_ref() => {}
+            (None, None) => {}
+            (Some(_), _) => {
+                return Err(Error::msg(format!(
+                    "Skill receipt does not match lockfile: {name}"
+                )));
+            }
+            (None, Some(_)) => {
+                return Err(Error::msg(format!(
+                    "Unexpected remote receipt for local skill: {name}"
+                )));
+            }
         }
     }
     for name in installed.keys() {
