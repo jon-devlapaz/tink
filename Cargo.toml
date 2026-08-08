@@ -1,6 +1,6 @@
 [package]
 name = "tink"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 description = "Install Agent Skills into a project's .agents/skills/"
 license = "MIT"
