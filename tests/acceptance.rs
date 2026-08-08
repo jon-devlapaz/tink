@@ -777,6 +777,36 @@ fn m2_skill_lock_generates_manifest_and_lockfile() {
 }
 
 #[test]
+fn m3_skill_sync_restores_missing_local_skill() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    let source = project.join("fixture").join("reviewer");
+    write_skill(&source, "reviewer", "body");
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .success();
+    ws.cmd(&project)
+        .args(["skill", "lock", "--source", "reviewer=fixture/reviewer"])
+        .assert()
+        .success();
+    fs::remove_dir_all(Workspace::skill_path(&project, "reviewer")).unwrap();
+    ws.cmd(&project)
+        .args(["skill", "sync"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Synced 1 manifest skill(s)"));
+    ws.cmd(&project)
+        .args(["skill", "verify"])
+        .assert()
+        .success();
+}
+
+#[test]
 fn m2_skill_verify_requires_manifest() {
     let ws = Workspace::new();
     let project = ws.project("app");

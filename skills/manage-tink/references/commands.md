@@ -20,6 +20,7 @@ form for add, list, check, refresh, and remove.
 | Check | `tink skill check` |
 | Generate project manifest and lockfile | `tink skill lock --source NAME=PATH` for each local skill |
 | Verify manifest, lockfile, and installed trees | `tink skill verify` |
+| Sync missing/pinned skills from manifest | `tink skill sync` |
 | Refresh all clean imports | `tink skill refresh` |
 | Refresh one | `tink skill refresh NAME` |
 | Remove one project skill | `tink skill remove NAME` |

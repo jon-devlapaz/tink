@@ -398,6 +398,29 @@ fn write_atomic(root: &Path, manifest: &str, lock: &str) -> Result<(), Error> {
     Ok(())
 }
 
+pub fn sync(root: &Path) -> Result<usize, Error> {
+    let manifest = load(root)?;
+    let lock = load_lock(root)?;
+    let declarations: BTreeMap<_, _> = manifest.skills.iter().map(|s| (&s.name, s)).collect();
+    let pins: BTreeMap<_, _> = lock.skills.iter().map(|s| (&s.name, s)).collect();
+    if declarations.len() != pins.len() || declarations.keys().any(|name| !pins.contains_key(name))
+    {
+        return Err(Error::msg(
+            "Project manifest and lockfile skill sets differ",
+        ));
+    }
+    for (name, declaration) in &declarations {
+        let pin = pins[name];
+        if pin.source != declaration.source || pin.path != declaration.path {
+            return Err(Error::msg(format!(
+                "Project lockfile does not match manifest: {name}"
+            )));
+        }
+        crate::add::add_locked_skill(root, name, &pin.source, pin.revision.as_deref())?;
+    }
+    verify(root)
+}
+
 pub fn verify(root: &Path) -> Result<usize, Error> {
     let manifest = load(root)?;
     let lock = load_lock(root)?;
