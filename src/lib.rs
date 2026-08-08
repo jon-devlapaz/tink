@@ -13,6 +13,7 @@ mod home;
 mod init;
 mod library;
 mod manage_tink;
+mod manifest;
 mod paths;
 mod provenance;
 mod refresh;
@@ -102,6 +103,16 @@ pub enum SkillCommand {
     },
     /// Validate project skills without changing anything
     Check,
+    /// Verify project skills against `.tink/skills.toml` and `.tink/skills.lock`
+    Verify,
+    /// Generate `.tink/skills.toml` and `.tink/skills.lock` from installed skills
+    Lock {
+        /// Source mapping for local skills (`NAME=PATH`); repeatable
+        #[arg(long = "source", value_name = "NAME=PATH")]
+        source: Vec<String>,
+    },
+    /// Install missing or pinned skills from the project manifest and lockfile
+    Sync,
     /// Refresh clean GitHub-imported skills; refuse local modifications
     Refresh {
         /// Optional skill name; default refreshes all imported skills
@@ -189,6 +200,9 @@ fn dispatch_skill(cwd: &Path, command: SkillCommand) -> Result<(), Error> {
             }
         }
         SkillCommand::Check => dispatch_skill_check(cwd),
+        SkillCommand::Verify => dispatch_skill_verify(cwd),
+        SkillCommand::Lock { source } => dispatch_skill_lock(cwd, &source),
+        SkillCommand::Sync => dispatch_skill_sync(cwd),
         SkillCommand::Refresh { name } => dispatch_skill_refresh(cwd, name.as_deref()),
         SkillCommand::Remove { name } => dispatch_skill_remove(cwd, &name),
         SkillCommand::Harvest => dispatch_skill_harvest(cwd),
@@ -267,6 +281,39 @@ fn print_init_skill(style: &CliStyle, skill: &init::InstalledSkill) {
 
 fn dispatch_skill_add(cwd: &Path, source: &str, skill: Option<&str>) -> Result<(), Error> {
     add::add_skill(cwd, source, skill).map(|_| ())
+}
+
+fn dispatch_skill_sync(cwd: &Path) -> Result<(), Error> {
+    let style = CliStyle::auto_stdout();
+    let count = manifest::sync(cwd)?;
+    println!(
+        "{} {} manifest skill(s)",
+        style.success("Synced"),
+        style.accent(count)
+    );
+    Ok(())
+}
+
+fn dispatch_skill_lock(cwd: &Path, sources: &[String]) -> Result<(), Error> {
+    let style = CliStyle::auto_stdout();
+    let count = manifest::lock(cwd, sources)?;
+    println!(
+        "{} {} manifest skill(s)",
+        style.success("Wrote"),
+        style.accent(count)
+    );
+    Ok(())
+}
+
+fn dispatch_skill_verify(cwd: &Path) -> Result<(), Error> {
+    let style = CliStyle::auto_stdout();
+    let count = manifest::verify(cwd)?;
+    println!(
+        "{} {} manifest skill(s)",
+        style.success("OK"),
+        style.accent(count)
+    );
+    Ok(())
 }
 
 fn dispatch_skill_check(cwd: &Path) -> Result<(), Error> {

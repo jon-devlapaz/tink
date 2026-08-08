@@ -455,8 +455,7 @@ mod tests {
         .unwrap();
 
         withdraw_skill_at(Some(&home), &clone_a, "alpha").unwrap();
-        let after: Value =
-            serde_json::from_str(&fs::read_to_string(&meta_path).unwrap()).unwrap();
+        let after: Value = serde_json::from_str(&fs::read_to_string(&meta_path).unwrap()).unwrap();
         let sealed = after["root"].as_str().unwrap_or("");
         assert!(
             !sealed.is_empty(),

@@ -721,6 +721,106 @@ description: corrupted metadata
         .stderr(predicate::str::contains("Skill name"));
 }
 
+// --- M*: project manifest ---
+
+#[test]
+fn m1_skill_verify_accepts_empty_manifest_for_empty_project() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    fs::create_dir_all(project.join(".tink")).unwrap();
+    fs::write(
+        project.join(".tink").join("skills.toml"),
+        "version = 1\nskills = []\n",
+    )
+    .unwrap();
+    fs::write(
+        project.join(".tink").join("skills.lock"),
+        "version = 1\nskills = []\n",
+    )
+    .unwrap();
+    ws.cmd(&project)
+        .args(["skill", "verify"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("OK 0 manifest skill(s)"));
+}
+
+#[test]
+fn m2_skill_lock_generates_manifest_and_lockfile() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    let source = project.join("fixture").join("reviewer");
+    write_skill(&source, "reviewer", "body");
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .success();
+    ws.cmd(&project)
+        .args(["skill", "lock", "--source", "reviewer=fixture/reviewer"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Wrote 1 manifest skill(s)"));
+    assert!(project.join(".tink").join("skills.toml").is_file());
+    assert!(project.join(".tink").join("skills.lock").is_file());
+    ws.cmd(&project)
+        .args(["skill", "verify"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn m3_skill_sync_restores_missing_local_skill() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    let source = project.join("fixture").join("reviewer");
+    write_skill(&source, "reviewer", "body");
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .success();
+    ws.cmd(&project)
+        .args(["skill", "lock", "--source", "reviewer=fixture/reviewer"])
+        .assert()
+        .success();
+    fs::remove_dir_all(Workspace::skill_path(&project, "reviewer")).unwrap();
+    ws.cmd(&project)
+        .args(["skill", "sync"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Synced 1 manifest skill(s)"));
+    ws.cmd(&project)
+        .args(["skill", "verify"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn m2_skill_verify_requires_manifest() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    ws.cmd(&project)
+        .args(["skill", "verify"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Missing project manifest"));
+}
+
 // --- L*: list ---
 
 #[test]

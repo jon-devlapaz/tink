@@ -108,11 +108,32 @@ fn install_from_checkout(
     selected_name: Option<&str>,
     source_url: Option<&str>,
     revision: Option<&str>,
+    locked_path: Option<&str>,
 ) -> Result<AddOutcome, Error> {
     let source_root = source_root
         .canonicalize()
         .map_err(|e| crate::paths::map_io(source_root, e))?;
-    let skill = select_one_skill(&source_root, source_display, selected_name)?;
+    let skill = if let Some(locked_path) = locked_path {
+        if locked_path.is_empty()
+            || locked_path.contains("..")
+            || locked_path.contains('\\')
+            || locked_path.starts_with('/')
+        {
+            return Err(Error::msg(format!(
+                "Invalid locked skill path: {locked_path}"
+            )));
+        }
+        let path = source_root.join(locked_path);
+        let skill = skills::read_skill(&path, true)?;
+        if selected_name != Some(skill.name.as_str()) {
+            return Err(Error::msg(format!(
+                "Locked skill path does not contain {selected_name:?}"
+            )));
+        }
+        skill
+    } else {
+        select_one_skill(&source_root, source_display, selected_name)?
+    };
     let provenance = match (source_url, revision) {
         (Some(url), Some(rev)) => {
             let rel = skill
@@ -141,6 +162,36 @@ fn install_from_checkout(
         return place_from_library(project_root, &cached, destination_root);
     }
     place_skill(project_root, &skill, destination_root, provenance.as_ref())
+}
+
+pub(crate) fn add_locked_skill(
+    project_root: &Path,
+    name: &str,
+    source: &str,
+    revision: Option<&str>,
+    source_path: Option<&str>,
+) -> Result<AddOutcome, Error> {
+    if revision.is_none() {
+        return add_skill(project_root, source, Some(name));
+    }
+    let remote = sources::parse_remote(source)?;
+    let (_clone, repository, tip) = git::checkout(&remote)?;
+    let (_old_checkout, source_root) = if tip == revision.unwrap() {
+        (None, repository)
+    } else {
+        let (temp, checkout) = git::checkout_revision(&repository, revision.unwrap())?;
+        (Some(temp), checkout)
+    };
+    install_from_checkout(
+        project_root,
+        &source_root,
+        &remote.display,
+        &crate::home::project_skills_path(project_root),
+        Some(name),
+        Some(&remote.url),
+        Some(revision.unwrap()),
+        source_path,
+    )
 }
 
 pub fn add_skill(
@@ -179,6 +230,7 @@ fn add_skill_inner(
             &source_root.display().to_string(),
             &destination_root,
             selected_name,
+            None,
             None,
             None,
         )?;
@@ -269,5 +321,6 @@ fn add_from_remote(
         selected_name,
         Some(&remote.url),
         Some(&revision),
+        None,
     )
 }
