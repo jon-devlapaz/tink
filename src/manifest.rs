@@ -338,7 +338,9 @@ fn write_atomic(root: &Path, manifest: &str, lock: &str) -> Result<(), Error> {
     fs::write(&lock_temp, lock).map_err(|e| map_io(&lock_temp, e))?;
     fs::rename(&manifest_temp, &manifest_path).map_err(|e| map_io(&manifest_path, e))?;
     if let Err(error) = fs::rename(&lock_temp, &lock_path) {
-        let _ = fs::remove_file(&manifest_path);
+        // Leave the manifest in place so a failed second rename cannot delete
+        // user data. `skill verify` detects the partial pair; rerun `skill lock`
+        // to repair it.
         return Err(map_io(&lock_path, error));
     }
     Ok(())
