@@ -8,11 +8,30 @@ use crate::paths::{map_io, refuse_symlink};
 use crate::provenance;
 use crate::skills::{self, Skill};
 
+fn is_ignored_skill_entry(name: &str) -> bool {
+    name == "README.md" || name.starts_with('.')
+}
+
+fn read_skill_entry(path: &Path) -> Result<Option<Skill>, Error> {
+    let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+    if is_ignored_skill_entry(name) {
+        return Ok(None);
+    }
+    if path.is_symlink() || !path.is_dir() {
+        return Err(Error::msg(format!(
+            "Unexpected entry in .agents/skills: {name}"
+        )));
+    }
+    let skill = skills::read_skill(path, true)?;
+    provenance::read(&skill)?;
+    Ok(Some(skill))
+}
+
 /// Load and validate project skills under `.agents/skills/`.
 /// Does not enforce ZEN.md / AGENTS.md coupling (see [`check_zen_coupling`]).
 pub fn load_project_skills(root: &Path) -> Result<Vec<Skill>, Error> {
-    let agents = root.join(".agents");
-    let skills_root = agents.join("skills");
+    let agents = crate::home::project_agents_path(root);
+    let skills_root = crate::home::project_skills_path(root);
     refuse_symlink(&agents)?;
     refuse_symlink(&skills_root)?;
     if !skills_root.is_dir() {
@@ -28,21 +47,9 @@ pub fn load_project_skills(root: &Path) -> Result<Vec<Skill>, Error> {
 
     let mut skills = Vec::new();
     for path in entries {
-        let name = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("");
-        if name == "README.md" || name.starts_with('.') {
-            continue;
+        if let Some(skill) = read_skill_entry(&path)? {
+            skills.push(skill);
         }
-        if path.is_symlink() || !path.is_dir() {
-            return Err(Error::msg(format!(
-                "Unexpected entry in .agents/skills: {name}"
-            )));
-        }
-        let skill = skills::read_skill(&path, true)?;
-        provenance::read(&skill)?;
-        skills.push(skill);
     }
     Ok(skills)
 }
@@ -60,7 +67,9 @@ pub fn check_zen_coupling(root: &Path) -> Result<(), Error> {
     let agents_file = root.join("AGENTS.md");
     refuse_symlink(&agents_file)?;
     if !agents_file.is_file() {
-        return Err(Error::msg("ZEN.md is not referenced by a regular AGENTS.md"));
+        return Err(Error::msg(
+            "ZEN.md is not referenced by a regular AGENTS.md",
+        ));
     }
     let agents_text = fs::read_to_string(&agents_file).map_err(|e| map_io(&agents_file, e))?;
     if !agents_text.contains(crate::templates::ZEN_REFERENCE_MARKER) {

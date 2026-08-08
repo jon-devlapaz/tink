@@ -69,19 +69,31 @@ impl CliStyle {
     }
 
     pub fn success(self, text: impl std::fmt::Display) -> String {
-        self.paint(Style::new().fg_color(Some(GREEN)).effects(Effects::BOLD), text)
+        self.paint(
+            Style::new().fg_color(Some(GREEN)).effects(Effects::BOLD),
+            text,
+        )
     }
 
     pub fn error(self, text: impl std::fmt::Display) -> String {
-        self.paint(Style::new().fg_color(Some(RED)).effects(Effects::BOLD), text)
+        self.paint(
+            Style::new().fg_color(Some(RED)).effects(Effects::BOLD),
+            text,
+        )
     }
 
     pub fn warn(self, text: impl std::fmt::Display) -> String {
-        self.paint(Style::new().fg_color(Some(YELLOW)).effects(Effects::BOLD), text)
+        self.paint(
+            Style::new().fg_color(Some(YELLOW)).effects(Effects::BOLD),
+            text,
+        )
     }
 
     pub fn muted(self, text: impl std::fmt::Display) -> String {
-        self.paint(Style::new().fg_color(Some(WHITE)).effects(Effects::DIMMED), text)
+        self.paint(
+            Style::new().fg_color(Some(WHITE)).effects(Effects::DIMMED),
+            text,
+        )
     }
 
     pub fn accent(self, text: impl std::fmt::Display) -> String {
@@ -90,7 +102,10 @@ impl CliStyle {
 
     /// Skill names — magenta so they read apart from cyan paths/accents.
     pub fn skill(self, text: impl std::fmt::Display) -> String {
-        self.paint(Style::new().fg_color(Some(MAGENTA)).effects(Effects::BOLD), text)
+        self.paint(
+            Style::new().fg_color(Some(MAGENTA)).effects(Effects::BOLD),
+            text,
+        )
     }
 
     /// Per-character rainbow (init ZEN tease). Plain text when styling is off.

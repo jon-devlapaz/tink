@@ -17,9 +17,9 @@ use std::path::{Path, PathBuf};
 
 use crate::error::Error;
 use crate::home::{ensure_inventory_root, skills_library_path};
+use crate::library::{self, CreateOnlyWrite};
 use crate::paths::{map_io, refuse_symlink};
 use crate::skills;
-use crate::library::{self, CreateOnlyWrite};
 
 /// Relative skill roots under `$HOME` (user/global harness locations).
 ///
@@ -128,9 +128,7 @@ fn resolve_skill_root(path: &Path) -> Result<Option<PathBuf>, Error> {
         let resolved = if target.is_absolute() {
             target
         } else {
-            path.parent()
-                .unwrap_or_else(|| Path::new("."))
-                .join(target)
+            path.parent().unwrap_or_else(|| Path::new(".")).join(target)
         };
         let canonical = match resolved.canonicalize() {
             Ok(p) => p,

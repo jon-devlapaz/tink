@@ -26,11 +26,19 @@ pub fn valid_skill_name(name: &str) -> bool {
     let Some(first) = parts.next() else {
         return false;
     };
-    if first.is_empty() || !first.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()) {
+    if first.is_empty()
+        || !first
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+    {
         return false;
     }
     for part in parts {
-        if part.is_empty() || !part.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()) {
+        if part.is_empty()
+            || !part
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        {
             return false;
         }
     }
@@ -101,13 +109,13 @@ pub fn read_skill(path: &Path, require_directory_name: bool) -> Result<Skill, Er
     let name = frontmatter_value(frontmatter, "name").unwrap_or_default();
     let description = frontmatter_value(frontmatter, "description").unwrap_or_default();
     if !valid_skill_name(&name) {
-        return Err(Error::msg(format!("Invalid skill name in {}", skill_file.display())));
+        return Err(Error::msg(format!(
+            "Invalid skill name in {}",
+            skill_file.display()
+        )));
     }
     if require_directory_name {
-        let dir_name = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("");
+        let dir_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
         if name != dir_name {
             return Err(Error::msg(format!(
                 "Skill name {name:?} must match directory {dir_name:?}"
@@ -127,16 +135,17 @@ pub fn read_skill(path: &Path, require_directory_name: bool) -> Result<Skill, Er
 }
 
 pub fn discover(source: &Path) -> Result<Vec<Skill>, Error> {
-    let source = source
-        .canonicalize()
-        .map_err(|e| map_io(source, e))?;
+    let source = source.canonicalize().map_err(|e| map_io(source, e))?;
     if source.join("SKILL.md").exists() {
         return Ok(vec![read_skill(&source, false)?]);
     }
     let skills_root = source.join("skills");
     refuse_symlink(&skills_root)?;
     if !skills_root.is_dir() {
-        return Err(Error::msg(format!("No skill found at {}", source.display())));
+        return Err(Error::msg(format!(
+            "No skill found at {}",
+            source.display()
+        )));
     }
     let mut entries: Vec<_> = fs::read_dir(&skills_root)
         .map_err(|e| map_io(&skills_root, e))?
@@ -150,7 +159,10 @@ pub fn discover(source: &Path) -> Result<Vec<Skill>, Error> {
         skills.push(read_skill(&path, true)?);
     }
     if skills.is_empty() {
-        return Err(Error::msg(format!("No skill found at {}", source.display())));
+        return Err(Error::msg(format!(
+            "No skill found at {}",
+            source.display()
+        )));
     }
     Ok(skills)
 }
@@ -299,7 +311,11 @@ pub enum PreflightOutcome {
 
 impl PreflightOutcome {
     /// Project installs refuse divergence; keep the historical error text.
-    pub fn require_compatible(self, skill_name: &str, destination_root: &Path) -> Result<Self, Error> {
+    pub fn require_compatible(
+        self,
+        skill_name: &str,
+        destination_root: &Path,
+    ) -> Result<Self, Error> {
         match self {
             Self::Divergent => Err(Error::msg(format!(
                 "Refusing to overwrite existing skill: {}",
@@ -318,14 +334,14 @@ pub fn preflight_install(
 ) -> Result<PreflightOutcome, Error> {
     let mut expected = require_safe_tree(&skill.path)?;
     if let Some(provenance) = provenance {
-        if expected.contains_key(".tink-source.json") {
+        if expected.contains_key(provenance::SIDECAR_FILE) {
             return Err(Error::msg(format!(
                 "Remote skill already contains reserved .tink-source.json: {}",
                 skill.path.display()
             )));
         }
         expected.insert(
-            ".tink-source.json".into(),
+            provenance::SIDECAR_FILE.into(),
             EntryKind::File(provenance::to_bytes(provenance)?),
         );
     }
@@ -362,7 +378,7 @@ pub fn install_local(
     let staged = staging.path().join(&skill.name);
     copy_skill_tree(&skill.path, &staged, &[".git"])?;
     if let Some(provenance) = provenance {
-        provenance::write_file(&staged.join(".tink-source.json"), provenance)?;
+        provenance::write_file(&staged.join(provenance::SIDECAR_FILE), provenance)?;
     }
     fs::rename(&staged, &target).map_err(|e| map_io(&target, e))?;
     Ok((target, true))
@@ -390,13 +406,13 @@ pub fn replace_verified(
     let staged = staging.path().join("new");
     let backup = staging.path().join("old");
     copy_skill_tree(&skill.path, &staged, &[".git"])?;
-    if staged.join(".tink-source.json").exists() {
+    if staged.join(provenance::SIDECAR_FILE).exists() {
         return Err(Error::msg(format!(
             "Remote skill contains reserved .tink-source.json: {}",
             skill.path.display()
         )));
     }
-    provenance::write_file(&staged.join(".tink-source.json"), provenance)?;
+    provenance::write_file(&staged.join(provenance::SIDECAR_FILE), provenance)?;
     fs::rename(&target, &backup).map_err(|e| map_io(&target, e))?;
     if let Err(err) = fs::rename(&staged, &target) {
         let _ = fs::rename(&backup, &target);

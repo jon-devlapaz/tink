@@ -21,8 +21,8 @@ pub fn remove_skill(project_root: &Path, name: &str) -> Result<RemoveReport, Err
         return Err(Error::msg(format!("Invalid skill name: {name}")));
     }
 
-    let agents = project_root.join(".agents");
-    let skills_root = agents.join("skills");
+    let agents = crate::home::project_agents_path(project_root);
+    let skills_root = crate::home::project_skills_path(project_root);
     let target = skills_root.join(name);
 
     if agents.exists() || agents.is_symlink() {

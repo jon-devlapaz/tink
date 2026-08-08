@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::error::Error;
-use crate::home::{ensure_inventory_root, skills_library_path, BY_PROJECT};
+use crate::home::{BY_PROJECT, ensure_inventory_root, skills_library_path};
 use crate::paths::{map_io, mkdir_p, refuse_symlink};
 use crate::provenance::{self, Provenance};
 use crate::skills::{self, PreflightOutcome, Skill};
@@ -127,7 +127,7 @@ pub fn deposit_create_only(skill: &Skill) -> Result<(PathBuf, CreateOnlyWrite), 
                 && skills::skill_contents_equal_except(
                     &target,
                     &skill.path,
-                    &[".tink-source.json"],
+                    &[provenance::SIDECAR_FILE],
                 )?
             {
                 Ok((target, CreateOnlyWrite::Unchanged))
@@ -142,10 +142,7 @@ pub fn deposit_create_only(skill: &Skill) -> Result<(PathBuf, CreateOnlyWrite), 
 }
 
 /// When the library already holds the exact tree we would install, return it.
-pub fn matching(
-    skill: &Skill,
-    provenance: Option<&Provenance>,
-) -> Result<Option<Skill>, Error> {
+pub fn matching(skill: &Skill, provenance: Option<&Provenance>) -> Result<Option<Skill>, Error> {
     let library = library_root(None)?;
     let target = library.join(&skill.name);
     if !target.is_dir() {
@@ -241,7 +238,7 @@ fn tracks_project(library_skill: &Path, project_skill: &Path) -> Result<bool, Er
         return Ok(true);
     }
     // Allow a missing/different receipt when the skill body still matches.
-    skills::skill_contents_equal_except(library_skill, project_skill, &[".tink-source.json"])
+    skills::skill_contents_equal_except(library_skill, project_skill, &[provenance::SIDECAR_FILE])
 }
 
 /// Before refreshing a project skill, ensure the library can accept `new`
@@ -452,4 +449,3 @@ mod tests {
         assert!(path.join(".tink-source.json").is_file());
     }
 }
-
