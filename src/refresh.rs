@@ -83,7 +83,8 @@ fn refresh_one(installed: &Skill) -> Result<Option<bool>, Error> {
                 "Refusing to update missing installed skill: {name}"
             )));
         }
-        skills::PreflightOutcome::Identical => {}
+        // Receipt drift alone is not a content edit; refresh rewrites receipts later.
+        skills::PreflightOutcome::Identical | skills::PreflightOutcome::ReceiptMismatch => {}
         skills::PreflightOutcome::Divergent => {
             return Err(Error::msg(format!(
                 "Refusing to update {name}: local modifications are present"

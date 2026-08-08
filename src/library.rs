@@ -99,6 +99,10 @@ pub fn deposit(
             Ok((path, LibraryWrite::Created))
         }
         PreflightOutcome::Identical => Ok((library.join(&skill.name), LibraryWrite::Unchanged)),
+        PreflightOutcome::ReceiptMismatch => {
+            let (path, _) = skills::install_local(skill, &library, provenance)?;
+            Ok((path, LibraryWrite::Repaired))
+        }
         PreflightOutcome::Divergent => {
             clear_path(&library.join(&skill.name))?;
             let (path, _) = skills::install_local(skill, &library, provenance)?;
@@ -121,23 +125,14 @@ pub fn deposit_create_only(skill: &Skill) -> Result<(PathBuf, CreateOnlyWrite), 
             let (path, _) = skills::install_local(skill, &library, None)?;
             Ok((path, CreateOnlyWrite::Created))
         }
-        Ok(PreflightOutcome::Identical) => Ok((target, CreateOnlyWrite::Unchanged)),
-        Ok(PreflightOutcome::Divergent) => {
-            if target.is_dir()
-                && skills::skill_contents_equal_except(
-                    &target,
-                    &skill.path,
-                    &[provenance::SIDECAR_FILE],
-                )?
-            {
-                Ok((target, CreateOnlyWrite::Unchanged))
-            } else {
-                Ok((
-                    target,
-                    CreateOnlyWrite::Skipped(Some("library differs; create-only".into())),
-                ))
-            }
+        Ok(PreflightOutcome::Identical | PreflightOutcome::ReceiptMismatch) => {
+            // Receipt-only drift: create-only never rewrites; body already matches.
+            Ok((target, CreateOnlyWrite::Unchanged))
         }
+        Ok(PreflightOutcome::Divergent) => Ok((
+            target,
+            CreateOnlyWrite::Skipped(Some("library differs; create-only".into())),
+        )),
     }
 }
 
@@ -150,7 +145,9 @@ pub fn matching(skill: &Skill, provenance: Option<&Provenance>) -> Result<Option
     }
     match skills::preflight_install(skill, &library, provenance)? {
         PreflightOutcome::Identical => Ok(Some(skills::read_skill(&target, true)?)),
-        PreflightOutcome::Ready | PreflightOutcome::Divergent => Ok(None),
+        PreflightOutcome::Ready
+        | PreflightOutcome::ReceiptMismatch
+        | PreflightOutcome::Divergent => Ok(None),
     }
 }
 
@@ -250,7 +247,9 @@ pub fn preflight_refresh(
 ) -> Result<(), Error> {
     let library = library_root(None)?;
     match skills::preflight_install(new_skill, &library, Some(new_provenance))? {
-        PreflightOutcome::Ready | PreflightOutcome::Identical => Ok(()),
+        PreflightOutcome::Ready
+        | PreflightOutcome::Identical
+        | PreflightOutcome::ReceiptMismatch => Ok(()),
         PreflightOutcome::Divergent => {
             let home_skill = library.join(&new_skill.name);
             if home_skill.is_dir() && tracks_project(&home_skill, project_installed)? {

@@ -32,7 +32,7 @@
 | Module | Pinned behaviors | Test files | Gaps |
 |---|---|---|---|
 | `src/lib.rs` | CLI dispatch is exhaustive by command enum; success prints are constrained and failures return exit code 1 via error pathway. | `tests/acceptance.rs` (`i*`, `a*`, `c*`, `l*`, `x*`) | No unit coverage for exact styled output in each branch (intentional for now). |
-| `src/add.rs` | Add source resolution precedence: local path/remote/library; idempotence and divergence refusal semantics are preserved. | `tests/acceptance.rs` (`a1..a8`, `r*`) | Add-path coverage for malformed local-tree receipt combinations not in scope yet. |
+| `src/add.rs` | Add source resolution precedence: local path/remote/library; idempotence and divergence refusal semantics are preserved. | `tests/acceptance.rs` (`a1..a8`, `r*`) | Receipt-only drift on unchanged local trees is repaired without replacing the skill body (`a3b_add_local_repair_sidecar_only_divergence`). |
 | `src/check.rs` | `skill check` requires `.agents/skills` and validates each installed skill directory/name, and enforces ZEN/AGENTS coupling rule. | `tests/acceptance.rs` (`c1`, `c2`, `c3`, `c4`, `l4`, `l5`) | Add targeted checks for additional malformed installed-skill states (e.g., non-YAML metadata variants, missing required fields). |
 | `src/remove.rs` | `remove` withdraws catalog entry before deleting project tree; never touches library content. | `tests/acceptance.rs` (`x1`, `x2`, `x4`), plus malformed-catalog regression (`x6_remove_fails_when_catalog_meta_is_malformed`) | Explicitly covers malformed catalog state behavior on remove. |
 | `src/refresh.rs` | `refresh_one` computes old/new remote skill repositories and refresh logic without mutating project state until checks pass. | `tests/acceptance.rs` (`p1`, `p2`, `p3`, `p4`, `p5`, `p6`, `p7`) | Refactor extraction added for clarity; now verify this invariant remains covered. |
@@ -50,6 +50,7 @@
 - [x] Add characterization test for a deliberately corrupted installed `SKILL.md` (`c4_check_fails_with_corrupt_installed_skill`).
 - [x] Pin behavior for malformed catalog metadata entries during catalog listing (`l6_skill_list_catalog_skips_malformed_meta_entries`).
 - [x] Pin malformed-catalog behavior for remove (`x6_remove_fails_when_catalog_meta_is_malformed`).
+- [x] Pin receipt-only repair for unchanged local skill bodies (`a3b_add_local_repair_sidecar_only_divergence`).
 
 ## CI Gates
 - `cargo test -- --nocapture`
