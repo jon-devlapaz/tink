@@ -16,6 +16,23 @@ pub const LAYOUT_FILENAME: &str = "layout.json";
 pub const LAYOUT_KIND: &str = "tink-skill-inventory";
 pub const BY_PROJECT: &str = "by-project";
 
+/// Project agent directory (`.agents`) — the single owner of this layout decision.
+pub const PROJECT_AGENTS_DIR: &str = ".agents";
+/// Project installed-skill root (`.agents/skills`).
+pub const PROJECT_SKILLS_DIR: &str = "skills";
+
+/// Path to a project's agent directory (`.agents`).
+pub fn project_agents_path(project_root: &Path) -> PathBuf {
+    project_root.join(PROJECT_AGENTS_DIR)
+}
+
+/// Path to a project's installed skill root (`.agents/skills`).
+pub fn project_skills_path(project_root: &Path) -> PathBuf {
+    project_root
+        .join(PROJECT_AGENTS_DIR)
+        .join(PROJECT_SKILLS_DIR)
+}
+
 const HOME_README: &str = "\
 # Tink home (`~/.tink`)
 
@@ -210,7 +227,12 @@ mod tests {
         )
         .unwrap();
         ensure_inventory_root(Some(&root)).unwrap();
-        assert!(by_project_path(&root).join("app").join("meta.json").is_file());
+        assert!(
+            by_project_path(&root)
+                .join("app")
+                .join("meta.json")
+                .is_file()
+        );
         assert!(!root.join("skills").join(BY_PROJECT).exists());
     }
 

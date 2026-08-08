@@ -11,6 +11,7 @@ mod git;
 mod harvest;
 mod home;
 mod init;
+mod library;
 mod manage_tink;
 mod paths;
 mod provenance;
@@ -18,7 +19,6 @@ mod refresh;
 mod remove;
 mod skills;
 mod sources;
-mod library;
 mod style;
 mod templates;
 mod update;
@@ -178,9 +178,7 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
 
 fn dispatch_skill(cwd: &Path, command: SkillCommand) -> Result<(), Error> {
     match command {
-        SkillCommand::Add { source, skill } => {
-            dispatch_skill_add(cwd, &source, skill.as_deref())
-        }
+        SkillCommand::Add { source, skill } => dispatch_skill_add(cwd, &source, skill.as_deref()),
         SkillCommand::List { catalog, library } => {
             if catalog {
                 dispatch_skill_list_catalog()

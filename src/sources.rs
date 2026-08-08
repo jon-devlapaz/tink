@@ -38,9 +38,7 @@ pub fn parse_remote(value: &str) -> Result<RemoteSource, Error> {
         }
     }
 
-    let err = || {
-        Error::msg("Remote sources must be public GitHub HTTPS URLs or owner/repository")
-    };
+    let err = || Error::msg("Remote sources must be public GitHub HTTPS URLs or owner/repository");
 
     let url = value.parse::<url_lite::Url>().map_err(|_| err())?;
     if url.scheme != "https" || url.host.as_deref() != Some("github.com") {

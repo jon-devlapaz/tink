@@ -6,10 +6,10 @@ use crate::catalog;
 use crate::error::Error;
 use crate::git;
 use crate::init;
+use crate::library::{self, LibraryWrite};
 use crate::provenance::Provenance;
 use crate::skills::{self, Skill};
 use crate::sources::{self, RemoteSource};
-use crate::library::{self, LibraryWrite};
 use crate::style::CliStyle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,11 +128,7 @@ fn install_from_checkout(
                 .to_string_lossy()
                 .replace('\\', "/");
             // Repo-root skills strip to ""; refresh already treats "." as root.
-            let rel = if rel.is_empty() {
-                ".".to_string()
-            } else {
-                rel
-            };
+            let rel = if rel.is_empty() { ".".to_string() } else { rel };
             let mut map = Provenance::new();
             map.insert("source".into(), url.to_string());
             map.insert("revision".into(), rev.to_string());
@@ -171,7 +167,7 @@ fn add_skill_inner(
     report: bool,
 ) -> Result<AddOutcome, Error> {
     init::ensure_project_layout(project_root)?;
-    let destination_root = project_root.join(".agents").join("skills");
+    let destination_root = crate::home::project_skills_path(project_root);
     let local_source = Path::new(source_value);
     if local_source.exists() {
         let source_root = local_source

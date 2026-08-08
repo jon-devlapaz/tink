@@ -25,7 +25,7 @@ pub fn destroy_project(project_root: &Path, yes: bool) -> Result<DestroyReport, 
     }
 
     let mut to_remove = Vec::new();
-    let agents = project_root.join(".agents");
+    let agents = crate::home::project_agents_path(project_root);
     if agents.exists() || agents.is_symlink() {
         refuse_symlink(&agents)?;
         if !agents.is_dir() {

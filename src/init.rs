@@ -92,12 +92,7 @@ fn opt_in_zen(explicit: Option<bool>) -> Result<bool, Error> {
         zen
     );
     let hint = format!("{r} = print {zen} without adding it");
-    let choices = format!(
-        "[{}/{}/{}] ",
-        style.accent("y"),
-        style.accent("N"),
-        r
-    );
+    let choices = format!("[{}/{}/{}] ", style.accent("y"), style.accent("N"), r);
     loop {
         println!("{hint}");
         print!("{question} {choices}");
@@ -157,8 +152,8 @@ fn write_zen(project_root: &Path) -> Result<bool, Error> {
 
 /// Create `.agents/skills/`, optionally ZEN/tink-skills/manage-tink, and ensure home root.
 pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitReport, Error> {
-    let agents = project_root.join(".agents");
-    let skills = agents.join("skills");
+    let agents = crate::home::project_agents_path(project_root);
+    let skills = crate::home::project_skills_path(project_root);
     let readme = skills.join("README.md");
 
     require_directory(&agents)?;
@@ -237,8 +232,8 @@ pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitRep
 
 /// Bootstrap used by `add` — skills dir + home only, no prompts or bundled skills.
 pub fn ensure_project_layout(project_root: &Path) -> Result<(), Error> {
-    let agents = project_root.join(".agents");
-    let skills = agents.join("skills");
+    let agents = crate::home::project_agents_path(project_root);
+    let skills = crate::home::project_skills_path(project_root);
     let readme = skills.join("README.md");
 
     require_directory(&agents)?;

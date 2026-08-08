@@ -7,7 +7,10 @@ use crate::error::Error;
 
 pub fn refuse_symlink(path: &Path) -> Result<(), Error> {
     if path.is_symlink() {
-        return Err(Error::msg(format!("Refusing to follow symlink: {}", path.display())));
+        return Err(Error::msg(format!(
+            "Refusing to follow symlink: {}",
+            path.display()
+        )));
     }
     Ok(())
 }

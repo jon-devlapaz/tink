@@ -7,10 +7,12 @@ use crate::catalog;
 use crate::check;
 use crate::error::Error;
 use crate::git;
+use crate::library;
 use crate::provenance::{self, Provenance};
 use crate::skills::{self, Skill};
 use crate::sources;
-use crate::library;
+
+use tempfile::TempDir;
 
 fn skill_at(repository: &Path, source_path: &str) -> Result<PathBuf, Error> {
     let mut path = repository.to_path_buf();
@@ -30,6 +32,18 @@ fn skill_at(repository: &Path, source_path: &str) -> Result<PathBuf, Error> {
         )));
     }
     Ok(path)
+}
+
+fn checkout_reference_skill(
+    repository: &Path,
+    tip_revision: &str,
+    recorded_revision: &str,
+) -> Result<(PathBuf, Option<TempDir>), Error> {
+    if tip_revision == recorded_revision {
+        return Ok((repository.to_path_buf(), None));
+    }
+    let (temp, checkout) = git::checkout_revision(repository, recorded_revision)?;
+    Ok((checkout, Some(temp)))
 }
 
 /// Returns whether the installed skill tree changed (receipt-only bumps are false).
@@ -52,14 +66,11 @@ fn refresh_one(installed: &Skill) -> Result<Option<bool>, Error> {
         .map_err(|e| Error::msg(format!("repository: {e}")))?;
     let source_is_repository_root = provenance["path"] == ".";
 
-    let mut _old_temp = None;
-    let old_repository = if current_revision == provenance["revision"] {
-        current_repository.clone()
-    } else {
-        let (temp, path) = git::checkout_revision(&current_repository, &provenance["revision"])?;
-        _old_temp = Some(temp);
-        path
-    };
+    let (old_repository, _old_checkout) = checkout_reference_skill(
+        &current_repository,
+        &current_revision,
+        &provenance["revision"],
+    )?;
 
     let old_skill = skills::read_skill(
         &skill_at(&old_repository, &provenance["path"])?,
@@ -116,7 +127,9 @@ pub fn refresh_skill(root: &Path, name: &str) -> Result<bool, Error> {
         .get(name)
         .ok_or_else(|| Error::msg(format!("Installed skill not found: {name}")))?;
     match refresh_one(installed)? {
-        None => Err(Error::msg(format!("Local skill has no remote source: {name}"))),
+        None => Err(Error::msg(format!(
+            "Local skill has no remote source: {name}"
+        ))),
         Some(changed) => {
             catalog::deposit_skill(root, name)?;
             Ok(changed)

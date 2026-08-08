@@ -11,6 +11,10 @@ use crate::sources;
 
 pub type Provenance = BTreeMap<String, String>;
 
+/// Receipt file name written beside a skill tree (`.tink-source.json`).
+/// Single owner of this decision; `skills` and `library` reference it here.
+pub const SIDECAR_FILE: &str = ".tink-source.json";
+
 /// Stable key order (`source`, `revision`, `path`) so preflight byte-compares
 /// of `.tink-source.json` stay deterministic.
 pub fn to_bytes(provenance: &Provenance) -> Result<Vec<u8>, Error> {
@@ -37,7 +41,7 @@ pub fn to_bytes(provenance: &Provenance) -> Result<Vec<u8>, Error> {
 
 /// Load and validate a skill's `.tink-source.json`, if present.
 pub fn read(skill: &Skill) -> Result<Option<Provenance>, Error> {
-    let sidecar = skill.path.join(".tink-source.json");
+    let sidecar = skill.path.join(SIDECAR_FILE);
     if !sidecar.exists() && !sidecar.is_symlink() {
         return Ok(None);
     }
@@ -49,8 +53,8 @@ pub fn read(skill: &Skill) -> Result<Option<Provenance>, Error> {
         )));
     }
     let text = fs::read_to_string(&sidecar).map_err(|e| map_io(&sidecar, e))?;
-    let value: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| Error::msg(format!("Invalid provenance JSON: {e}")))?;
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| Error::msg(format!("Invalid provenance JSON: {e}")))?;
     let obj = value
         .as_object()
         .ok_or_else(|| Error::msg("Provenance must contain exactly source, revision, and path"))?;

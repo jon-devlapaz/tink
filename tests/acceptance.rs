@@ -1,7 +1,7 @@
 //! Acceptance rows from ACCEPTANCE.md. These must fail until each row is implemented.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -121,7 +121,10 @@ fn commit_all(path: &Path, message: &str) -> String {
 }
 
 fn github_redirect(local_repo: &Path, public_url: &str) -> Vec<(String, String)> {
-    let file_url = format!("file://{}", local_repo.canonicalize().expect("canon").display());
+    let file_url = format!(
+        "file://{}",
+        local_repo.canonicalize().expect("canon").display()
+    );
     vec![
         ("GIT_CONFIG_COUNT".into(), "1".into()),
         (
@@ -227,7 +230,10 @@ fn i7_init_no_manage_tink_skips_embedded_skill() {
 fn i8_relative_tink_home_resolves_absolute_not_nested() {
     // I8: relative TINK_HOME is absolutized against cwd; must not nest under project.
     let root = tempfile::TempDir::new().unwrap();
-    let root = root.path().canonicalize().unwrap_or_else(|_| root.path().to_path_buf());
+    let root = root
+        .path()
+        .canonicalize()
+        .unwrap_or_else(|_| root.path().to_path_buf());
     let project = root.join("app");
     fs::create_dir_all(&project).unwrap();
     let expected_home = root.join("tink-home");
@@ -240,7 +246,9 @@ fn i8_relative_tink_home_resolves_absolute_not_nested() {
         .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(expected_home.display().to_string()));
+        .stdout(predicate::str::contains(
+            expected_home.display().to_string(),
+        ));
 
     assert!(
         expected_home.join("layout.json").is_file(),
@@ -307,8 +315,8 @@ fn a3_add_refuses_overwrite_when_diverged() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("Refusing to overwrite"));
-    let body = fs::read_to_string(Workspace::skill_path(&project, "demo-skill").join("SKILL.md"))
-        .unwrap();
+    let body =
+        fs::read_to_string(Workspace::skill_path(&project, "demo-skill").join("SKILL.md")).unwrap();
     assert!(body.contains("original"));
     assert!(!body.contains("changed"));
 }
@@ -399,13 +407,13 @@ fn a6_add_repairs_divergent_library_and_installs_project() {
         .assert()
         .success()
         .stderr(predicate::str::contains("Updated home copy of"));
-    assert!(Workspace::skill_path(&other, "demo-skill")
-        .join("SKILL.md")
-        .is_file());
-    let project = fs::read_to_string(
-        Workspace::skill_path(&other, "demo-skill").join("SKILL.md"),
-    )
-    .unwrap();
+    assert!(
+        Workspace::skill_path(&other, "demo-skill")
+            .join("SKILL.md")
+            .is_file()
+    );
+    let project =
+        fs::read_to_string(Workspace::skill_path(&other, "demo-skill").join("SKILL.md")).unwrap();
     assert!(project.contains("from other"));
     let archived = fs::read_to_string(ws.library_skill("demo-skill").join("SKILL.md")).unwrap();
     assert!(archived.contains("from other"));
@@ -449,13 +457,14 @@ fn a8_add_uses_library_when_remote_tip_matches() {
         .assert()
         .success()
         .stdout(predicate::str::contains("from library"));
-    assert!(Workspace::skill_path(&other, "root-skill")
-        .join(".tink-source.json")
-        .is_file());
-    let receipt = fs::read_to_string(
-        Workspace::skill_path(&other, "root-skill").join(".tink-source.json"),
-    )
-    .unwrap();
+    assert!(
+        Workspace::skill_path(&other, "root-skill")
+            .join(".tink-source.json")
+            .is_file()
+    );
+    let receipt =
+        fs::read_to_string(Workspace::skill_path(&other, "root-skill").join(".tink-source.json"))
+            .unwrap();
     assert!(
         receipt.contains("\"path\": \".\"") || receipt.contains("\"path\":\".\""),
         "{receipt}"
@@ -558,10 +567,9 @@ fn r5_add_root_level_skill_writes_dot_path_check_and_refresh() {
     }
     add.assert().success();
 
-    let receipt = fs::read_to_string(
-        Workspace::skill_path(&project, "root-skill").join(".tink-source.json"),
-    )
-    .unwrap();
+    let receipt =
+        fs::read_to_string(Workspace::skill_path(&project, "root-skill").join(".tink-source.json"))
+            .unwrap();
     assert!(
         receipt.contains("\"path\": \".\"") || receipt.contains("\"path\":\".\""),
         "expected path \".\": {receipt}"
@@ -586,12 +594,60 @@ fn r5_add_root_level_skill_writes_dot_path_check_and_refresh() {
     let skill_md =
         fs::read_to_string(Workspace::skill_path(&project, "root-skill").join("SKILL.md")).unwrap();
     assert!(skill_md.contains("v2"), "{skill_md}");
-    let receipt = fs::read_to_string(
-        Workspace::skill_path(&project, "root-skill").join(".tink-source.json"),
-    )
-    .unwrap();
+    let receipt =
+        fs::read_to_string(Workspace::skill_path(&project, "root-skill").join(".tink-source.json"))
+            .unwrap();
     assert!(receipt.contains(&new_rev));
     assert!(receipt.contains("\"path\": \".\"") || receipt.contains("\"path\":\".\""));
+}
+
+#[test]
+fn v3_main_help_works_when_current_directory_is_unavailable_commands_fail() {
+    let ws = Workspace::new();
+    let bad_dir = ws.root.join("vanish-now");
+    fs::create_dir_all(&bad_dir).unwrap();
+
+    let bin = std::env::var_os("CARGO_BIN_EXE_tink").expect("CARGO_BIN_EXE_tink missing");
+
+    // --help must not depend on a live workdir (clap exit after parse succeeds).
+    let help = StdCommand::new("sh")
+        .arg("-c")
+        .arg("cd \"$1\" && rm -rf \"$1\" && \"$2\" --help")
+        .arg("tink-main-current-dir-help")
+        .arg(bad_dir.to_string_lossy().to_string())
+        .arg(&bin)
+        .output()
+        .expect("run help shim");
+    assert!(
+        help.status.success(),
+        "tink --help should succeed without cwd; status={:?} stderr={}",
+        help.status,
+        String::from_utf8_lossy(&help.stderr)
+    );
+    let help_out = String::from_utf8_lossy(&help.stdout);
+    assert!(
+        help_out.contains("Usage") || help_out.contains("Usage:"),
+        "expected help output: {help_out}"
+    );
+
+    // Commands that need a project path still fail closed when cwd is gone.
+    let bad_dir2 = ws.root.join("vanish-cmd");
+    fs::create_dir_all(&bad_dir2).unwrap();
+    let cmd = StdCommand::new("sh")
+        .arg("-c")
+        .arg("cd \"$1\" && rm -rf \"$1\" && \"$2\" skill check")
+        .arg("tink-main-current-dir-cmd")
+        .arg(bad_dir2.to_string_lossy().to_string())
+        .arg(&bin)
+        .output()
+        .expect("run skill check shim");
+    assert!(!cmd.status.success(), "skill check should fail without cwd");
+    let stderr = String::from_utf8_lossy(&cmd.stderr);
+    assert!(
+        stderr.contains("Failed to resolve current directory"),
+        "stderr did not include current directory failure: {stderr}"
+    );
+    assert_eq!(cmd.status.code().unwrap(), 1);
 }
 
 // --- C*: check ---
@@ -633,6 +689,36 @@ fn c3_check_refuses_agents_symlink() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("symlink").or(predicate::str::contains("Symlink")));
+}
+
+#[test]
+fn c4_check_fails_with_corrupt_installed_skill() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+
+    let source = ws.root.join("demo-skill");
+    write_skill(&source, "demo-skill", "ok");
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let installed = Workspace::skill_path(&project, "demo-skill");
+    let corrupt = r#"---
+name: mismatch
+description: corrupted metadata
+---
+
+# mismatch
+"#;
+    std::fs::write(installed.join("SKILL.md"), corrupt).expect("corrupt skill");
+
+    ws.cmd(&project)
+        .args(["skill", "check"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Skill name"));
 }
 
 // --- L*: list ---
@@ -687,6 +773,40 @@ fn l3_skill_list_catalog_prints_tsv() {
 }
 
 #[test]
+fn l6_skill_list_catalog_skips_malformed_meta_entries() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+
+    let by_project = ws.inventory.join("catalog").join("by-project");
+    let good = by_project.join("good-project");
+    let malformed = by_project.join("bad-project");
+    fs::create_dir_all(&good).unwrap();
+    fs::create_dir_all(&malformed).unwrap();
+    fs::write(
+        good.join("meta.json"),
+        "{\"name\":\"good-project\",\"root\":\"/tmp/example\",\"skills\":[\"demo-skill\"]}",
+    )
+    .unwrap();
+    fs::write(malformed.join("meta.json"), "{not-json}").unwrap();
+
+    let output = ws
+        .cmd(&project)
+        .args(["skill", "list", "--catalog"])
+        .output()
+        .expect("run skill list --catalog");
+    assert!(
+        output.status.success(),
+        "skill list --catalog should ignore malformed entries"
+    );
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(out.starts_with("project	root	skill\n"));
+    assert!(out.contains("good-project	/tmp/example	demo-skill"));
+    assert!(out.contains("good-project"));
+    assert!(out.contains("/tmp/example"));
+    assert!(!out.contains("bad-project"));
+}
+
+#[test]
 fn l5_skill_list_rejects_removed_stash_and_home_flags() {
     let ws = Workspace::new();
     let project = ws.project("app");
@@ -697,8 +817,7 @@ fn l5_skill_list_rejects_removed_stash_and_home_flags() {
             .assert()
             .failure()
             .stderr(
-                predicate::str::contains(flag)
-                    .or(predicate::str::contains("unexpected argument")),
+                predicate::str::contains(flag).or(predicate::str::contains("unexpected argument")),
             );
     }
 }
@@ -785,12 +904,13 @@ fn h2_skill_add_library_installs_into_project() {
         .assert()
         .success()
         .stdout(
-            predicate::str::contains("stash-skill")
-                .and(predicate::str::contains("from library")),
+            predicate::str::contains("stash-skill").and(predicate::str::contains("from library")),
         );
-    assert!(Workspace::skill_path(&app, "stash-skill")
-        .join("SKILL.md")
-        .is_file());
+    assert!(
+        Workspace::skill_path(&app, "stash-skill")
+            .join("SKILL.md")
+            .is_file()
+    );
     ws.assert_cataloged("app", "stash-skill");
 }
 
@@ -842,8 +962,8 @@ fn h4_skill_add_library_refuses_overwrite_when_diverged() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("Refusing to overwrite"));
-    let body = fs::read_to_string(Workspace::skill_path(&app, "demo-skill").join("SKILL.md"))
-        .unwrap();
+    let body =
+        fs::read_to_string(Workspace::skill_path(&app, "demo-skill").join("SKILL.md")).unwrap();
     assert!(body.contains("project local body"));
 }
 
@@ -929,7 +1049,11 @@ fn h7_skill_harvest_divergent_skips_without_repair() {
         "harness body",
     );
     // Pre-seed divergent library.
-    write_skill(ws.library_skill("demo-skill").as_path(), "demo-skill", "stash body");
+    write_skill(
+        ws.library_skill("demo-skill").as_path(),
+        "demo-skill",
+        "stash body",
+    );
     let before = fs::read_to_string(ws.library_skill("demo-skill").join("SKILL.md")).unwrap();
 
     ws.cmd(&project)
@@ -940,7 +1064,10 @@ fn h7_skill_harvest_divergent_skips_without_repair() {
         .stderr(predicate::str::contains("Skipped").and(predicate::str::contains("demo-skill")));
 
     let after = fs::read_to_string(ws.library_skill("demo-skill").join("SKILL.md")).unwrap();
-    assert_eq!(before, after, "create-only must not repair divergent library");
+    assert_eq!(
+        before, after,
+        "create-only must not repair divergent library"
+    );
     assert!(after.contains("stash body"));
 }
 
@@ -957,7 +1084,10 @@ fn h8_skill_harvest_skips_tink_home_and_unsafe_trees() {
         "ok",
     );
     write_skill(
-        &project.join(".agents").join("skills").join("nested-home-skill"),
+        &project
+            .join(".agents")
+            .join("skills")
+            .join("nested-home-skill"),
         "nested-home-skill",
         "under tink home workspace",
     );
@@ -993,13 +1123,14 @@ fn h8_skill_harvest_skips_tink_home_and_unsafe_trees() {
             predicate::str::contains("good-skill")
                 .and(predicate::str::contains("nested-home-skill")),
         )
-        .stderr(
-            predicate::str::contains("bad-skill")
-                .and(predicate::str::contains("from-home")),
-        );
+        .stderr(predicate::str::contains("bad-skill").and(predicate::str::contains("from-home")));
 
     assert!(ws.library_skill("good-skill").join("SKILL.md").is_file());
-    assert!(ws.library_skill("nested-home-skill").join("SKILL.md").is_file());
+    assert!(
+        ws.library_skill("nested-home-skill")
+            .join("SKILL.md")
+            .is_file()
+    );
     assert!(!ws.library_skill("bad-skill").exists());
     let home_body = fs::read_to_string(ws.library_skill("from-home").join("SKILL.md")).unwrap();
     assert!(home_body.contains("stash resident"));
@@ -1011,16 +1142,21 @@ fn h8_skill_harvest_skips_tink_home_and_unsafe_trees() {
 fn v1_skill_add_installs_local_skill() {
     let ws = Workspace::new();
     let project = ws.project("app");
-    ws.cmd(&project).args(["init", "--no-manage-tink"]).assert().success();
+    ws.cmd(&project)
+        .args(["init", "--no-manage-tink"])
+        .assert()
+        .success();
     let source = ws.root.join("demo-skill");
     write_skill(&source, "demo-skill", "via skill add");
     ws.cmd(&project)
         .args(["skill", "add", source.to_str().unwrap()])
         .assert()
         .success();
-    assert!(Workspace::skill_path(&project, "demo-skill")
-        .join("SKILL.md")
-        .is_file());
+    assert!(
+        Workspace::skill_path(&project, "demo-skill")
+            .join("SKILL.md")
+            .is_file()
+    );
 }
 
 #[test]
@@ -1228,7 +1364,11 @@ fn p5_refresh_refuses_divergent_library() {
         add.env(k, v);
     }
     add.assert().success();
-    write_skill(ws.library_skill("remote-skill").as_path(), "remote-skill", "other");
+    write_skill(
+        ws.library_skill("remote-skill").as_path(),
+        "remote-skill",
+        "other",
+    );
 
     write_skill(
         &remote.join("skills").join("remote-skill"),
@@ -1294,7 +1434,11 @@ fn p7_refresh_repairs_stale_archive_when_project_already_new() {
     refresh.assert().success();
 
     // Simulate failed library deposit: project at v2, library rolled back to v1.
-    write_skill(ws.library_skill("remote-skill").as_path(), "remote-skill", "v1");
+    write_skill(
+        ws.library_skill("remote-skill").as_path(),
+        "remote-skill",
+        "v1",
+    );
 
     let mut repair = ws.cmd(&project);
     repair.args(["skill", "refresh", "remote-skill"]);
@@ -1506,7 +1650,11 @@ fn x3_remove_refuses_agents_symlink() {
     let project = ws.project("app");
     let real = ws.root.join("real-agents");
     fs::create_dir_all(real.join("skills").join("demo-skill")).unwrap();
-    write_skill(&real.join("skills").join("demo-skill"), "demo-skill", "body");
+    write_skill(
+        &real.join("skills").join("demo-skill"),
+        "demo-skill",
+        "body",
+    );
     std::os::unix::fs::symlink(&real, project.join(".agents")).unwrap();
     ws.cmd(&project)
         .args(["skill", "remove", "demo-skill"])
@@ -1514,7 +1662,12 @@ fn x3_remove_refuses_agents_symlink() {
         .failure()
         .stderr(predicate::str::contains("symlink").or(predicate::str::contains("Symlink")));
     assert!(project.join(".agents").is_symlink());
-    assert!(real.join("skills").join("demo-skill").join("SKILL.md").is_file());
+    assert!(
+        real.join("skills")
+            .join("demo-skill")
+            .join("SKILL.md")
+            .is_file()
+    );
 }
 
 #[test]
@@ -1565,8 +1718,7 @@ fn x5_manage_tink_documents_remove_and_catalog_sync() {
         "manage-tink must teach bare-name library promote, not add --library: {skill_md}"
     );
     assert!(
-        commands.contains("tink skill add NAME")
-            && !commands.contains("add --library"),
+        commands.contains("tink skill add NAME") && !commands.contains("add --library"),
         "commands.md must list bare-name library promote, not add --library: {commands}"
     );
     assert!(
@@ -1589,6 +1741,30 @@ fn x5_manage_tink_documents_remove_and_catalog_sync() {
                 || commands.contains("updates")),
         "commands.md must describe catalog sync on remove/destroy: {commands}"
     );
+}
+
+#[test]
+fn x6_remove_fails_when_catalog_meta_is_malformed() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+    let source = ws.root.join("demo-skill");
+    write_skill(&source, "demo-skill", "body");
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .success();
+
+    fs::write(ws.catalog_meta("app"), "{not-json}").unwrap();
+
+    ws.cmd(&project)
+        .args(["skill", "remove", "demo-skill"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Invalid catalog meta"));
+
+    assert!(Workspace::skill_path(&project, "demo-skill").is_dir());
+    assert!(ws.library_skill("demo-skill").join("SKILL.md").is_file());
 }
 
 // --- S*: safety ---
@@ -1635,7 +1811,10 @@ fn package_version() -> String {
 
 fn write_release_fixture(dir: &Path, version: &str, binary_src: &Path) -> PathBuf {
     let target = host_release_target();
-    assert_ne!(target, "unsupported", "update fixtures need a supported host");
+    assert_ne!(
+        target, "unsupported",
+        "update fixtures need a supported host"
+    );
     let asset = format!("tink-{version}-{target}.tar.gz");
     let stage = dir.join("stage");
     fs::create_dir_all(&stage).unwrap();
@@ -1750,10 +1929,7 @@ fn u3_update_replaces_binary_when_newer_release_exists() {
         .env("TINK_HOME", &ws.inventory)
         .assert()
         .success()
-        .stdout(
-            predicate::str::contains("Updated")
-                .and(predicate::str::contains("v99.0.0")),
-        );
+        .stdout(predicate::str::contains("Updated").and(predicate::str::contains("v99.0.0")));
 
     assert!(installed.is_file());
     let after = fs::metadata(&installed).unwrap().modified().unwrap();

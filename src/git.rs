@@ -8,26 +8,71 @@ use tempfile::TempDir;
 use crate::error::Error;
 use crate::sources::RemoteSource;
 
+const GIT_LOW_SPEED_LIMIT_SETTING: &str = "http.lowSpeedLimit=1024";
+const GIT_LOW_SPEED_TIME_SETTING: &str = "http.lowSpeedTime=30";
+
+fn git_transport_args() -> [&'static str; 4] {
+    [
+        "-c",
+        GIT_LOW_SPEED_LIMIT_SETTING,
+        "-c",
+        GIT_LOW_SPEED_TIME_SETTING,
+    ]
+}
+
+/// Full argv prefix + subcommand args for every git spawn (proves transport flags).
+fn git_command_args<'a>(args: &[&'a str]) -> Vec<&'a str> {
+    let mut full = Vec::with_capacity(git_transport_args().len() + args.len());
+    full.extend_from_slice(&git_transport_args());
+    full.extend_from_slice(args);
+    full
+}
+
+fn run_git(
+    args: &[&str],
+    cwd: Option<&Path>,
+    non_interactive: bool,
+    io_context: &str,
+    missing_message: Option<&str>,
+) -> Result<std::process::Output, Error> {
+    let mut command = Command::new("git");
+    command.args(git_command_args(args));
+    if non_interactive {
+        command.env("GIT_TERMINAL_PROMPT", "0");
+    }
+    if let Some(cwd) = cwd {
+        command.current_dir(cwd);
+    }
+
+    command.output().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            if let Some(missing_message) = missing_message {
+                Error::msg(missing_message)
+            } else {
+                Error::msg(format!("{io_context}: {e}"))
+            }
+        } else {
+            Error::msg(format!("{io_context}: {e}"))
+        }
+    })
+}
+
+fn git_detail(stderr: &[u8], fallback: &str) -> String {
+    let stderr = String::from_utf8_lossy(stderr);
+    stderr.lines().last().unwrap_or(fallback).trim().to_string()
+}
+
 /// Resolve the remote default branch tip without a full clone.
 pub fn remote_head(remote: &RemoteSource) -> Result<String, Error> {
-    let output = Command::new("git")
-        .args(["ls-remote", "--quiet", &remote.url, "HEAD"])
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .output()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                Error::msg("Git is required for remote skill sources")
-            } else {
-                Error::msg(format!("git ls-remote: {e}"))
-            }
-        })?;
+    let output = run_git(
+        &["ls-remote", "--quiet", &remote.url, "HEAD"],
+        None,
+        true,
+        "git ls-remote",
+        Some("Git is required for remote skill sources"),
+    )?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let detail = stderr
-            .lines()
-            .last()
-            .unwrap_or("git ls-remote failed")
-            .trim();
+        let detail = git_detail(&output.stderr, "git ls-remote failed");
         return Err(Error::msg(format!(
             "Could not resolve {}: {detail}",
             remote.url
@@ -55,30 +100,23 @@ pub fn remote_head(remote: &RemoteSource) -> Result<String, Error> {
 pub fn checkout(remote: &RemoteSource) -> Result<(TempDir, PathBuf, String), Error> {
     let temp = TempDir::new().map_err(|e| Error::msg(format!("temp dir: {e}")))?;
     let repository = temp.path().join("repository");
-    let output = Command::new("git")
-        .args([
+    let output = run_git(
+        &[
             "clone",
             "--quiet",
             "--no-tags",
             &remote.url,
-            repository.to_str().ok_or_else(|| Error::msg("non-utf8 path"))?,
-        ])
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .output()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                Error::msg("Git is required for remote skill sources")
-            } else {
-                Error::msg(format!("git clone: {e}"))
-            }
-        })?;
+            repository
+                .to_str()
+                .ok_or_else(|| Error::msg("non-utf8 path"))?,
+        ],
+        None,
+        true,
+        "git clone",
+        Some("Git is required for remote skill sources"),
+    )?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let detail = stderr
-            .lines()
-            .last()
-            .unwrap_or("git clone failed")
-            .trim();
+        let detail = git_detail(&output.stderr, "git clone failed");
         return Err(Error::msg(format!(
             "Could not fetch {}: {detail}",
             remote.url
@@ -92,14 +130,11 @@ pub fn checkout(remote: &RemoteSource) -> Result<(TempDir, PathBuf, String), Err
 }
 
 /// Detached worktree at `revision`; returns `(temp_keep_alive, worktree_path)`.
-pub fn checkout_revision(
-    repository: &Path,
-    revision: &str,
-) -> Result<(TempDir, PathBuf), Error> {
+pub fn checkout_revision(repository: &Path, revision: &str) -> Result<(TempDir, PathBuf), Error> {
     let temp = TempDir::new().map_err(|e| Error::msg(format!("temp dir: {e}")))?;
     let worktree = temp.path().join("worktree");
-    let output = Command::new("git")
-        .args([
+    let output = run_git(
+        &[
             "-C",
             repository
                 .to_str()
@@ -112,22 +147,14 @@ pub fn checkout_revision(
                 .to_str()
                 .ok_or_else(|| Error::msg("non-utf8 path"))?,
             revision,
-        ])
-        .output()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                Error::msg("Git is required to verify recorded skill revisions")
-            } else {
-                Error::msg(format!("git worktree: {e}"))
-            }
-        })?;
+        ],
+        None,
+        false,
+        "git worktree",
+        Some("Git is required to verify recorded skill revisions"),
+    )?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let detail = stderr
-            .lines()
-            .last()
-            .unwrap_or("revision unavailable")
-            .trim();
+        let detail = git_detail(&output.stderr, "revision unavailable");
         return Err(Error::msg(format!(
             "Could not read recorded revision {revision}: {detail}"
         )));
@@ -139,11 +166,7 @@ pub fn checkout_revision(
 }
 
 pub fn git_stdout(cwd: &Path, args: &[&str]) -> Result<String, Error> {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .map_err(|e| Error::msg(format!("git: {e}")))?;
+    let output = run_git(args, Some(cwd), false, "git", None)?;
     if !output.status.success() {
         return Err(Error::msg(format!(
             "git {} failed",
@@ -151,4 +174,26 @@ pub fn git_stdout(cwd: &Path, args: &[&str]) -> Result<String, Error> {
         )));
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn git_command_args_prepend_transport_timeouts() {
+        assert_eq!(
+            git_command_args(&["ls-remote", "--quiet", "https://example.test", "HEAD"]),
+            [
+                "-c",
+                GIT_LOW_SPEED_LIMIT_SETTING,
+                "-c",
+                GIT_LOW_SPEED_TIME_SETTING,
+                "ls-remote",
+                "--quiet",
+                "https://example.test",
+                "HEAD",
+            ]
+        );
+    }
 }

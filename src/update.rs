@@ -13,6 +13,47 @@ use crate::style::CliStyle;
 pub const DEFAULT_RELEASES_API: &str =
     "https://api.github.com/repos/jon-devlapaz/tink/releases/latest";
 
+const CURL_CONNECT_TIMEOUT_SECONDS: &str = "5";
+/// Bound for tiny JSON metadata (releases API).
+const CURL_METADATA_MAX_TIME_SECONDS: &str = "30";
+/// Bound for release archive download (can be multi-MB on slow links).
+const CURL_ASSET_MAX_TIME_SECONDS: &str = "300";
+const CURL_RETRY_COUNT: &str = "2";
+const CURL_RETRY_DELAY_SECONDS: &str = "1";
+
+#[derive(Debug, Clone, Copy)]
+enum CurlBudget {
+    Metadata,
+    Asset,
+}
+
+impl CurlBudget {
+    fn max_time_seconds(self) -> &'static str {
+        match self {
+            CurlBudget::Metadata => CURL_METADATA_MAX_TIME_SECONDS,
+            CurlBudget::Asset => CURL_ASSET_MAX_TIME_SECONDS,
+        }
+    }
+}
+
+/// Full curl argv for a download (transport flags wired in one place).
+fn curl_command_args<'a>(budget: CurlBudget, url: &'a str, dest: &'a Path) -> Vec<&'a str> {
+    vec![
+        "-fsSL",
+        "--connect-timeout",
+        CURL_CONNECT_TIMEOUT_SECONDS,
+        "--max-time",
+        budget.max_time_seconds(),
+        "--retry",
+        CURL_RETRY_COUNT,
+        "--retry-delay",
+        CURL_RETRY_DELAY_SECONDS,
+        url,
+        "-o",
+        dest.to_str().unwrap_or(""),
+    ]
+}
+
 /// Host target triple for the binary we are running.
 pub fn host_target() -> &'static str {
     if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
@@ -97,10 +138,12 @@ fn require_tool(name: &str) -> Result<(), Error> {
     }
 }
 
-fn curl_to_file(url: &str, dest: &Path) -> Result<(), Error> {
+fn curl_to_file(budget: CurlBudget, url: &str, dest: &Path) -> Result<(), Error> {
+    if dest.to_str().is_none() {
+        return Err(Error::msg("non-utf8 download path"));
+    }
     let output = Command::new("curl")
-        .args(["-fsSL", url, "-o"])
-        .arg(dest)
+        .args(curl_command_args(budget, url, dest))
         .output()
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -150,13 +193,13 @@ fn extract_tink_binary(archive: &Path, into: &Path) -> Result<PathBuf, Error> {
 }
 
 fn replace_binary(current: &Path, new_bin: &Path) -> Result<(), Error> {
-    let parent = current
-        .parent()
-        .ok_or_else(|| Error::msg(format!("cannot update {}: no parent directory", current.display())))?;
-    let staging = parent.join(format!(
-        ".tink-update-{}",
-        std::process::id()
-    ));
+    let parent = current.parent().ok_or_else(|| {
+        Error::msg(format!(
+            "cannot update {}: no parent directory",
+            current.display()
+        ))
+    })?;
+    let staging = parent.join(format!(".tink-update-{}", std::process::id()));
     fs::copy(new_bin, &staging).map_err(|e| {
         Error::msg(format!(
             "cannot write {} ({}). Re-run install.sh or fix permissions.",
@@ -167,9 +210,10 @@ fn replace_binary(current: &Path, new_bin: &Path) -> Result<(), Error> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&staging, fs::Permissions::from_mode(0o755)).map_err(|e| {
-            Error::msg(format!("chmod {}: {e}", staging.display()))
-        })?;
+        if let Err(e) = fs::set_permissions(&staging, fs::Permissions::from_mode(0o755)) {
+            let _ = fs::remove_file(&staging);
+            return Err(Error::msg(format!("chmod {}: {e}", staging.display())));
+        }
     }
     fs::rename(&staging, current).map_err(|e| {
         let _ = fs::remove_file(&staging);
@@ -186,9 +230,7 @@ fn replace_binary(current: &Path, new_bin: &Path) -> Result<(), Error> {
 pub fn update_binary() -> Result<UpdateReport, Error> {
     let target = host_target();
     if target == "unsupported" {
-        return Err(Error::msg(
-            "tink update does not support this platform yet",
-        ));
+        return Err(Error::msg("tink update does not support this platform yet"));
     }
     require_tool("curl")?;
     require_tool("tar")?;
@@ -196,8 +238,9 @@ pub fn update_binary() -> Result<UpdateReport, Error> {
     let api = releases_api_url();
     let temp = TempDir::new().map_err(|e| Error::msg(format!("temp dir: {e}")))?;
     let meta_path = temp.path().join("release.json");
-    curl_to_file(&api, &meta_path)?;
-    let json = fs::read_to_string(&meta_path).map_err(|e| Error::msg(format!("read metadata: {e}")))?;
+    curl_to_file(CurlBudget::Metadata, &api, &meta_path)?;
+    let json =
+        fs::read_to_string(&meta_path).map_err(|e| Error::msg(format!("read metadata: {e}")))?;
     let asset = select_release_asset(&json, target)?;
 
     let current_version = env!("CARGO_PKG_VERSION");
@@ -209,7 +252,7 @@ pub fn update_binary() -> Result<UpdateReport, Error> {
     }
 
     let archive = temp.path().join("tink.tgz");
-    curl_to_file(&asset.download_url, &archive)?;
+    curl_to_file(CurlBudget::Asset, &asset.download_url, &archive)?;
     let extracted = extract_tink_binary(&archive, temp.path())?;
     let current = env::current_exe().map_err(|e| Error::msg(format!("current exe: {e}")))?;
     // Resolve symlinks so we replace the real binary (e.g. cargo install shim).
@@ -225,8 +268,15 @@ pub fn update_binary() -> Result<UpdateReport, Error> {
 
 #[derive(Debug)]
 pub enum UpdateReport {
-    AlreadyLatest { version: String, path: PathBuf },
-    Updated { from: String, to: String, path: PathBuf },
+    AlreadyLatest {
+        version: String,
+        path: PathBuf,
+    },
+    Updated {
+        from: String,
+        to: String,
+        path: PathBuf,
+    },
 }
 
 pub fn print_report(report: &UpdateReport) {
@@ -247,7 +297,10 @@ pub fn print_report(report: &UpdateReport) {
                 style.muted(format!("v{from}")),
                 style.accent(format!("v{to}"))
             );
-            println!("{}", style.muted(format!("Installed to {}", path.display())));
+            println!(
+                "{}",
+                style.muted(format!("Installed to {}", path.display()))
+            );
         }
     }
 }
@@ -255,6 +308,37 @@ pub fn print_report(report: &UpdateReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn curl_command_args_wire_timeouts_retries_and_dest() {
+        let dest = Path::new("/tmp/tink-release.json");
+        assert_eq!(
+            curl_command_args(CurlBudget::Metadata, "https://example.test/meta", dest),
+            [
+                "-fsSL",
+                "--connect-timeout",
+                CURL_CONNECT_TIMEOUT_SECONDS,
+                "--max-time",
+                CURL_METADATA_MAX_TIME_SECONDS,
+                "--retry",
+                CURL_RETRY_COUNT,
+                "--retry-delay",
+                CURL_RETRY_DELAY_SECONDS,
+                "https://example.test/meta",
+                "-o",
+                "/tmp/tink-release.json",
+            ]
+        );
+        let archive = Path::new("/tmp/tink.tgz");
+        let asset_args =
+            curl_command_args(CurlBudget::Asset, "https://example.test/tink.tgz", archive);
+        let max_time_idx = asset_args
+            .iter()
+            .position(|a| *a == "--max-time")
+            .expect("--max-time present");
+        assert_eq!(asset_args[max_time_idx + 1], CURL_ASSET_MAX_TIME_SECONDS);
+        assert_ne!(CURL_METADATA_MAX_TIME_SECONDS, CURL_ASSET_MAX_TIME_SECONDS);
+    }
 
     #[test]
     fn asset_name_matches_release_layout() {
