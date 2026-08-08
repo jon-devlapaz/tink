@@ -35,6 +35,12 @@ are hard stops — honor them; do not work around them.
    `tink skill remove manage-tink && tink init --no-zen --no-tink-skills`
    (init installs the manage-tink copy shipped with the binary; it does not
    overwrite a divergent live skill otherwise).
+   Shell Tab completion setup:
+   - Zsh (`~/.zshrc`, after `autoload -Uz compinit` and `compinit`):
+     `source <(COMPLETE=zsh tink)`
+   - Bash (`~/.bashrc`): `source <(COMPLETE=bash tink)`
+   - Fish (`~/.config/fish/completions/tink.fish`):
+     `COMPLETE=fish tink | source`
    - Done when: the chosen command has finished and its stdout/stderr is known.
    - After adding or changing project skills, if `.tink/skills.toml` and `.tink/skills.lock` do not exist, ask the user whether they want Tink to record a reproducible project skill manifest. If they agree, run `tink skill lock`; provide `--source NAME=PATH` mappings for local skills. Do not create the files without user approval.
    - When a project has a manifest and lockfile, use `tink skill sync` to restore missing pinned skills; stop on divergent content rather than overwriting it.

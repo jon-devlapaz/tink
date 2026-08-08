@@ -1,10 +1,13 @@
 use std::process::ExitCode;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::CompleteEnv;
 
 use tink::{Cli, run};
 
 fn main() -> ExitCode {
+    CompleteEnv::with_factory(Cli::command).complete();
+
     // Parse first so --help / --version work when the process has no cwd
     // (e.g. shell still open after `rm -rf` of the working directory).
     let cli = Cli::parse();

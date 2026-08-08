@@ -25,6 +25,11 @@ mod templates;
 mod update;
 
 use clap::{Parser, Subcommand};
+use clap_complete::{
+    CompletionCandidate,
+    engine::{ArgValueCompleter, PathCompleter, ValueCompleter},
+};
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -87,6 +92,7 @@ pub enum SkillCommand {
     /// Copy one complete skill into the project
     Add {
         /// Local path, `owner/repo`, public GitHub HTTPS URL, or library skill name
+        #[arg(add = ArgValueCompleter::new(add_source_candidates))]
         source: String,
         /// Skill name when the source contains several skills
         #[arg(long)]
@@ -125,6 +131,23 @@ pub enum SkillCommand {
     },
     /// Copy harness skill trees into the library (create-only)
     Harvest,
+}
+
+fn add_source_candidates(current: &OsStr) -> Vec<CompletionCandidate> {
+    let mut candidates = PathCompleter::any().complete(current);
+    let Some(prefix) = current.to_str() else {
+        return candidates;
+    };
+    candidates.extend(
+        library::list_names(None)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|name| name.starts_with(prefix))
+            .map(CompletionCandidate::new),
+    );
+    candidates.sort();
+    candidates.dedup();
+    candidates
 }
 
 fn flag_tri(yes: bool, no: bool) -> Option<bool> {
