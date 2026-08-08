@@ -114,8 +114,7 @@ fn install_from_checkout(
         .canonicalize()
         .map_err(|e| crate::paths::map_io(source_root, e))?;
     let skill = if let Some(locked_path) = locked_path {
-        if locked_path == "."
-            || locked_path.is_empty()
+        if locked_path.is_empty()
             || locked_path.contains("..")
             || locked_path.contains('\\')
             || locked_path.starts_with('/')
@@ -170,6 +169,7 @@ pub(crate) fn add_locked_skill(
     name: &str,
     source: &str,
     revision: Option<&str>,
+    source_path: Option<&str>,
 ) -> Result<AddOutcome, Error> {
     if revision.is_none() {
         return add_skill(project_root, source, Some(name));
@@ -190,7 +190,7 @@ pub(crate) fn add_locked_skill(
         Some(name),
         Some(&remote.url),
         Some(revision.unwrap()),
-        Some("."),
+        source_path,
     )
 }
 

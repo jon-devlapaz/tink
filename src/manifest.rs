@@ -416,7 +416,13 @@ pub fn sync(root: &Path) -> Result<usize, Error> {
                 "Project lockfile does not match manifest: {name}"
             )));
         }
-        crate::add::add_locked_skill(root, name, &pin.source, pin.revision.as_deref())?;
+        crate::add::add_locked_skill(
+            root,
+            name,
+            &pin.source,
+            pin.revision.as_deref(),
+            pin.path.as_deref(),
+        )?;
     }
     verify(root)
 }
