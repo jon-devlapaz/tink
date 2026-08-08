@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 
 use crate::error::Error;
 use crate::paths::{map_io, refuse_symlink};
+use crate::provenance;
 use crate::skills;
 use crate::sources;
 
@@ -196,6 +197,149 @@ fn validate_lock(lock: &Lockfile) -> Result<(), Error> {
             skill.revision.as_deref(),
             &skill.name,
         )?;
+    }
+    Ok(())
+}
+
+pub fn lock(root: &Path, source_args: &[String]) -> Result<usize, Error> {
+    let installed = crate::check::load_project_skills(root)?;
+    let mut local_sources = BTreeMap::new();
+    for value in source_args {
+        let (name, source) = value.split_once('=').ok_or_else(|| {
+            Error::msg(format!(
+                "Invalid --source mapping (expected NAME=PATH): {value}"
+            ))
+        })?;
+        if local_sources
+            .insert(name.to_string(), source.to_string())
+            .is_some()
+        {
+            return Err(Error::msg(format!("Duplicate --source mapping: {name}")));
+        }
+    }
+
+    let mut entries = Vec::new();
+    for skill in &installed {
+        let remote = provenance::read(skill)?;
+        let (source, revision, path) = if let Some(receipt) = remote {
+            (
+                receipt["source"].clone(),
+                Some(receipt["revision"].clone()),
+                Some(receipt["path"].clone()),
+            )
+        } else {
+            let source = local_sources.remove(&skill.name).ok_or_else(|| {
+                Error::msg(format!(
+                    "Local skill needs --source {}=PATH to write the manifest",
+                    skill.name
+                ))
+            })?;
+            let source_path = Path::new(&source);
+            let source_path = if source_path.is_absolute() {
+                source_path
+                    .strip_prefix(root)
+                    .map_err(|_| {
+                        Error::msg(format!(
+                            "Local source must be inside project: {}",
+                            skill.name
+                        ))
+                    })?
+                    .to_path_buf()
+            } else {
+                source_path.to_path_buf()
+            };
+            let source = source_path.to_string_lossy().replace('\\', "/");
+            (source, None, None)
+        };
+        let sha256 = tree_sha256(&skill.path)?;
+        entries.push(LockedSkill {
+            name: skill.name.clone(),
+            source,
+            revision,
+            path,
+            sha256,
+        });
+    }
+    if let Some((name, _)) = local_sources.into_iter().next() {
+        return Err(Error::msg(format!(
+            "--source names an uninstalled skill: {name}"
+        )));
+    }
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    let manifest = entries
+        .iter()
+        .map(|entry| format_manifest_entry(entry))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let lock = entries
+        .iter()
+        .map(|entry| format_lock_entry(entry))
+        .collect::<Vec<_>>()
+        .join("\n");
+    write_atomic(
+        root,
+        &format!("version = 1\n\n{manifest}"),
+        &format!("version = 1\n\n{lock}"),
+    )?;
+    Ok(entries.len())
+}
+
+fn format_manifest_entry(entry: &LockedSkill) -> String {
+    let mut text = format!(
+        "[[skills]]\nname = {}\nsource = {}\n",
+        quote(&entry.name),
+        quote(&entry.source)
+    );
+    if let Some(path) = &entry.path {
+        text.push_str(&format!("path = {}\n", quote(path)));
+    }
+    text
+}
+
+fn format_lock_entry(entry: &LockedSkill) -> String {
+    let mut text = format!(
+        "[[skills]]\nname = {}\nsource = {}\n",
+        quote(&entry.name),
+        quote(&entry.source)
+    );
+    if let Some(revision) = &entry.revision {
+        text.push_str(&format!("revision = {}\n", quote(revision)));
+    }
+    if let Some(path) = &entry.path {
+        text.push_str(&format!("path = {}\n", quote(path)));
+    }
+    text.push_str(&format!("sha256 = {}\n", quote(&entry.sha256)));
+    text
+}
+
+fn quote(value: &str) -> String {
+    toml::Value::String(value.to_string()).to_string()
+}
+
+fn write_atomic(root: &Path, manifest: &str, lock: &str) -> Result<(), Error> {
+    let directory = root.join(DIRECTORY);
+    refuse_symlink(&directory)?;
+    if !directory.exists() {
+        fs::create_dir_all(&directory).map_err(|e| map_io(&directory, e))?;
+    }
+    if !directory.is_dir() {
+        return Err(Error::msg(format!(
+            "Refusing non-directory manifest root: {}",
+            directory.display()
+        )));
+    }
+    let manifest_path = directory.join(MANIFEST_FILE);
+    let lock_path = directory.join(LOCK_FILE);
+    refuse_symlink(&manifest_path)?;
+    refuse_symlink(&lock_path)?;
+    let manifest_temp = directory.join(format!(".{MANIFEST_FILE}.tmp"));
+    let lock_temp = directory.join(format!(".{LOCK_FILE}.tmp"));
+    fs::write(&manifest_temp, manifest).map_err(|e| map_io(&manifest_temp, e))?;
+    fs::write(&lock_temp, lock).map_err(|e| map_io(&lock_temp, e))?;
+    fs::rename(&manifest_temp, &manifest_path).map_err(|e| map_io(&manifest_path, e))?;
+    if let Err(error) = fs::rename(&lock_temp, &lock_path) {
+        let _ = fs::remove_file(&manifest_path);
+        return Err(map_io(&lock_path, error));
     }
     Ok(())
 }

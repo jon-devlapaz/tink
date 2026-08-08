@@ -94,6 +94,13 @@ entries are repaired only when their body is unchanged and only the receipt diff
 Body divergence fails closed and leaves the project tree untouched. Unlisted live
 skills are reported but not deleted.
 
+### `tink skill lock`
+
+Generate both project files from installed skills. Remote skills use their validated
+receipts; local skills require explicit repeatable mappings such as
+`--source reviewer=fixture/reviewer`. Sources are normalized to project-relative
+paths and both files are written through temporary files.
+
 ### `tink skill verify`
 
 Read-only validation of the manifest and installed trees. It reports:
@@ -179,9 +186,10 @@ This is a repository-local tool, not a distributed service:
 
 1. Add manifest parser/validator and unit tests; no CLI changes.
 2. Add `skill verify` for read-only manifest and tree validation.
-3. Add manifest-aware `skill add --manifest` and atomic manifest writes.
-4. Add `skill sync` with staged installs and bounded remote resolution.
-5. Add acceptance coverage, docs, and a migration/import command if needed.
+3. Add `skill lock` to generate intent and resolved pins from installed trees. (done)
+4. Add manifest-aware `skill add --manifest` and atomic manifest updates.
+5. Add `skill sync` with staged installs and bounded remote resolution.
+6. Add acceptance coverage, docs, and a migration/import command if needed.
 
 ## System-design diagnostic
 
