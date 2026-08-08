@@ -38,14 +38,29 @@ skills a project intentionally owns and pins reproducible source information.
 
 ```text
 .tink/
-  skills.toml       # human-reviewed declarations and resolved pins
+  skills.toml       # human-reviewed dependency intent
+  skills.lock       # exact resolved revisions and content hashes
 .agents/skills/     # installed, checked-in skill trees remain the runtime input
 ```
 
-`.tink/skills.toml` is project-owned and should be committed. `$TINK_HOME` remains
-a cache/library and catalog location, not a source of truth.
+Both `.tink/skills.toml` and `.tink/skills.lock` are project-owned and should be
+committed. `$TINK_HOME` remains a cache/library and catalog location, not a source
+of truth.
 
-## Manifest shape
+## Manifest and lockfile shape
+
+`.tink/skills.toml` declares intent:
+
+```toml
+version = 1
+
+[[skills]]
+name = "reviewer"
+source = "https://github.com/example/skills.git"
+path = "skills/reviewer"
+```
+
+`.tink/skills.lock` records resolution:
 
 ```toml
 version = 1
@@ -56,11 +71,6 @@ source = "https://github.com/example/skills.git"
 revision = "40-character-full-git-commit-sha"
 path = "skills/reviewer"
 sha256 = "sha256-of-installed-tree-excluding-receipt"
-
-[[skills]]
-name = "local-conventions"
-source = "./tools/local-conventions"
-sha256 = "sha256-of-installed-tree"
 ```
 
 Rules:
@@ -73,7 +83,7 @@ Rules:
   body drift without making the receipt part of content identity.
 - Duplicate names are invalid.
 - Unknown top-level fields are rejected in v1 to avoid silently ignored policy.
-- Manifest ordering is stable by `name` when Tink writes it.
+- Manifest and lockfile ordering is stable by `name` when Tink writes them.
 
 ## Commands
 
@@ -110,7 +120,7 @@ must not require network access; remote reachability is not part of verification
 
 Tink uses a local, filesystem-based transaction per skill:
 
-1. Parse and validate the complete manifest before writes.
+1. Parse and validate the manifest and lockfile before writes.
 2. Resolve sources and stage each candidate outside the live skill directory.
 3. Validate names, trees, receipts, and hashes.
 4. Preflight every destination for missing, identical, receipt-only drift, or body drift.
@@ -157,8 +167,8 @@ This is a repository-local tool, not a distributed service:
   reviewable agent context. Preferred for reliability.
 - **Manifest plus generated copies:** smaller repositories, but every checkout needs
   network access and agent behavior becomes bootstrap-dependent. Deferred.
-- **One file under `.tink/`:** easy discovery and ownership, while preserving the
-  native `.agents/skills/` runtime convention.
+- **Two files under `.tink/`:** separates human intent from machine resolution, following
+  the Cargo.toml/Cargo.lock model while preserving the native `.agents/skills/` convention.
 - **No automatic deletion:** avoids destructive surprises; a future `--prune` can be
   explicit and separately designed.
 - **SHA-256 tree hash:** catches local tampering and drift, while remaining independent

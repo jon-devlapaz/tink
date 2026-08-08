@@ -737,6 +737,11 @@ fn m1_skill_verify_accepts_empty_manifest_for_empty_project() {
         "version = 1\nskills = []\n",
     )
     .unwrap();
+    fs::write(
+        project.join(".tink").join("skills.lock"),
+        "version = 1\nskills = []\n",
+    )
+    .unwrap();
     ws.cmd(&project)
         .args(["skill", "verify"])
         .assert()
