@@ -9,7 +9,7 @@ use crate::init;
 use crate::library::{self, LibraryWrite};
 use crate::provenance::Provenance;
 use crate::skills::{self, Skill};
-use crate::sources::{self, RemoteSource};
+use crate::sources::{self, AddSource, LockedSource, RemoteSource};
 use crate::style::CliStyle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,31 +167,63 @@ fn install_from_checkout(
 pub(crate) fn add_locked_skill(
     project_root: &Path,
     name: &str,
-    source: &str,
-    revision: Option<&str>,
-    source_path: Option<&str>,
+    source: LockedSource,
 ) -> Result<AddOutcome, Error> {
-    if revision.is_none() {
-        return add_skill(project_root, source, Some(name));
+    match source {
+        LockedSource::LocalPath { path, .. } => {
+            init::ensure_project_layout(project_root)?;
+            if !path.exists() {
+                return Err(Error::msg(format!(
+                    "Path does not exist: {}",
+                    path.display()
+                )));
+            }
+            let source_root = path
+                .canonicalize()
+                .map_err(|e| crate::paths::map_io(&path, e))?;
+            let outcome = install_from_checkout(
+                project_root,
+                &source_root,
+                &source_root.display().to_string(),
+                &crate::home::project_skills_path(project_root),
+                Some(name),
+                None,
+                None,
+                None,
+            )?;
+            report_add(&outcome);
+            Ok(outcome)
+        }
+        LockedSource::Github {
+            remote,
+            revision,
+            path,
+        } => {
+            let (_clone, repository, tip) = git::checkout(&remote)?;
+            let (_old_checkout, source_root) = if tip == revision {
+                (None, repository)
+            } else {
+                let (temp, checkout) = git::checkout_revision(&repository, &revision)?;
+                (Some(temp), checkout)
+            };
+            install_from_checkout(
+                project_root,
+                &source_root,
+                &remote.display,
+                &crate::home::project_skills_path(project_root),
+                Some(name),
+                Some(&remote.url),
+                Some(&revision),
+                Some(&path),
+            )
+        }
+        LockedSource::EmbeddedManageTink if name == "manage-tink" => {
+            crate::manage_tink::install_manage_tink(project_root)
+        }
+        LockedSource::EmbeddedManageTink => Err(Error::msg(format!(
+            "Embedded source does not provide skill: {name}"
+        ))),
     }
-    let remote = sources::parse_remote(source)?;
-    let (_clone, repository, tip) = git::checkout(&remote)?;
-    let (_old_checkout, source_root) = if tip == revision.unwrap() {
-        (None, repository)
-    } else {
-        let (temp, checkout) = git::checkout_revision(&repository, revision.unwrap())?;
-        (Some(temp), checkout)
-    };
-    install_from_checkout(
-        project_root,
-        &source_root,
-        &remote.display,
-        &crate::home::project_skills_path(project_root),
-        Some(name),
-        Some(&remote.url),
-        Some(revision.unwrap()),
-        source_path,
-    )
 }
 
 pub fn add_skill(
@@ -219,62 +251,47 @@ fn add_skill_inner(
 ) -> Result<AddOutcome, Error> {
     init::ensure_project_layout(project_root)?;
     let destination_root = crate::home::project_skills_path(project_root);
-    let local_source = Path::new(source_value);
-    if local_source.exists() {
-        let source_root = local_source
-            .canonicalize()
-            .map_err(|e| crate::paths::map_io(local_source, e))?;
-        let outcome = install_from_checkout(
-            project_root,
-            &source_root,
-            &source_root.display().to_string(),
-            &destination_root,
-            selected_name,
-            None,
-            None,
-            None,
-        )?;
-        if report {
-            report_add(&outcome);
+    match sources::classify_add_input(source_value)? {
+        AddSource::LocalPath(local_source) => {
+            let source_root = local_source
+                .canonicalize()
+                .map_err(|e| crate::paths::map_io(&local_source, e))?;
+            let outcome = install_from_checkout(
+                project_root,
+                &source_root,
+                &source_root.display().to_string(),
+                &destination_root,
+                selected_name,
+                None,
+                None,
+                None,
+            )?;
+            if report {
+                report_add(&outcome);
+            }
+            Ok(outcome)
         }
-        return Ok(outcome);
-    }
-    if looks_like_filesystem_path(source_value) {
-        return Err(Error::msg(format!("Path does not exist: {source_value}")));
-    }
-    // Slash or URL → remote only. Bare name → library promote.
-    if looks_like_remote_source(source_value) {
-        let remote = sources::parse_remote(source_value)?;
-        let outcome = add_from_remote(project_root, &destination_root, &remote, selected_name)?;
-        if report {
-            report_add(&outcome);
+        AddSource::Github(remote) => {
+            let outcome = add_from_remote(project_root, &destination_root, &remote, selected_name)?;
+            if report {
+                report_add(&outcome);
+            }
+            Ok(outcome)
         }
-        return Ok(outcome);
+        AddSource::LibraryName(name) => {
+            if selected_name.is_some() {
+                return Err(Error::msg(
+                    "Do not combine --skill with a library skill name; pass only the library name",
+                ));
+            }
+            let skill = library::load(&name)?;
+            let outcome = place_from_library(project_root, &skill, &destination_root)?;
+            if report {
+                report_add(&outcome);
+            }
+            Ok(outcome)
+        }
     }
-    if selected_name.is_some() {
-        return Err(Error::msg(
-            "Do not combine --skill with a library skill name; pass only the library name",
-        ));
-    }
-    let skill = library::load(source_value)?;
-    let outcome = place_from_library(project_root, &skill, &destination_root)?;
-    if report {
-        report_add(&outcome);
-    }
-    Ok(outcome)
-}
-
-fn looks_like_remote_source(value: &str) -> bool {
-    value.contains('/') || value.contains("://")
-}
-
-fn looks_like_filesystem_path(value: &str) -> bool {
-    let path = Path::new(value);
-    path.is_absolute()
-        || value.starts_with("./")
-        || value.starts_with("../")
-        || value.starts_with("~/")
-        || value.contains('\\')
 }
 
 fn report_add(outcome: &AddOutcome) {

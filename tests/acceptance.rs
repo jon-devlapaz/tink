@@ -541,6 +541,20 @@ fn r2_add_rejects_non_github_remote() {
 }
 
 #[test]
+fn r2_add_rejects_embedded_lock_source() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+    ws.cmd(&project)
+        .args(["skill", "add", "tink:embedded/manage-tink"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Remote sources must be public GitHub HTTPS URLs or owner/repository",
+        ));
+}
+
+#[test]
 fn r3_add_dot_slash_missing_is_path_not_github() {
     let ws = Workspace::new();
     let project = ws.project("app");
@@ -826,6 +840,61 @@ fn m3_skill_sync_restores_missing_local_skill() {
         .args(["skill", "verify"])
         .assert()
         .success();
+}
+
+#[test]
+fn m4_skill_sync_restores_embedded_manage_tink() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--with-manage-tink"])
+        .assert()
+        .success();
+    ws.cmd(&project).args(["skill", "lock"]).assert().success();
+    ws.cmd(&project)
+        .args(["skill", "verify"])
+        .assert()
+        .success();
+    fs::remove_dir_all(Workspace::skill_path(&project, "manage-tink")).unwrap();
+    ws.cmd(&project)
+        .args(["skill", "sync"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Synced 1 manifest skill(s)"));
+    ws.cmd(&project)
+        .args(["skill", "verify"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn m5_skill_sync_keeps_missing_local_source_local() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    let source = project.join("owner").join("repo-shape");
+    write_skill(&source, "local-skill", "body");
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .success();
+    ws.cmd(&project)
+        .args(["skill", "lock", "--source", "local-skill=owner/repo-shape"])
+        .assert()
+        .success();
+    fs::remove_dir_all(Workspace::skill_path(&project, "local-skill")).unwrap();
+    fs::remove_dir_all(project.join("owner")).unwrap();
+    ws.cmd(&project)
+        .args(["skill", "sync"])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("Path does not exist")
+                .and(predicate::str::contains("github.com").not()),
+        );
 }
 
 #[test]

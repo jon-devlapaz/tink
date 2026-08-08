@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -51,6 +51,16 @@ pub struct LockedSkill {
     pub sha256: String,
 }
 
+struct ResolvedLockfile {
+    skills: Vec<ResolvedLockedSkill>,
+}
+
+struct ResolvedLockedSkill {
+    name: String,
+    source: sources::LockedSource,
+    sha256: String,
+}
+
 pub fn path(root: &Path) -> PathBuf {
     root.join(DIRECTORY).join(MANIFEST_FILE)
 }
@@ -66,11 +76,10 @@ pub fn load(root: &Path) -> Result<Manifest, Error> {
     Ok(manifest)
 }
 
-fn load_lock(root: &Path) -> Result<Lockfile, Error> {
+fn load_lock(root: &Path) -> Result<ResolvedLockfile, Error> {
     let file = lock_path(root);
     let lock: Lockfile = read_toml(root, &file, "project lockfile")?;
-    validate_lock(&lock)?;
-    Ok(lock)
+    resolve_lock(root, lock)
 }
 
 fn read_toml<T: for<'de> Deserialize<'de>>(
@@ -106,108 +115,21 @@ fn validate_name(name: &str, kind: &str, names: &mut BTreeMap<String, ()>) -> Re
     Ok(())
 }
 
-fn normalize_project_path(path: &Path, name: &str) -> Result<String, Error> {
-    if path.as_os_str().is_empty() || path.to_string_lossy().contains('\\') {
-        return Err(Error::msg(format!(
-            "Project source must be a non-empty relative path: {name}"
-        )));
-    }
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::Normal(part) => normalized.push(part),
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(Error::msg(format!(
-                    "Project source must stay inside project: {name}"
-                )));
-            }
-        }
-    }
-    if normalized.as_os_str().is_empty() {
-        return Err(Error::msg(format!(
-            "Project source must be a non-empty relative path: {name}"
-        )));
-    }
-    Ok(normalized.to_string_lossy().replace('\\', "/"))
-}
-
-fn validate_source(
-    source: &str,
-    path: Option<&str>,
-    revision: Option<&str>,
-    name: &str,
-) -> Result<(), Error> {
-    if source.starts_with("https://") {
-        let parsed = sources::parse_remote(source)?;
-        if parsed.url != source {
-            return Err(Error::msg(format!(
-                "Manifest source must be canonical GitHub HTTPS URL: {name}"
-            )));
-        }
-        let revision = revision
-            .ok_or_else(|| Error::msg(format!("Remote lock entry missing revision: {name}")))?;
-        if !(revision.len() == 40 || revision.len() == 64)
-            || !revision.chars().all(|c| c.is_ascii_hexdigit())
-        {
-            return Err(Error::msg(format!(
-                "Invalid revision for project lockfile skill: {name}"
-            )));
-        }
-        let source_path =
-            path.ok_or_else(|| Error::msg(format!("Remote lock entry missing path: {name}")))?;
-        if source_path.starts_with('/') || source_path.contains("..") || source_path.contains('\\')
-        {
-            return Err(Error::msg(format!(
-                "Invalid source path for project lockfile skill: {name}"
-            )));
-        }
-    } else {
-        if revision.is_some() || path.is_some() {
-            return Err(Error::msg(format!(
-                "Local lock entry has remote fields: {name}"
-            )));
-        }
-        normalize_project_path(Path::new(source), name)?;
-    }
-    Ok(())
-}
-
 fn validate_manifest(manifest: &Manifest) -> Result<(), Error> {
     validate_version(manifest.version)?;
     let mut names = BTreeMap::new();
     for skill in &manifest.skills {
         validate_name(&skill.name, "project manifest", &mut names)?;
-        if skill.source.starts_with("https://") {
-            let parsed = sources::parse_remote(&skill.source)?;
-            if parsed.url != skill.source {
-                return Err(Error::msg(format!(
-                    "Manifest source must be canonical GitHub HTTPS URL: {}",
-                    skill.name
-                )));
-            }
-            if let Some(path) = &skill.path {
-                if path.starts_with('/') || path.contains("..") || path.contains('\\') {
-                    return Err(Error::msg(format!(
-                        "Invalid source path for project manifest skill: {}",
-                        skill.name
-                    )));
-                }
-            }
-        } else if skill.path.is_some() {
-            return Err(Error::msg(format!(
-                "Local manifest skill has remote path: {}",
-                skill.name
-            )));
-        }
+        sources::validate_manifest_source(&skill.name, &skill.source, skill.path.as_deref())?;
     }
     Ok(())
 }
 
-fn validate_lock(lock: &Lockfile) -> Result<(), Error> {
+fn resolve_lock(root: &Path, lock: Lockfile) -> Result<ResolvedLockfile, Error> {
     validate_version(lock.version)?;
     let mut names = BTreeMap::new();
-    for skill in &lock.skills {
+    let mut skills = Vec::with_capacity(lock.skills.len());
+    for skill in lock.skills {
         validate_name(&skill.name, "project lockfile", &mut names)?;
         if skill.sha256.len() != 64 || !skill.sha256.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(Error::msg(format!(
@@ -215,14 +137,20 @@ fn validate_lock(lock: &Lockfile) -> Result<(), Error> {
                 skill.name
             )));
         }
-        validate_source(
-            &skill.source,
-            skill.path.as_deref(),
-            skill.revision.as_deref(),
+        let source = sources::classify_locked(
+            root,
             &skill.name,
+            &skill.source,
+            skill.revision.as_deref(),
+            skill.path.as_deref(),
         )?;
+        skills.push(ResolvedLockedSkill {
+            name: skill.name,
+            source,
+            sha256: skill.sha256,
+        });
     }
-    Ok(())
+    Ok(ResolvedLockfile { skills })
 }
 
 pub fn lock(root: &Path, source_args: &[String]) -> Result<usize, Error> {
@@ -254,7 +182,7 @@ pub fn lock(root: &Path, source_args: &[String]) -> Result<usize, Error> {
         } else {
             let source = if skill.name == "manage-tink" {
                 // Embedded by `tink init`; it has no user-facing source path.
-                "tink:embedded/manage-tink".to_string()
+                sources::EMBEDDED_MANAGE_TINK.to_string()
             } else {
                 local_sources.remove(&skill.name).ok_or_else(|| {
                     Error::msg(format!(
@@ -277,7 +205,7 @@ pub fn lock(root: &Path, source_args: &[String]) -> Result<usize, Error> {
             } else {
                 source_path.to_path_buf()
             };
-            let source = normalize_project_path(&source_path, &skill.name)?;
+            let source = sources::normalize_project_path(&source_path, &skill.name)?;
             (source, None, None)
         };
         let sha256 = tree_sha256(&skill.path)?;
@@ -411,18 +339,14 @@ pub fn sync(root: &Path) -> Result<usize, Error> {
     }
     for (name, declaration) in &declarations {
         let pin = pins[name];
-        if pin.source != declaration.source || pin.path != declaration.path {
+        if pin.source.declared() != declaration.source
+            || pin.source.source_path() != declaration.path.as_deref()
+        {
             return Err(Error::msg(format!(
                 "Project lockfile does not match manifest: {name}"
             )));
         }
-        crate::add::add_locked_skill(
-            root,
-            name,
-            &pin.source,
-            pin.revision.as_deref(),
-            pin.path.as_deref(),
-        )?;
+        crate::add::add_locked_skill(root, name, pin.source.clone())?;
     }
     verify(root)
 }
@@ -440,7 +364,9 @@ pub fn verify(root: &Path) -> Result<usize, Error> {
     }
     for (name, declaration) in &declarations {
         let pin = pins[name];
-        if pin.source != declaration.source || pin.path != declaration.path {
+        if pin.source.declared() != declaration.source
+            || pin.source.source_path() != declaration.path.as_deref()
+        {
             return Err(Error::msg(format!(
                 "Project lockfile does not match manifest: {name}"
             )));
@@ -456,11 +382,11 @@ pub fn verify(root: &Path) -> Result<usize, Error> {
             return Err(Error::msg(format!("Skill content hash mismatch: {name}")));
         }
         let receipt = provenance::read(skill)?;
-        match (&pin.revision, receipt) {
+        match (pin.source.revision(), receipt) {
             (Some(revision), Some(receipt))
-                if receipt.get("source") == Some(&pin.source)
-                    && receipt.get("revision") == Some(revision)
-                    && receipt.get("path") == pin.path.as_ref() => {}
+                if receipt.get("source").map(String::as_str) == Some(pin.source.declared())
+                    && receipt.get("revision").map(String::as_str) == Some(revision)
+                    && receipt.get("path").map(String::as_str) == pin.source.source_path() => {}
             (None, None) => {}
             (Some(_), _) => {
                 return Err(Error::msg(format!(
