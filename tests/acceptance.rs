@@ -721,6 +721,44 @@ description: corrupted metadata
         .stderr(predicate::str::contains("Skill name"));
 }
 
+// --- M*: project manifest ---
+
+#[test]
+fn m1_skill_verify_accepts_empty_manifest_for_empty_project() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    fs::create_dir_all(project.join(".tink")).unwrap();
+    fs::write(
+        project.join(".tink").join("skills.toml"),
+        "version = 1\nskills = []\n",
+    )
+    .unwrap();
+    ws.cmd(&project)
+        .args(["skill", "verify"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("OK 0 manifest skill(s)"));
+}
+
+#[test]
+fn m2_skill_verify_requires_manifest() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    ws.cmd(&project)
+        .args(["skill", "verify"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Missing project manifest"));
+}
+
 // --- L*: list ---
 
 #[test]
