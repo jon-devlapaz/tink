@@ -15,6 +15,7 @@ pub const TINK_HOME_NAME: &str = ".tink";
 pub const LAYOUT_FILENAME: &str = "layout.json";
 pub const LAYOUT_KIND: &str = "tink-skill-inventory";
 pub const BY_PROJECT: &str = "by-project";
+pub const BY_SKILLSET: &str = "by-skillset";
 
 /// Project agent directory (`.agents`) — the single owner of this layout decision.
 pub const PROJECT_AGENTS_DIR: &str = ".agents";
@@ -40,8 +41,10 @@ Tink home directory. This is **not** an agent skill discovery root. Agents load
 skills only from a project's `.agents/skills/`.
 
 Successful installs:
-- copy skill trees into the library under `skills/<name>/` (divergent entries are repaired)
+- copy skill and validated project skillset trees into the library under `skills/<name>/`
+- skillsets use canonical `<name>-skillset` roots; their project tree is primary
 - record skill **names** under `catalog/by-project/<project>/meta.json`
+- read pinned skillset definitions from `catalog/by-skillset/<name>/meta.json`
 
 `skill remove` and `destroy` update that name catalog; they do not delete
 library trees.
@@ -93,6 +96,11 @@ pub fn by_project_path(home: &Path) -> PathBuf {
     home.join("catalog").join(BY_PROJECT)
 }
 
+/// Path to the catalog of authored skillset definitions.
+pub fn by_skillset_path(home: &Path) -> PathBuf {
+    home.join("catalog").join(BY_SKILLSET)
+}
+
 /// Path to the skill-tree library root (`skills/`).
 pub fn skills_library_path(home: &Path) -> PathBuf {
     home.join("skills")
@@ -120,6 +128,7 @@ pub fn ensure_inventory_root(root: Option<&Path>) -> Result<(PathBuf, bool), Err
     mkdir_p(&skills_library_path(&root))?;
     migrate_catalog_if_needed(&root)?;
     mkdir_p(&by_project_path(&root))?;
+    mkdir_p(&by_skillset_path(&root))?;
     write_layout_marker(&root)?;
     Ok((root, created))
 }

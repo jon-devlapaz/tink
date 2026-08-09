@@ -42,6 +42,13 @@ pub fn remove_skill(project_root: &Path, name: &str) -> Result<RemoveReport, Err
             target.display()
         )));
     }
+    if target.join(crate::skillsets::RECEIPT_FILE).exists()
+        || target.join(crate::skillsets::RECEIPT_FILE).is_symlink()
+    {
+        return Err(Error::msg(format!(
+            "Skillset root detected; use `tink skillset remove {name}`"
+        )));
+    }
 
     catalog::withdraw_skill(project_root, name)?;
     fs::remove_dir_all(&target).map_err(|e| map_io(&target, e))?;
