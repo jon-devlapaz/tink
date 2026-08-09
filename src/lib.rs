@@ -11,6 +11,7 @@ mod git;
 mod harvest;
 mod home;
 mod init;
+mod inspect;
 mod library;
 mod manage_tink;
 mod manifest;
@@ -19,6 +20,7 @@ mod provenance;
 mod refresh;
 mod remove;
 mod skills;
+mod skillsets;
 mod sources;
 mod style;
 mod templates;
@@ -29,6 +31,7 @@ use clap_complete::{
     CompletionCandidate,
     engine::{ArgValueCompleter, PathCompleter, ValueCompleter},
 };
+use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -77,6 +80,13 @@ pub enum Command {
         #[command(subcommand)]
         command: SkillCommand,
     },
+    /// Install grouped member skills as one nested project tree
+    Skillset {
+        #[command(subcommand)]
+        command: SkillsetCommand,
+    },
+    /// Inspect skills and source-defined skillsets in a public GitHub URL
+    Inspect { url: String },
     /// Remove `.agents/`, `ZEN.md`, `AGENTS.md`, and this project's catalog entry (not library)
     Destroy {
         /// Skip the confirmation prompt
@@ -133,6 +143,22 @@ pub enum SkillCommand {
     Harvest,
 }
 
+#[derive(Debug, Subcommand)]
+pub enum SkillsetCommand {
+    /// List receipt-backed skillsets installed in the current project
+    List {
+        /// List receipt-backed skillsets in the home library
+        #[arg(long)]
+        library: bool,
+    },
+    /// Install the pinned skillset named in `$TINK_HOME/catalog/by-skillset/`
+    Add { name: String },
+    /// Update one clean installed skillset to its pinned catalog definition
+    Refresh { name: String },
+    /// Remove one installed skillset without deleting its shared catalog definition
+    Remove { name: String },
+}
+
 fn add_source_candidates(current: &OsStr) -> Vec<CompletionCandidate> {
     let mut candidates = PathCompleter::any().complete(current);
     let Some(prefix) = current.to_str() else {
@@ -186,6 +212,8 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
             flag_tri(with_manage_tink, no_manage_tink),
         ),
         Command::Skill { command } => dispatch_skill(&cwd, command),
+        Command::Skillset { command } => dispatch_skillset(&cwd, command),
+        Command::Inspect { url } => dispatch_inspect(&url),
         Command::Destroy { yes } => {
             let style = CliStyle::auto_stdout();
             let report = destroy::destroy_project(&cwd, yes)?;
@@ -210,6 +238,101 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
     }
 }
 
+fn dispatch_inspect(url: &str) -> Result<(), Error> {
+    let style = CliStyle::auto_stdout();
+    let report = inspect::inspect(url)?;
+    println!("Source");
+    println!("  Repository: {}", style.accent(&report.repository));
+    println!("  Revision:   {}", style.accent(&report.revision));
+    println!("  Boundary:   {}", style.accent(&report.boundary));
+    println!();
+    let member_count: usize = report
+        .skillsets
+        .iter()
+        .map(|skillset| skillset.members)
+        .sum();
+    println!(
+        "Skillsets ({}, {} member skills)",
+        report.skillsets.len(),
+        member_count
+    );
+    let mut grouped_paths = BTreeSet::new();
+    for (index, skillset) in report.skillsets.iter().enumerate() {
+        if index > 0 {
+            println!();
+        }
+        let name = skillset.name.as_deref().unwrap_or("(unnamed proposal)");
+        let padded_name = format!("{name:<28}");
+        let displayed_name = if skillset.name.is_some() {
+            style.skillset(padded_name)
+        } else {
+            padded_name
+        };
+        let source_path = if skillset.path == "." {
+            "./".to_string()
+        } else {
+            format!("{}/", skillset.path)
+        };
+        let noun = if skillset.members == 1 {
+            "skill"
+        } else {
+            "skills"
+        };
+        println!(
+            "  {} ({} {})  {}",
+            displayed_name,
+            skillset.members,
+            noun,
+            style.accent(source_path)
+        );
+        if skillset.members == 0 {
+            println!("    (empty structural candidate)");
+            continue;
+        }
+        let prefix = if skillset.path == "." {
+            None
+        } else {
+            Some(format!("{}/", skillset.path))
+        };
+        for skill in &report.skills {
+            if prefix
+                .as_ref()
+                .map(|prefix| skill.path.starts_with(prefix))
+                .unwrap_or(true)
+            {
+                println!("    {}", style.skill(&skill.name));
+                grouped_paths.insert(skill.path.as_str());
+            }
+        }
+    }
+    println!();
+    let standalone: Vec<_> = report
+        .skills
+        .iter()
+        .filter(|skill| !grouped_paths.contains(skill.path.as_str()))
+        .collect();
+    println!("Standalone skills ({})", standalone.len());
+    for skill in standalone {
+        let padded_name = format!("{:<28}", skill.name);
+        println!(
+            "  {} {}",
+            style.skill(padded_name),
+            style.accent(&skill.path)
+        );
+    }
+    if !report.diagnostics.is_empty() {
+        println!();
+        println!(
+            "{}",
+            style.warn(format!("Diagnostics ({})", report.diagnostics.len()))
+        );
+        for diagnostic in &report.diagnostics {
+            println!("  {diagnostic}");
+        }
+    }
+    Ok(())
+}
+
 fn dispatch_skill(cwd: &Path, command: SkillCommand) -> Result<(), Error> {
     match command {
         SkillCommand::Add { source, skill } => dispatch_skill_add(cwd, &source, skill.as_deref()),
@@ -229,6 +352,69 @@ fn dispatch_skill(cwd: &Path, command: SkillCommand) -> Result<(), Error> {
         SkillCommand::Refresh { name } => dispatch_skill_refresh(cwd, name.as_deref()),
         SkillCommand::Remove { name } => dispatch_skill_remove(cwd, &name),
         SkillCommand::Harvest => dispatch_skill_harvest(cwd),
+    }
+}
+
+fn dispatch_skillset(cwd: &Path, command: SkillsetCommand) -> Result<(), Error> {
+    match command {
+        SkillsetCommand::List { library } => {
+            let style = CliStyle::auto_stdout();
+            let names = if library {
+                skillsets::list_library(None)?
+            } else {
+                skillsets::list_installed(cwd)?
+            };
+            if names.is_empty() {
+                let message = if library {
+                    "(no library skillsets)"
+                } else {
+                    "(no skillsets)"
+                };
+                println!("{}", style.muted(message));
+            } else {
+                for name in names {
+                    println!("{}", style.skillset(name));
+                }
+            }
+            Ok(())
+        }
+        SkillsetCommand::Add { name } => {
+            let style = CliStyle::auto_stdout();
+            let (path, created, library_write) = skillsets::add_skillset(cwd, &name)?;
+            if library_write == skillsets::LibraryWrite::Repaired {
+                let err = CliStyle::auto_stderr();
+                eprintln!("{}", err.warn(format!("Updated home copy of {name}")));
+            }
+            if created {
+                println!(
+                    "{} {}",
+                    style.success("Installed"),
+                    style.accent(path.display())
+                );
+            } else {
+                println!("{} {}", style.muted("Unchanged"), style.skillset(name));
+            }
+            Ok(())
+        }
+        SkillsetCommand::Refresh { name } => {
+            let style = CliStyle::auto_stdout();
+            if skillsets::refresh_skillset(cwd, &name)? {
+                println!("{} {}", style.success("Refreshed"), style.skillset(name));
+            } else {
+                println!("{} {}", style.muted("Unchanged"), style.skillset(name));
+            }
+            Ok(())
+        }
+        SkillsetCommand::Remove { name } => {
+            let style = CliStyle::auto_stdout();
+            let path = skillsets::remove_skillset(cwd, &name)?;
+            println!(
+                "{} {}",
+                style.success("Removed"),
+                style.accent(path.display())
+            );
+            Ok(())
+        }
     }
 }
 
@@ -342,11 +528,22 @@ fn dispatch_skill_verify(cwd: &Path) -> Result<(), Error> {
 fn dispatch_skill_check(cwd: &Path) -> Result<(), Error> {
     let style = CliStyle::auto_stdout();
     let skills = check::check_project(cwd)?;
-    println!(
-        "{} {} skill(s)",
-        style.success("OK"),
-        style.accent(skills.len())
-    );
+    let (skillsets, members) = skillsets::project_counts(cwd)?;
+    if skillsets == 0 {
+        println!(
+            "{} {} skill(s)",
+            style.success("OK"),
+            style.accent(skills.len())
+        );
+    } else {
+        println!(
+            "{} {} skill(s), {} skillset(s), {} member skill(s)",
+            style.success("OK"),
+            style.accent(skills.len()),
+            style.accent(skillsets),
+            style.accent(members)
+        );
+    }
     Ok(())
 }
 
@@ -358,7 +555,15 @@ fn dispatch_skill_list(cwd: &Path) -> Result<(), Error> {
         eprintln!("{}", err.warn(zen_err.to_string()));
     }
     if skills.is_empty() {
-        println!("{}", out.muted("(no skills)"));
+        let (skillsets, _) = skillsets::project_counts(cwd)?;
+        if skillsets > 0 {
+            println!(
+                "{}",
+                out.muted("(no standalone skills; use `tink skillset list`)")
+            );
+        } else {
+            println!("{}", out.muted("(no skills)"));
+        }
     } else {
         for skill in &skills {
             println!("{}", out.skill(&skill.name));

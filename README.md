@@ -6,9 +6,11 @@
 
 Skill manager that makes sense to you, and your agent.
 
-Live skills live only under a project’s `.agents/skills/<name>/`. There is no
-registry and no daemon. Agents that already look for project skills find them
-there.
+Live skills live only under a project’s `.agents/skills/<name>/`. Grouped
+skillsets use one canonical nested root at
+`.agents/skills/<name>-skillset/<member>/`. There
+is no registry and no daemon. Agents that already look for project skills find
+them there.
 
 ## Install
 
@@ -123,6 +125,12 @@ tink skill add ../my-skill
 tink skill add skill-name
 tink skill add owner/repository --skill skill-name
 tink skill add jon-devlapaz/tink-skills --skill skill-eval-loop
+tink skillset add common-skillset
+tink skillset list
+tink skillset list --library
+tink skillset refresh common-skillset
+tink skillset remove common-skillset
+tink inspect https://github.com/mattpocock/skills
 tink skill list
 tink skill check
 tink skill refresh
@@ -136,6 +144,31 @@ tink skill remove skill-name
 - tink does not overwrite a project skill that differs from what it would
   install.
 - tink never inits Git, stages, commits, or pushes.
+
+### Skillsets
+
+Skillset names are explicit and canonical: every name must end in `-skillset`;
+Tink never appends or removes that suffix. `skillset add NAME-skillset` reads
+the pinned definition at
+`$TINK_HOME/catalog/by-skillset/NAME-skillset/meta.json`. The definition contains an
+absolute HTTPS Git URL, a full commit SHA, a repository-relative `sourceRoot`,
+and explicit member names. Tink copies those member skill trees atomically
+under `.agents/skills/NAME-skillset/`, validates the project tree, then mirrors
+that exact tree to `$TINK_HOME/skills/NAME-skillset/`. The project is primary;
+the home library conforms to it and never overwrites it. Both copies carry
+`.tink-skillset.json` as derived receipt evidence. Repeated identical installs
+are offline no-ops. `skillset refresh NAME-skillset` updates a clean project to
+its pinned catalog definition; local project modifications are refused. Library
+drift is repaired only from a valid project tree.
+`skillset remove NAME-skillset` removes only the project tree; it preserves the
+shared catalog definition and home library copy.
+`skillset list` lists receipt-backed skillsets installed in the current project.
+`skillset list --library` lists receipt-backed skillsets in the home library.
+
+`tink inspect <GITHUB_URL>` performs a read-only inspection of a public GitHub
+repository, folder, or skill URL. It reports directories containing valid
+`SKILL.md` files and infers source skillsets from the URL boundary's directory
+structure. Inspection never writes the project, catalog, or home library.
 
 ## Power
 

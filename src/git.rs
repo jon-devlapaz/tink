@@ -1,5 +1,6 @@
 //! Git checkout helpers for public GitHub sources.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -96,20 +97,64 @@ pub fn remote_head(remote: &RemoteSource) -> Result<String, Error> {
     Ok(revision)
 }
 
+/// List branch and tag names advertised by a remote.
+pub fn remote_ref_names(remote: &RemoteSource) -> Result<BTreeSet<String>, Error> {
+    let output = run_git(
+        &["ls-remote", "--quiet", "--heads", "--tags", &remote.url],
+        None,
+        true,
+        "git ls-remote",
+        Some("Git is required for remote skill sources"),
+    )?;
+    if !output.status.success() {
+        let detail = git_detail(&output.stderr, "git ls-remote failed");
+        return Err(Error::msg(format!(
+            "Could not resolve refs for {}: {detail}",
+            remote.url
+        )));
+    }
+
+    let mut names = BTreeSet::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let Some(reference) = line.split_whitespace().nth(1) else {
+            continue;
+        };
+        let reference = reference.trim_end_matches("^{}");
+        if let Some(name) = reference
+            .strip_prefix("refs/heads/")
+            .or_else(|| reference.strip_prefix("refs/tags/"))
+        {
+            names.insert(name.to_string());
+        }
+    }
+    Ok(names)
+}
+
 /// Clone `remote` into a temporary directory; return `(temp_keep_alive, repo_path, revision)`.
 pub fn checkout(remote: &RemoteSource) -> Result<(TempDir, PathBuf, String), Error> {
+    checkout_ref(remote, None)
+}
+
+/// Clone `remote`, optionally checking out the requested branch or tag.
+pub fn checkout_ref(
+    remote: &RemoteSource,
+    requested_ref: Option<&str>,
+) -> Result<(TempDir, PathBuf, String), Error> {
     let temp = TempDir::new().map_err(|e| Error::msg(format!("temp dir: {e}")))?;
     let repository = temp.path().join("repository");
+    let repository_string = repository
+        .to_str()
+        .ok_or_else(|| Error::msg("non-utf8 path"))?
+        .to_string();
+    let mut args = vec!["clone", "--quiet", "--no-tags"];
+    if let Some(requested_ref) = requested_ref {
+        args.push("--branch");
+        args.push(requested_ref);
+    }
+    args.push(&remote.url);
+    args.push(&repository_string);
     let output = run_git(
-        &[
-            "clone",
-            "--quiet",
-            "--no-tags",
-            &remote.url,
-            repository
-                .to_str()
-                .ok_or_else(|| Error::msg("non-utf8 path"))?,
-        ],
+        &args,
         None,
         true,
         "git clone",
@@ -117,9 +162,12 @@ pub fn checkout(remote: &RemoteSource) -> Result<(TempDir, PathBuf, String), Err
     )?;
     if !output.status.success() {
         let detail = git_detail(&output.stderr, "git clone failed");
+        let subject = requested_ref
+            .map(|requested_ref| format!(" ref {requested_ref}"))
+            .unwrap_or_default();
         return Err(Error::msg(format!(
-            "Could not fetch {}: {detail}",
-            remote.url
+            "Could not fetch {}{}: {detail}",
+            remote.url, subject
         )));
     }
     let revision = git_stdout(&repository, &["rev-parse", "HEAD"])?;

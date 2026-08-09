@@ -108,6 +108,14 @@ impl CliStyle {
         )
     }
 
+    /// Skillset names — blue so grouped identities read apart from member skills.
+    pub fn skillset(self, text: impl std::fmt::Display) -> String {
+        self.paint(
+            Style::new().fg_color(Some(BLUE)).effects(Effects::BOLD),
+            text,
+        )
+    }
+
     /// Per-character rainbow (init ZEN tease). Plain text when styling is off.
     pub fn rainbow(self, text: impl std::fmt::Display) -> String {
         let text = text.to_string();
@@ -161,6 +169,10 @@ mod tests {
         assert_eq!(style.error("nope"), "nope");
         assert_eq!(style.accent("tui-design"), "tui-design");
         assert_eq!(style.skill("manage-tink"), "manage-tink");
+        assert_eq!(
+            style.skillset("engineering-skillset"),
+            "engineering-skillset"
+        );
         assert_eq!(style.rainbow("ZEN.md"), "ZEN.md");
         assert_eq!(
             style.link("https://github.com/jon-devlapaz/tink-skills", "tink-skills"),
@@ -179,6 +191,11 @@ mod tests {
         let skill = style.skill("manage-tink");
         assert!(skill.contains("manage-tink"), "{skill}");
         assert!(skill.contains('\u{1b}'), "{skill}");
+        let skillset = style.skillset("engineering-skillset");
+        assert!(skillset.contains("engineering-skillset"), "{skillset}");
+        assert!(skillset.contains('\u{1b}'), "{skillset}");
+        assert!(skill.contains("\u{1b}[35m"), "{skill}");
+        assert!(skillset.contains("\u{1b}[34m"), "{skillset}");
         let rainbow = style.rainbow("ZEN.md");
         assert!(rainbow.contains('Z') && rainbow.contains('N'), "{rainbow}");
         assert!(rainbow.contains('\u{1b}'), "{rainbow}");

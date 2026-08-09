@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use sha2::{Digest, Sha256};
+
 use crate::error::Error;
 use crate::paths::{map_io, refuse_symlink};
 use crate::provenance::{self, Provenance};
@@ -296,6 +298,32 @@ pub fn copy_skill_tree(
         tree.retain(|key, _| !key.starts_with(&prefix));
     }
     materialize_tree(&tree, destination)
+}
+
+/// Compute the canonical digest used by opaque managed skillset trees.
+pub fn tree_digest(root: &Path, root_ignore: &[&str]) -> Result<String, Error> {
+    let mut tree = require_safe_tree(root)?;
+    for name in root_ignore {
+        tree.remove(*name);
+        let prefix = format!("{name}/");
+        tree.retain(|key, _| !key.starts_with(&prefix));
+    }
+
+    let mut hasher = Sha256::new();
+    for (relative, kind) in tree {
+        let path = relative.as_bytes();
+        hasher.update((path.len() as u64).to_be_bytes());
+        hasher.update(path);
+        match kind {
+            EntryKind::Dir => hasher.update([b'd']),
+            EntryKind::File(bytes) => {
+                hasher.update([b'f']);
+                hasher.update((bytes.len() as u64).to_be_bytes());
+                hasher.update(bytes);
+            }
+        }
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 /// Result of comparing a candidate skill tree to an install target.

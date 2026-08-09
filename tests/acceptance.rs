@@ -55,6 +55,18 @@ impl Workspace {
         self.inventory.join("skills").join(skill)
     }
 
+    fn library_skillset(&self, skillset: &str) -> PathBuf {
+        self.inventory.join("skills").join(skillset)
+    }
+
+    fn skillset_meta(&self, name: &str) -> PathBuf {
+        self.inventory
+            .join("catalog")
+            .join("by-skillset")
+            .join(name)
+            .join("meta.json")
+    }
+
     fn assert_cataloged(&self, project_name: &str, skill: &str) {
         let raw = fs::read_to_string(self.catalog_meta(project_name))
             .unwrap_or_else(|_| panic!("missing catalog for {project_name}"));
@@ -85,6 +97,27 @@ fn write_skill(path: &Path, name: &str, body: &str) {
         "---\nname: {name}\ndescription: Valid skill fixture named {name}.\n---\n\n# {name}\n\n{body}\n"
     );
     fs::write(path.join("SKILL.md"), text).expect("SKILL.md");
+}
+
+fn write_skillset_meta(
+    path: &Path,
+    source: &str,
+    revision: &str,
+    source_root: &str,
+    members: &[&str],
+) {
+    fs::create_dir_all(path.parent().expect("skillset catalog parent")).expect("catalog dir");
+    let meta = serde_json::json!({
+        "source": source,
+        "revision": revision,
+        "sourceRoot": source_root,
+        "members": members,
+    });
+    fs::write(
+        path,
+        format!("{}\n", serde_json::to_string_pretty(&meta).unwrap()),
+    )
+    .expect("skillset meta");
 }
 
 fn git(cwd: &Path, args: &[&str]) {
@@ -491,6 +524,402 @@ fn a8_add_uses_library_when_remote_tip_matches() {
         receipt.contains("\"path\": \".\"") || receipt.contains("\"path\":\".\""),
         "{receipt}"
     );
+}
+
+// --- K*: skillsets ---
+
+#[test]
+fn k1_skillset_add_installs_explicit_members_and_checks_digest() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let repository = ws.root.join("skillset-repo");
+    init_repo(&repository);
+    write_skill(
+        &repository.join("bundles/common/alpha"),
+        "alpha",
+        "first member",
+    );
+    write_skill(
+        &repository.join("bundles/common/beta"),
+        "beta",
+        "second member",
+    );
+    let revision = commit_all(&repository, "skillset");
+    let source = "https://github.com/example/skillsets.git";
+    write_skillset_meta(
+        &ws.skillset_meta("common-skillset"),
+        source,
+        &revision,
+        "bundles/common",
+        &["alpha", "beta"],
+    );
+
+    let redirect = github_redirect(&repository, source);
+    ws.cmd(&project)
+        .args(["skillset", "add", "common-skillset"])
+        .envs(redirect.clone())
+        .assert()
+        .success();
+
+    let installed = Workspace::skill_path(&project, "common-skillset");
+    let library = ws.library_skillset("common-skillset");
+    assert!(installed.join("alpha/SKILL.md").is_file());
+    assert!(installed.join("beta/SKILL.md").is_file());
+    assert!(installed.join(".tink-skillset.json").is_file());
+    assert!(library.join("alpha/SKILL.md").is_file());
+    assert!(library.join("beta/SKILL.md").is_file());
+    assert!(library.join(".tink-skillset.json").is_file());
+
+    ws.cmd(&project)
+        .args(["skillset", "add", "common-skillset"])
+        .envs(redirect.clone())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Unchanged"));
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
+    ws.cmd(&project)
+        .args(["skillset", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("common-skillset"));
+    ws.cmd(&project)
+        .args(["skillset", "list", "--library"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("common-skillset"));
+
+    fs::write(
+        library.join("alpha/SKILL.md"),
+        "---\nname: alpha\ndescription: library drift\n---\n",
+    )
+    .unwrap();
+    ws.cmd(&project)
+        .args(["skillset", "add", "common-skillset"])
+        .envs(redirect.clone())
+        .assert()
+        .success();
+    assert_eq!(
+        fs::read(installed.join("alpha/SKILL.md")).unwrap(),
+        fs::read(library.join("alpha/SKILL.md")).unwrap(),
+        "library must conform to the validated project tree"
+    );
+
+    fs::write(
+        installed.join("alpha/SKILL.md"),
+        "---\nname: alpha\ndescription: changed\n---\n",
+    )
+    .unwrap();
+    let library_before_failed_add = fs::read(library.join("alpha/SKILL.md")).unwrap();
+    ws.cmd(&project)
+        .args(["skillset", "add", "common-skillset"])
+        .envs(redirect)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("local modifications are present"));
+    assert_eq!(
+        fs::read(library.join("alpha/SKILL.md")).unwrap(),
+        library_before_failed_add,
+        "project drift must block library mutation"
+    );
+    ws.cmd(&project)
+        .args(["skill", "check"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("digest mismatch"));
+
+    ws.cmd(&project)
+        .args(["skill", "remove", "common-skillset"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("skillset remove"));
+    ws.cmd(&project)
+        .args(["skillset", "remove", "common-skillset"])
+        .assert()
+        .success();
+    assert!(!installed.exists());
+    assert!(library.is_dir());
+    assert!(ws.skillset_meta("common-skillset").is_file());
+}
+
+#[test]
+fn k4_skillset_commands_require_canonical_suffix() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["skillset", "add", "common"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("must end in -skillset"));
+    assert!(!Workspace::skill_path(&project, "common").exists());
+}
+
+#[test]
+fn k5_skillset_add_refuses_unowned_library_collision() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    let name = "common-skillset";
+    write_skill(
+        &ws.library_skill(name),
+        name,
+        "ordinary library skill with colliding name",
+    );
+    write_skillset_meta(
+        &ws.skillset_meta(name),
+        "https://github.com/example/skillsets.git",
+        &"a".repeat(40),
+        "bundles/common",
+        &["alpha"],
+    );
+
+    ws.cmd(&project)
+        .args(["skillset", "add", name])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Library name collision"));
+    assert!(!Workspace::skill_path(&project, name).exists());
+}
+
+#[test]
+fn k6_skillset_remove_requires_a_valid_owned_receipt() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    let target = Workspace::skill_path(&project, "victim-skillset");
+    fs::create_dir_all(&target).unwrap();
+    fs::write(target.join(".tink-skillset.json"), "not a receipt\n").unwrap();
+    fs::write(target.join("keep.txt"), "valuable user data\n").unwrap();
+
+    ws.cmd(&project)
+        .args(["skillset", "remove", "victim-skillset"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Invalid installed skillset receipt",
+        ));
+    assert_eq!(
+        fs::read_to_string(target.join("keep.txt")).unwrap(),
+        "valuable user data\n"
+    );
+
+    let missing_receipt = Workspace::skill_path(&project, "unowned-skillset");
+    fs::create_dir_all(&missing_receipt).unwrap();
+    fs::write(missing_receipt.join("keep.txt"), "also valuable\n").unwrap();
+    ws.cmd(&project)
+        .args(["skillset", "remove", "unowned-skillset"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Missing installed skillset receipt",
+        ));
+    assert!(missing_receipt.join("keep.txt").is_file());
+}
+
+#[test]
+fn k7_skillset_setup_failures_are_actionable_and_non_mutating() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+
+    ws.cmd(&project)
+        .args(["skillset", "list"])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("Not a Tink project")
+                .and(predicate::str::contains("tink init")),
+        );
+    ws.cmd(&project)
+        .args(["skillset", "add", "missing-skillset"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Missing skillset catalog meta"));
+    assert!(!project.join(".agents").exists());
+}
+
+#[test]
+fn k8_skillset_readd_is_offline_when_project_is_unchanged() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    let repository = ws.root.join("skillset-repo");
+    init_repo(&repository);
+    write_skill(&repository.join("bundles/common/alpha"), "alpha", "member");
+    let revision = commit_all(&repository, "skillset");
+    let source = "https://github.com/example/skillsets.git";
+    write_skillset_meta(
+        &ws.skillset_meta("common-skillset"),
+        source,
+        &revision,
+        "bundles/common",
+        &["alpha"],
+    );
+    ws.cmd(&project)
+        .args(["skillset", "add", "common-skillset"])
+        .envs(github_redirect(&repository, source))
+        .assert()
+        .success();
+    fs::remove_dir_all(ws.library_skillset("common-skillset")).unwrap();
+
+    ws.cmd(&project)
+        .args(["skillset", "add", "common-skillset"])
+        .env("GIT_CONFIG_COUNT", "1")
+        .env(
+            "GIT_CONFIG_KEY_0",
+            "url.file:///definitely-missing-tink-repo/.insteadOf",
+        )
+        .env("GIT_CONFIG_VALUE_0", source)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Unchanged common-skillset"));
+    assert!(
+        ws.library_skillset("common-skillset")
+            .join("alpha/SKILL.md")
+            .is_file()
+    );
+}
+
+#[test]
+fn k9_skill_status_reports_grouped_members_honestly() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    let repository = ws.root.join("skillset-repo");
+    init_repo(&repository);
+    write_skill(&repository.join("bundles/common/alpha"), "alpha", "first");
+    write_skill(&repository.join("bundles/common/beta"), "beta", "second");
+    let revision = commit_all(&repository, "skillset");
+    let source = "https://github.com/example/skillsets.git";
+    write_skillset_meta(
+        &ws.skillset_meta("common-skillset"),
+        source,
+        &revision,
+        "bundles/common",
+        &["alpha", "beta"],
+    );
+    ws.cmd(&project)
+        .args(["skillset", "add", "common-skillset"])
+        .envs(github_redirect(&repository, source))
+        .assert()
+        .success();
+
+    ws.cmd(&project)
+        .args(["skill", "check"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "OK 0 skill(s), 1 skillset(s), 2 member skill(s)",
+        ));
+    ws.cmd(&project)
+        .args(["skill", "list"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("no standalone skills")
+                .and(predicate::str::contains("tink skillset list")),
+        );
+}
+
+#[test]
+fn k10_skillset_refresh_updates_clean_tree_and_refuses_local_edits() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    let repository = ws.root.join("skillset-repo");
+    init_repo(&repository);
+    let source = "https://github.com/example/skillsets.git";
+    let member = repository.join("bundles/common/alpha");
+    write_skill(&member, "alpha", "version one");
+    let first_revision = commit_all(&repository, "first");
+    write_skillset_meta(
+        &ws.skillset_meta("common-skillset"),
+        source,
+        &first_revision,
+        "bundles/common",
+        &["alpha"],
+    );
+    let redirect = github_redirect(&repository, source);
+    ws.cmd(&project)
+        .args(["skillset", "add", "common-skillset"])
+        .envs(redirect.clone())
+        .assert()
+        .success();
+
+    write_skill(&member, "alpha", "version two");
+    let second_revision = commit_all(&repository, "second");
+    write_skillset_meta(
+        &ws.skillset_meta("common-skillset"),
+        source,
+        &second_revision,
+        "bundles/common",
+        &["alpha"],
+    );
+    ws.cmd(&project)
+        .args(["skillset", "refresh", "common-skillset"])
+        .envs(redirect.clone())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Refreshed common-skillset"));
+    let installed = Workspace::skill_path(&project, "common-skillset");
+    assert!(
+        fs::read_to_string(installed.join("alpha/SKILL.md"))
+            .unwrap()
+            .contains("version two")
+    );
+    assert_eq!(
+        fs::read(installed.join("alpha/SKILL.md")).unwrap(),
+        fs::read(
+            ws.library_skillset("common-skillset")
+                .join("alpha/SKILL.md")
+        )
+        .unwrap()
+    );
+
+    fs::write(
+        installed.join("alpha/SKILL.md"),
+        "---\nname: alpha\ndescription: local edit\n---\n",
+    )
+    .unwrap();
+    ws.cmd(&project)
+        .args(["skillset", "refresh", "common-skillset"])
+        .envs(redirect)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("local modifications are present"));
+}
+
+#[test]
+fn k11_skillset_rejects_member_directory_name_mismatch() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    let repository = ws.root.join("skillset-repo");
+    init_repo(&repository);
+    write_skill(
+        &repository.join("bundles/common/alpha"),
+        "different-name",
+        "mismatched member",
+    );
+    let revision = commit_all(&repository, "mismatched member");
+    let source = "https://github.com/example/skillsets.git";
+    write_skillset_meta(
+        &ws.skillset_meta("common-skillset"),
+        source,
+        &revision,
+        "bundles/common",
+        &["alpha"],
+    );
+
+    ws.cmd(&project)
+        .args(["skillset", "add", "common-skillset"])
+        .envs(github_redirect(&repository, source))
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("different-name")
+                .and(predicate::str::contains("must match directory"))
+                .and(predicate::str::contains("alpha")),
+        );
+    assert!(!Workspace::skill_path(&project, "common-skillset").exists());
+    assert!(!ws.library_skillset("common-skillset").exists());
 }
 
 // --- R*: remote add ---
@@ -2199,4 +2628,379 @@ fn u3_update_replaces_binary_when_newer_release_exists() {
     assert!(installed.is_file());
     let after = fs::metadata(&installed).unwrap().modified().unwrap();
     assert!(after >= before);
+}
+
+// --- G*: GitHub source inspection ---
+
+fn inspect_fixture() -> (Workspace, PathBuf, Vec<(String, String)>) {
+    let ws = Workspace::new();
+    let repo = ws.root.join("skills-repo");
+    init_repo(&repo);
+    for (group, names) in [
+        ("deprecated", Vec::<&str>::new()),
+        ("engineering", vec!["alpha", "beta"]),
+        ("in-progress", vec!["gamma"]),
+        ("misc", vec!["delta"]),
+        ("productivity", vec!["epsilon"]),
+    ] {
+        fs::create_dir_all(repo.join("skills").join(group)).unwrap();
+        if group == "deprecated" {
+            fs::write(
+                repo.join("skills").join(group).join("README.md"),
+                "empty peer\n",
+            )
+            .unwrap();
+        }
+        for name in names {
+            write_skill(&repo.join("skills").join(group).join(name), name, "fixture");
+        }
+    }
+    fs::write(repo.join("README.md"), "repository documentation\n").unwrap();
+    fs::create_dir_all(repo.join("docs")).unwrap();
+    fs::write(repo.join("docs").join("overview.md"), "unrelated sibling\n").unwrap();
+    commit_all(&repo, "fixture");
+    let public = "https://github.com/example/skills.git";
+    let redirect = github_redirect(&repo, public);
+    (ws, repo, redirect)
+}
+
+#[test]
+fn g1_inspect_repository_reports_groups_empty_peers_and_sorted_skills() {
+    let (ws, _repo, redirect) = inspect_fixture();
+    let project = ws.project("app");
+    let mut cmd = ws.cmd(&project);
+    cmd.args(["inspect", "https://github.com/example/skills"]);
+    for (key, value) in &redirect {
+        cmd.env(key, value);
+    }
+    cmd.assert().success().stdout(
+        predicate::str::contains("Skillsets (5, 5 member skills)")
+            .and(predicate::str::contains("deprecated-skillset"))
+            .and(predicate::str::contains("empty structural candidate"))
+            .and(predicate::str::contains("engineering-skillset"))
+            .and(predicate::str::contains("skills/engineering/"))
+            .and(predicate::str::contains("    alpha"))
+            .and(predicate::str::contains("skills/productivity/"))
+            .and(predicate::str::contains("    epsilon"))
+            .and(predicate::str::contains("Standalone skills (0)")),
+    );
+    assert!(!project.join(".agents").exists());
+    assert!(!ws.inventory.exists());
+}
+
+#[test]
+fn g2_inspect_group_tree_limits_boundary() {
+    let (ws, _repo, redirect) = inspect_fixture();
+    let project = ws.project("app");
+    let mut cmd = ws.cmd(&project);
+    cmd.args([
+        "inspect",
+        "https://github.com/example/skills/tree/master/skills/productivity",
+    ]);
+    for (key, value) in &redirect {
+        cmd.env(key, value);
+    }
+    cmd.assert().success().stdout(
+        predicate::str::contains("Skillsets (1, 1 member skills)")
+            .and(predicate::str::contains("productivity-skillset"))
+            .and(predicate::str::contains("skills/productivity/"))
+            .and(predicate::str::contains("    epsilon"))
+            .and(predicate::str::contains("Standalone skills (0)"))
+            .and(predicate::str::contains("engineering/alpha").not()),
+    );
+}
+
+#[test]
+fn g3_inspect_skill_tree_reports_one_skill_and_no_skillset() {
+    let (ws, _repo, redirect) = inspect_fixture();
+    let project = ws.project("app");
+    let mut cmd = ws.cmd(&project);
+    cmd.args([
+        "inspect",
+        "https://github.com/example/skills/tree/master/skills/productivity/epsilon",
+    ]);
+    for (key, value) in &redirect {
+        cmd.env(key, value);
+    }
+    cmd.assert().success().stdout(
+        predicate::str::contains("Skillsets (0, 0 member skills)")
+            .and(predicate::str::contains("Standalone skills (1)"))
+            .and(predicate::str::contains("epsilon")),
+    );
+}
+
+#[test]
+fn g4_inspect_infers_wrapper_without_skills_convention() {
+    let ws = Workspace::new();
+    let repo = ws.root.join("wrapped-repo");
+    init_repo(&repo);
+    write_skill(
+        &repo.join("bundles").join("one").join("first"),
+        "first",
+        "fixture",
+    );
+    write_skill(
+        &repo.join("bundles").join("two").join("second"),
+        "second",
+        "fixture",
+    );
+    commit_all(&repo, "wrapped fixture");
+    let public = "https://github.com/example/wrapped.git";
+    let redirect = github_redirect(&repo, public);
+    let project = ws.project("app");
+    let mut cmd = ws.cmd(&project);
+    cmd.args(["inspect", public]);
+    for (key, value) in &redirect {
+        cmd.env(key, value);
+    }
+    cmd.assert().success().stdout(
+        predicate::str::contains("Skillsets (2, 2 member skills)")
+            .and(predicate::str::contains("one-skillset"))
+            .and(predicate::str::contains("two-skillset")),
+    );
+}
+
+#[test]
+fn g4b_inspect_flat_repository_does_not_expose_checkout_directory_name() {
+    let ws = Workspace::new();
+    let repo = ws.root.join("flat-repo");
+    init_repo(&repo);
+    write_skill(&repo.join("alpha"), "alpha", "fixture");
+    write_skill(&repo.join("beta"), "beta", "fixture");
+    commit_all(&repo, "flat fixture");
+    let public = "https://github.com/example/flat.git";
+    let redirect = github_redirect(&repo, public);
+    let project = ws.project("app");
+    let mut cmd = ws.cmd(&project);
+    cmd.args(["inspect", public]);
+    for (key, value) in &redirect {
+        cmd.env(key, value);
+    }
+    cmd.assert().success().stdout(
+        predicate::str::contains("Skillsets (1, 2 member skills)")
+            .and(predicate::str::contains("(unnamed proposal)"))
+            .and(predicate::str::contains("repository-skillset").not())
+            .and(predicate::str::contains("invalid skillset folder name").not()),
+    );
+}
+
+#[test]
+fn g4c_inspect_mixed_root_refuses_to_collapse_unrelated_levels() {
+    let ws = Workspace::new();
+    let repo = ws.root.join("mixed-repo");
+    init_repo(&repo);
+    write_skill(&repo.join("template"), "template", "fixture");
+    write_skill(&repo.join("skills/alpha"), "alpha", "fixture");
+    write_skill(&repo.join("skills/beta"), "beta", "fixture");
+    commit_all(&repo, "mixed fixture");
+    let public = "https://github.com/example/mixed.git";
+    let redirect = github_redirect(&repo, public);
+    let project = ws.project("app");
+    let mut cmd = ws.cmd(&project);
+    cmd.args(["inspect", public]);
+    for (key, value) in &redirect {
+        cmd.env(key, value);
+    }
+    cmd.assert().success().stdout(
+        predicate::str::contains("Skillsets (0, 0 member skills)")
+            .and(predicate::str::contains("Standalone skills (3)"))
+            .and(predicate::str::contains("mixed skill layout"))
+            .and(predicate::str::contains("narrower GitHub tree URL")),
+    );
+}
+
+#[test]
+fn g4d_inspect_reserves_skills_as_a_collection_root() {
+    let ws = Workspace::new();
+    let repo = ws.root.join("collection-repo");
+    init_repo(&repo);
+    write_skill(&repo.join("skills/alpha"), "alpha", "fixture");
+    write_skill(&repo.join("skills/beta"), "beta", "fixture");
+    commit_all(&repo, "collection fixture");
+    let public = "https://github.com/example/collection.git";
+    let redirect = github_redirect(&repo, public);
+    let project = ws.project("app");
+
+    for url in [
+        public,
+        "https://github.com/example/collection/tree/master/skills",
+    ] {
+        let mut cmd = ws.cmd(&project);
+        cmd.args(["inspect", url]);
+        for (key, value) in &redirect {
+            cmd.env(key, value);
+        }
+        cmd.assert().success().stdout(
+            predicate::str::contains("Skillsets (0, 0 member skills)")
+                .and(predicate::str::contains("Standalone skills (2)"))
+                .and(predicate::str::contains("skills-skillset").not()),
+        );
+    }
+}
+
+#[test]
+fn g4e_inspect_does_not_propose_an_overlong_canonical_skillset_name() {
+    let ws = Workspace::new();
+    let repo = ws.root.join("long-name-repo");
+    init_repo(&repo);
+    let group = "a".repeat(64);
+    write_skill(
+        &repo.join("skills").join(&group).join("alpha"),
+        "alpha",
+        "fixture",
+    );
+    write_skill(&repo.join("skills/short/beta"), "beta", "fixture");
+    commit_all(&repo, "long group name");
+    let public = "https://github.com/example/long-name.git";
+    let redirect = github_redirect(&repo, public);
+    let project = ws.project("app");
+    let mut cmd = ws.cmd(&project);
+    cmd.args(["inspect", public]);
+    for (key, value) in &redirect {
+        cmd.env(key, value);
+    }
+    cmd.assert().success().stdout(
+        predicate::str::contains("(unnamed proposal)")
+            .and(predicate::str::contains("no valid canonical skillset name"))
+            .and(predicate::str::contains(format!("{group}-skillset")).not()),
+    );
+}
+
+#[test]
+fn g5_inspect_reports_duplicate_names_and_invalid_candidates() {
+    let ws = Workspace::new();
+    let repo = ws.root.join("diagnostic-repo");
+    init_repo(&repo);
+    write_skill(
+        &repo.join("skills").join("one").join("same"),
+        "same",
+        "fixture",
+    );
+    write_skill(
+        &repo.join("skills").join("two").join("same"),
+        "same",
+        "fixture",
+    );
+    fs::create_dir_all(repo.join("skills").join("bad")).unwrap();
+    fs::write(
+        repo.join("skills").join("bad").join("SKILL.md"),
+        "not frontmatter\n",
+    )
+    .unwrap();
+    commit_all(&repo, "diagnostics");
+    let public = "https://github.com/example/diagnostics.git";
+    let redirect = github_redirect(&repo, public);
+    let project = ws.project("app");
+    let mut cmd = ws.cmd(&project);
+    cmd.args(["inspect", public]);
+    for (key, value) in &redirect {
+        cmd.env(key, value);
+    }
+    cmd.assert().success().stdout(
+        predicate::str::contains("Diagnostics (2)")
+            .and(predicate::str::contains("duplicate skill name: same"))
+            .and(predicate::str::contains("invalid SKILL.md"))
+            .and(predicate::str::contains(repo.to_string_lossy().as_ref()).not()),
+    );
+}
+
+#[test]
+fn g6_inspect_empty_boundary_succeeds() {
+    let ws = Workspace::new();
+    let repo = ws.root.join("empty-repo");
+    init_repo(&repo);
+    fs::create_dir_all(repo.join("empty")).unwrap();
+    fs::write(repo.join("empty").join("README.md"), "empty\n").unwrap();
+    commit_all(&repo, "empty");
+    let public = "https://github.com/example/empty.git";
+    let redirect = github_redirect(&repo, public);
+    let project = ws.project("app");
+    let mut cmd = ws.cmd(&project);
+    cmd.args([
+        "inspect",
+        "https://github.com/example/empty/tree/master/empty",
+    ]);
+    for (key, value) in &redirect {
+        cmd.env(key, value);
+    }
+    cmd.assert().success().stdout(
+        predicate::str::contains("Skillsets (0, 0 member skills)")
+            .and(predicate::str::contains("Standalone skills (0)"))
+            .and(predicate::str::contains("Diagnostics (1)"))
+            .and(predicate::str::contains("no valid skills found"))
+            .and(predicate::str::contains("could not be inferred").not()),
+    );
+}
+
+#[test]
+fn g7_inspect_rejects_bad_urls_refs_and_boundaries() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["inspect", "https://gitlab.com/example/skills"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("GitHub"));
+
+    let repo = ws.root.join("failure-repo");
+    init_repo(&repo);
+    fs::write(repo.join("README.md"), "failure\n").unwrap();
+    commit_all(&repo, "failure");
+    let public = "https://github.com/example/failure.git";
+    let redirect = github_redirect(&repo, public);
+    for url in [
+        "https://github.com/example/failure/tree/missing",
+        "https://github.com/example/failure/tree/master/missing",
+    ] {
+        let mut cmd = ws.cmd(&project);
+        cmd.args(["inspect", url]);
+        for (key, value) in &redirect {
+            cmd.env(key, value);
+        }
+        cmd.assert()
+            .failure()
+            .stderr(predicate::str::contains("ref").or(predicate::str::contains("boundary")));
+    }
+
+    git(&repo, &["checkout", "-b", "feature/grouped"]);
+    fs::create_dir_all(repo.join("skills")).unwrap();
+    write_skill(&repo.join("skills/alpha"), "alpha", "slash ref");
+    commit_all(&repo, "slash ref");
+    let mut cmd = ws.cmd(&project);
+    cmd.args([
+        "inspect",
+        "https://github.com/example/failure/tree/feature/grouped/skills",
+    ]);
+    for (key, value) in &redirect {
+        cmd.env(key, value);
+    }
+    cmd.assert().failure().stderr(
+        predicate::str::contains("ambiguous")
+            .and(predicate::str::contains("feature/grouped"))
+            .and(predicate::str::contains("contains `/`")),
+    );
+}
+
+#[test]
+fn g8_inspect_preserves_project_and_home_bytes() {
+    let (ws, _repo, redirect) = inspect_fixture();
+    let project = ws.project("app");
+    fs::create_dir_all(project.join(".tink")).unwrap();
+    fs::write(project.join(".tink").join("marker"), "project").unwrap();
+    fs::create_dir_all(&ws.inventory).unwrap();
+    fs::write(ws.inventory.join("marker"), "home").unwrap();
+    let project_before = fs::read(project.join(".tink").join("marker")).unwrap();
+    let home_before = fs::read(ws.inventory.join("marker")).unwrap();
+    let mut cmd = ws.cmd(&project);
+    cmd.args(["inspect", "https://github.com/example/skills"]);
+    for (key, value) in &redirect {
+        cmd.env(key, value);
+    }
+    cmd.assert().success();
+    assert_eq!(
+        fs::read(project.join(".tink").join("marker")).unwrap(),
+        project_before
+    );
+    assert_eq!(fs::read(ws.inventory.join("marker")).unwrap(), home_before);
+    assert!(!project.join(".agents").exists());
 }

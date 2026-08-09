@@ -32,6 +32,7 @@ Skill verbs live only under `tink skill`. There are no top-level `add` /
 | `tink skill check` | Validate project skills; no network; no writes |
 | `tink skill refresh [name]` | Refresh clean GitHub imports; refuse local edits |
 | `tink skill remove <name>` | Delete one project skill under `.agents/skills/<name>/` and drop that name from the by-project catalog (not library) |
+| `tink inspect <GITHUB_URL>` | Inspect skills and source-defined skillsets in a public GitHub URL without writing project or home state |
 | `tink update` | Replace this binary with the latest public GitHub Release (requires `curl` + `tar`) |
 | `tink destroy [--yes]` | Remove `.agents/`, `ZEN.md`, and `AGENTS.md`; drop this project's by-project catalog entry (not library) |
 
@@ -84,6 +85,35 @@ Ids are stable. Tests must name or comment the id they prove.
 | R3 | `skill add ./missing-skill` (path-like, absent) | Exit ≠ 0; "Path does not exist"; **no** GitHub network fetch |
 | R4 | `skill add /abs/missing` | Exit ≠ 0; "Path does not exist" |
 | R5 | `skill add owner/repo` when `SKILL.md` is at repo root | Receipt `path` is `"."` (non-empty); `skill check` passes; `skill refresh` updates from repo root |
+
+### Skillsets
+
+| Id | Action | Expect |
+|---|---|---|
+| K1 | `skillset add <name>-skillset` with `$TINK_HOME/catalog/by-skillset/<name>-skillset/meta.json` | Installs the pinned members under `.agents/skills/<name>-skillset/`, validates the project, then mirrors that exact tree to `$TINK_HOME/skills/<name>-skillset/`; matching re-add is a no-op; library drift is repaired from the valid project |
+| K2 | `skillset remove <name>-skillset` after K1 | Removes only the project skillset tree; preserves the shared catalog definition and home library copy; `skill remove` refuses the skillset root |
+| K3 | `skillset list [--library]` after K1 | Lists receipt-backed skillset names from the current project or home library without network or writes |
+| K4 | Any skillset command receives a name without `-skillset` | Exit ≠ 0; clear canonical-name error; no skillset tree written |
+| K5 | `skillset add` finds an ordinary or unowned library entry at the canonical name | Exit ≠ 0 before network/project publication; preserve the library entry |
+| K6 | `skillset remove` finds a missing or invalid receipt | Exit ≠ 0; preserve the complete project directory |
+| K7 | `skillset list` or `add` runs before project/catalog setup | List explains how to initialize; missing catalog leaves the project untouched |
+| K8 | Re-add a valid unchanged project skillset while its remote is unavailable | Succeeds offline as unchanged and synchronizes the library from the project |
+| K9 | `skill check` / `skill list` with grouped members only | Check reports standalone, skillset, and member counts; list says there are no standalone skills and points to `skillset list` |
+| K10 | `skillset refresh <name>-skillset` after the pinned catalog definition changes | Atomically replaces the clean project tree, then mirrors the validated result to the library; refuses local project modifications |
+| K11 | A declared member folder and its `SKILL.md` name differ | Exit ≠ 0 before project or library publication; explain the name mismatch |
+
+### GitHub inspection
+
+| Id | Action | Expect |
+|---|---|---|
+| G1 | `inspect` a repository URL | Reports source metadata, inferred source skillsets including empty peers, and all discovered skills in deterministic order |
+| G2 | `inspect` a group tree URL | Reports only the one inferred skillset and skills beneath that boundary |
+| G3 | `inspect` a skill tree URL | Reports one skill and zero skillsets |
+| G4 | `inspect` a repository with one non-`skills` structural wrapper | Infers grouped skillsets without relying on a literal `skills/` directory |
+| G5 | `inspect` duplicate names and invalid `SKILL.md` files | Succeeds with visible diagnostics and excludes invalid candidates from the skill count |
+| G6 | `inspect` an empty valid directory | Succeeds with zero skills and a structural diagnostic |
+| G7 | `inspect` unsupported URLs, missing or ambiguous slash-containing refs, and missing boundaries | Exits nonzero with actionable errors |
+| G8 | `inspect` with existing project and home state | Leaves both project and `$TINK_HOME` absent or byte-for-byte unchanged |
 
 ### Check
 
