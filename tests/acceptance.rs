@@ -2465,6 +2465,27 @@ fn x5_manage_tink_documents_remove_and_catalog_sync() {
             "manage-tink SKILL.md must document {contract}: {skill_md}"
         );
     }
+    for section in [
+        "## When to Use",
+        "## Inputs",
+        "## Procedure",
+        "## Validation",
+        "## Common Pitfalls",
+        "## Related Skills",
+    ] {
+        assert!(
+            skill_md.contains(section),
+            "manage-tink SKILL.md must contain {section}: {skill_md}"
+        );
+    }
+    assert!(
+        skill_md.contains("**Expected:**") && skill_md.contains("**On failure:**"),
+        "manage-tink procedures must state expected and failure behavior: {skill_md}"
+    );
+    assert!(
+        !skill_md.contains("tink skill remove manage-tink && tink init"),
+        "manage-tink must not chain re-embedding onto binary updates: {skill_md}"
+    );
 }
 
 #[test]

@@ -31,7 +31,7 @@ form for add, list, check, refresh, and remove.
 | Refresh a clean pinned skillset | `tink skillset refresh NAME-skillset` |
 | Remove one project skillset | `tink skillset remove NAME-skillset` |
 | Update the tink CLI binary | `tink update` |
-| Refresh live manage-tink after major upgrade | `tink skill remove manage-tink` then `tink init --no-zen --no-tink-skills` |
+| Re-embed manage-tink after separate approval | `tink skill remove manage-tink`, then `tink init --no-zen --no-tink-skills` |
 | Destroy scaffolding | `tink destroy --yes` (non-TTY/scripts) or `tink destroy` (TTY, confirm `y`) |
 
 ## Layout facts
