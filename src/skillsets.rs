@@ -51,6 +51,12 @@ struct InstalledSkillset {
     receipt: SkillsetReceipt,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListedSkillset {
+    pub name: String,
+    pub members: Vec<String>,
+}
+
 fn read_json<T: for<'de> Deserialize<'de>>(path: &Path, label: &str) -> Result<T, Error> {
     refuse_symlink(path)?;
     if !path.is_file() {
@@ -419,7 +425,7 @@ pub fn validate_installed(path: &Path) -> Result<(), Error> {
 }
 
 /// List receipt-backed skillsets installed in a project.
-pub fn list_installed(project_root: &Path) -> Result<Vec<String>, Error> {
+pub fn list_installed(project_root: &Path) -> Result<Vec<ListedSkillset>, Error> {
     let agents = home::project_agents_path(project_root);
     let skills_root = home::project_skills_path(project_root);
     refuse_symlink(&agents)?;
@@ -437,7 +443,7 @@ pub fn list_installed(project_root: &Path) -> Result<Vec<String>, Error> {
         .collect();
     entries.sort();
 
-    let mut names = Vec::new();
+    let mut skillsets = Vec::new();
     for path in entries {
         let name = path
             .file_name()
@@ -452,11 +458,15 @@ pub fn list_installed(project_root: &Path) -> Result<Vec<String>, Error> {
             )));
         }
         if path.join(RECEIPT_FILE).exists() || path.join(RECEIPT_FILE).is_symlink() {
-            names.push(read_installed(&path)?.name);
+            let installed = read_installed(&path)?;
+            skillsets.push(ListedSkillset {
+                name: installed.name,
+                members: installed.receipt.members,
+            });
         }
     }
-    names.sort();
-    Ok(names)
+    skillsets.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(skillsets)
 }
 
 /// Count validated project skillsets and their declared member skills.
@@ -550,7 +560,7 @@ fn sync_library_from_project(project: &Path) -> Result<LibraryWrite, Error> {
 }
 
 /// List receipt-backed skillsets in the home library without creating it.
-pub fn list_library(home_root: Option<&Path>) -> Result<Vec<String>, Error> {
+pub fn list_library(home_root: Option<&Path>) -> Result<Vec<ListedSkillset>, Error> {
     let home = match home_root {
         Some(path) => path.to_path_buf(),
         None => home::resolve_home()?,
@@ -577,16 +587,20 @@ pub fn list_library(home_root: Option<&Path>) -> Result<Vec<String>, Error> {
         .map(|entry| entry.path())
         .collect();
     entries.sort();
-    let mut names = Vec::new();
+    let mut skillsets = Vec::new();
     for path in entries {
         if path.is_symlink() || !path.is_dir() {
             continue;
         }
         if path.join(RECEIPT_FILE).exists() || path.join(RECEIPT_FILE).is_symlink() {
-            names.push(read_installed(&path)?.name);
+            let installed = read_installed(&path)?;
+            skillsets.push(ListedSkillset {
+                name: installed.name,
+                members: installed.receipt.members,
+            });
         }
     }
-    Ok(names)
+    Ok(skillsets)
 }
 
 #[cfg(test)]

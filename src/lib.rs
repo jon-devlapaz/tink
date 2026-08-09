@@ -145,9 +145,9 @@ pub enum SkillCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum SkillsetCommand {
-    /// List receipt-backed skillsets installed in the current project
+    /// List receipt-backed project skillsets and their members
     List {
-        /// List receipt-backed skillsets in the home library
+        /// List receipt-backed library skillsets and their members
         #[arg(long)]
         library: bool,
     },
@@ -359,12 +359,12 @@ fn dispatch_skillset(cwd: &Path, command: SkillsetCommand) -> Result<(), Error> 
     match command {
         SkillsetCommand::List { library } => {
             let style = CliStyle::auto_stdout();
-            let names = if library {
+            let skillsets = if library {
                 skillsets::list_library(None)?
             } else {
                 skillsets::list_installed(cwd)?
             };
-            if names.is_empty() {
+            if skillsets.is_empty() {
                 let message = if library {
                     "(no library skillsets)"
                 } else {
@@ -372,8 +372,23 @@ fn dispatch_skillset(cwd: &Path, command: SkillsetCommand) -> Result<(), Error> 
                 };
                 println!("{}", style.muted(message));
             } else {
-                for name in names {
-                    println!("{}", style.skillset(name));
+                for (index, skillset) in skillsets.iter().enumerate() {
+                    if index > 0 {
+                        println!();
+                    }
+                    let noun = if skillset.members.len() == 1 {
+                        "skill"
+                    } else {
+                        "skills"
+                    };
+                    println!(
+                        "{} {}",
+                        style.skillset(&skillset.name),
+                        style.muted(format!("({} {noun})", skillset.members.len()))
+                    );
+                    for member in &skillset.members {
+                        println!("  {}", style.skill(member));
+                    }
                 }
             }
             Ok(())

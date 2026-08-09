@@ -92,7 +92,7 @@ Ids are stable. Tests must name or comment the id they prove.
 |---|---|---|
 | K1 | `skillset add <name>-skillset` with `$TINK_HOME/catalog/by-skillset/<name>-skillset/meta.json` | Installs the pinned members under `.agents/skills/<name>-skillset/`, validates the project, then mirrors that exact tree to `$TINK_HOME/skills/<name>-skillset/`; matching re-add is a no-op; library drift is repaired from the valid project |
 | K2 | `skillset remove <name>-skillset` after K1 | Removes only the project skillset tree; preserves the shared catalog definition and home library copy; `skill remove` refuses the skillset root |
-| K3 | `skillset list [--library]` after K1 | Lists receipt-backed skillset names from the current project or home library without network or writes |
+| K3 | `skillset list [--library]` after K1 | Groups each receipt-backed project or library skillset with its member skill names without network or writes |
 | K4 | Any skillset command receives a name without `-skillset` | Exit ≠ 0; clear canonical-name error; no skillset tree written |
 | K5 | `skillset add` finds an ordinary or unowned library entry at the canonical name | Exit ≠ 0 before network/project publication; preserve the library entry |
 | K6 | `skillset remove` finds a missing or invalid receipt | Exit ≠ 0; preserve the complete project directory |
