@@ -1,4 +1,4 @@
 interface:
   display_name: "Tink"
-  short_description: "Repository-owned Agent Skills via the Tink CLI"
-  default_prompt: "Use $manage-tink to set up or manage this project's agent skills with Tink."
+  short_description: "Project skills and skillsets via Tink CLI"
+  default_prompt: "Use $manage-tink to manage this project's skills, skillsets, and Tink library safely."

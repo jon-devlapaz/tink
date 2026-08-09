@@ -2439,6 +2439,57 @@ fn x5_manage_tink_documents_remove_and_catalog_sync() {
                 || commands.contains("updates")),
         "commands.md must describe catalog sync on remove/destroy: {commands}"
     );
+    for command in [
+        "tink inspect GITHUB_URL",
+        "tink skill harvest",
+        "tink skill lock",
+        "tink skill verify",
+        "tink skill sync",
+        "tink skillset add NAME-skillset",
+        "tink skillset list",
+        "tink skillset list --library",
+        "tink skillset refresh NAME-skillset",
+        "tink skillset remove NAME-skillset",
+        "tink update",
+        "tink destroy",
+    ] {
+        assert!(
+            commands.contains(command),
+            "manage-tink commands.md must document {command}: {commands}"
+        );
+    }
+    for contract in [
+        "project is authoritative",
+        "catalog/by-skillset/NAME-skillset/meta.json",
+        ".tink-skillset.json",
+        ".agents/skills/NAME-skillset/<member>/SKILL.md",
+    ] {
+        assert!(
+            skill_md.contains(contract),
+            "manage-tink SKILL.md must document {contract}: {skill_md}"
+        );
+    }
+    for section in [
+        "## When to Use",
+        "## Inputs",
+        "## Procedure",
+        "## Validation",
+        "## Common Pitfalls",
+        "## Related Skills",
+    ] {
+        assert!(
+            skill_md.contains(section),
+            "manage-tink SKILL.md must contain {section}: {skill_md}"
+        );
+    }
+    assert!(
+        skill_md.contains("**Expected:**") && skill_md.contains("**On failure:**"),
+        "manage-tink procedures must state expected and failure behavior: {skill_md}"
+    );
+    assert!(
+        !skill_md.contains("tink skill remove manage-tink && tink init"),
+        "manage-tink must not chain re-embedding onto binary updates: {skill_md}"
+    );
 }
 
 #[test]

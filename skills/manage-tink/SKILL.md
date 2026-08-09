@@ -1,58 +1,150 @@
 ---
 name: manage-tink
-description: "Tink CLI for repository-owned Agent Skills. Use when the user asks to set up or init Tink, add or refresh a project skill, remove a project skill, harvest harness skills into the library, update the tink CLI, list or check .agents/skills, list the by-project catalog or library, promote a library skill into the project, or destroy project agent scaffolding."
+description: "Tink CLI for repository-owned Agent Skills. Use when the user asks to initialize Tink; inspect GitHub skill sources; add, list, check, lock, verify, sync, refresh, or remove project skills; manage grouped skillsets; use the home library or catalog; harvest harness skills; configure shell completion; update Tink; re-embed manage-tink; or destroy project agent scaffolding."
 ---
 
 # Manage Tink
 
-**Live skills** live only under the project's `.agents/skills/`. Tink's **refusals**
-are hard stops — honor them; do not work around them.
+**Live skills and skillsets** live only under the project's `.agents/skills/`.
+The project is authoritative; the home library conforms to it. Tink's
+**refusals** are hard stops — honor them; do not work around them.
 
-## Steps
+## When to Use
 
-1. **Inspect** — If `tink` is missing, report that it must be installed
-   (`curl -fsSL https://raw.githubusercontent.com/jon-devlapaz/tink/main/install.sh | sh`)
-   and stop. Otherwise: use `tink skill check` for this project's live state; use
-   `tink skill list` for live skill names; use `tink skill list --catalog` when the
-   user asks what Tink has recorded across projects; use `tink skill list --library`
-   when the user asks what skill trees sit in the home library (do not hand-parse
-   `~/.tink/catalog/by-project` or `~/.tink/skills`).
-   - Done when: either install guidance was given, or the chosen inspect
-     command's exit status and output are known.
+Use this workflow only for the Tink request that triggered the skill. Do not
+broaden inspection authority into mutation authority.
 
-2. **Mutate only on explicit ask** — Map the user's request to exactly one
-   command from [references/commands.md](references/commands.md). Run that
-   command; do not invent flags, merges, force-overwrites, or alternate install
-   paths (no symlinks, manual copies, or private registries). To promote from
-   the library into the project, use `tink skill add NAME` only (bare library
-   skill name; not a path and not `owner/repo`).
-   To fill the library from known harness skill locations, use
-   `tink skill harvest` only (create-only; does not write project skills).
-   To remove a live project skill, use `tink skill remove NAME` only (drops the
-   name from the by-project catalog; does not prune the library). To update
-   the tink CLI binary, use `tink update` only. After a **major** binary
-   upgrade (new major version / removed flags), re-embed this skill:
-   `tink skill remove manage-tink && tink init --no-zen --no-tink-skills`
-   (init installs the manage-tink copy shipped with the binary; it does not
-   overwrite a divergent live skill otherwise).
-   Shell Tab completion setup:
-   - Zsh (`~/.zshrc`, after `autoload -Uz compinit` and `compinit`):
-     `source <(COMPLETE=zsh tink)`
-   - Bash (`~/.bashrc`): `source <(COMPLETE=bash tink)`
-   - Fish (`~/.config/fish/completions/tink.fish`):
-     `COMPLETE=fish tink | source`
-   - Done when: the chosen command has finished and its stdout/stderr is known.
-   - After adding or changing project skills, if `.tink/skills.toml` and `.tink/skills.lock` do not exist, ask the user whether they want Tink to record a reproducible project skill manifest. If they agree, run `tink skill lock`; provide `--source NAME=PATH` mappings for local skills. Do not create the files without user approval.
-   - When a project has a manifest and lockfile, use `tink skill sync` to restore missing pinned skills; stop on divergent content rather than overwriting it.
+## Inputs
 
-3. **Prove** — After every successful mutation except `destroy` and
-   `skill remove`, run `tink skill check` and report the result. After
-   `skill remove`, run `tink skill list` and `tink skill list --catalog` and
-   confirm the name is gone from the project and the catalog. After `destroy`,
-   confirm `.agents/`, `ZEN.md`, and `AGENTS.md` are gone and
-   `tink skill list --catalog` has no rows for this project; do not run check.
-   - Done when: proof for that mutation type is reported to the user.
-   - After `skill lock`, run `tink skill verify` and report that the manifest and lockfile match the installed trees. For projects that already have these files, recommend `tink skill verify` after skill mutations.
+- The current project root.
+- The user's requested Tink operation and its explicit mutation authority.
+- Any supplied skill source, skill name, or canonical `NAME-skillset` name.
+
+## Procedure
+
+### Step 1: Inspect the Requested State
+
+If `tink` is missing, report the installation command and stop:
+`curl -fsSL https://raw.githubusercontent.com/jon-devlapaz/tink/main/install.sh | sh`.
+Otherwise, run only the read command matching the request:
+
+- Project state or names: `tink skill check` or `tink skill list`.
+- Catalog or library: `tink skill list --catalog` or `tink skill list --library`.
+- Project or library skillsets: `tink skillset list` or
+  `tink skillset list --library`.
+- Public GitHub structure: `tink inspect GITHUB_URL`.
+
+**Expected:** The command's exit status and output are known without writes.
+
+**On failure:** Report the exact refusal or error and stop. Do not hand-parse
+`~/.tink/catalog` or `~/.tink/skills` as a substitute for a failing CLI.
+
+### Step 2: Select One Authorized Mutation
+
+For an explicit mutation request, load
+[references/commands.md](references/commands.md) and select one primary
+command. Do not invent flags, merge operations, force-overwrite, use private
+registries, or substitute symlinks or manual copies.
+
+Require canonical skillset names ending in `-skillset`; never append or remove
+the suffix. `skillset add` reads
+`$TINK_HOME/catalog/by-skillset/NAME-skillset/meta.json`; inspection does not
+create that definition.
+
+**Expected:** One primary command exactly matches the user's authority.
+
+**On failure:** If the request does not authorize the required mutation or a
+canonical name is missing, stop and ask for the missing authority or name.
+
+### Step 3: Execute the Primary Mutation
+
+Run the selected command once. Honor create-only and divergence refusals. Use
+`tink skill add NAME` to promote a bare library skill, `tink skill harvest` to
+fill the library from known harness roots, and only the matching `tink
+skillset add`, `refresh`, or `remove` command for a skillset mutation.
+
+**Expected:** The command finishes and its stdout, stderr, and exit status are
+known.
+
+**On failure:** Stop and report the failure. Do not repair Tink-managed state
+by hand.
+
+### Step 4: Offer Reproducible Project State
+
+After adding or changing project skills, check for `.tink/skills.toml` and
+`.tink/skills.lock`. If absent, ask whether the user wants a reproducible
+manifest. Only after approval, run `tink skill lock`, supplying
+`--source NAME=PATH` for each local skill. If both files already exist, use
+`tink skill sync` only when the user requested restoration.
+
+**Expected:** Manifest files are created or synchronized only with explicit
+approval; divergent content remains untouched.
+
+**On failure:** Report missing local source mappings or divergence and stop.
+Do not guess a source or overwrite a project tree.
+
+### Step 5: Configure Shell Completion When Requested
+
+Use the shell-specific command only after the user asks for completion:
+
+- Zsh: after `autoload -Uz compinit` and `compinit`, use
+  `source <(COMPLETE=zsh tink)`.
+- Bash: use `source <(COMPLETE=bash tink)`.
+- Fish: use `COMPLETE=fish tink | source`.
+
+**Expected:** Completion is configured for the requested shell only.
+
+**On failure:** Report the shell and command failure. Do not edit unrelated
+shell configuration.
+
+### Step 6: Re-embed Manage Tink When Separately Authorized
+
+After a major binary upgrade, explain that the live skill may be stale. Do not
+replace it automatically. If the user explicitly authorizes re-embedding, run
+`tink skill remove manage-tink`, then `tink init --no-zen --no-tink-skills`.
+
+**Expected:** Separate approval exists and the binary's embedded copy becomes
+the live project skill.
+
+**On failure:** Stop after the failing command and report whether the old skill
+was removed. Do not conceal a partially completed replacement.
+
+### Step 7: Prove the Post-state
+
+- After successful mutations other than removal or destroy, run
+  `tink skill check`.
+- After `skill remove`, run `tink skill list` and `tink skill list --catalog`.
+- After `skillset remove`, run `tink skillset list`; its definition and library
+  copy should remain.
+- After `skill lock`, run `tink skill verify`.
+- After `destroy`, confirm `.agents/`, `ZEN.md`, and `AGENTS.md` are gone and
+  the project has no catalog rows; do not run `skill check`.
+
+**Expected:** The proof matching the mutation is reported to the user.
+
+**On failure:** Report the unproven post-state and stop. Never claim success
+from the mutation command alone.
+
+## Validation
+
+- [ ] The selected command matches the user's explicit authority.
+- [ ] No Tink refusal was bypassed.
+- [ ] Canonical skillset names retain `-skillset`.
+- [ ] The mutation-specific post-state check passed.
+- [ ] Any remaining uncertainty or partial completion is reported.
+
+## Common Pitfalls
+
+- Treating the home library as an agent discovery root.
+- Inferring a skillset suffix or definition from inspection output.
+- Combining a binary update with project-skill replacement without approval.
+- Hand-editing receipts, catalog metadata, or divergent managed trees.
+- Treating command completion as proof of the requested outcome.
+
+## Related Skills
+
+- `skill-scout` — Research candidate skills with evidence before choosing one
+  to add through Tink.
 
 ## Authority
 
@@ -64,24 +156,34 @@ are hard stops — honor them; do not work around them.
 | List catalog | `tink skill list --catalog` |
 | List library / promote from library | `tink skill list --library` / `tink skill add NAME` |
 | Harvest harness skills into library | `tink skill harvest` |
+| Inspect a public GitHub skill source | `tink inspect GITHUB_URL` (read-only) |
+| List project / library skillsets | `tink skillset list` / `tink skillset list --library` |
+| Add / refresh / remove a canonical skillset | The matching `tink skillset … NAME-skillset` command |
+| Configure shell completion | Only the matching shell command |
+| Re-embed manage-tink | `tink skill remove manage-tink`, then `tink init --no-zen --no-tink-skills` |
 | Remove one project skill | `tink skill remove NAME` |
-| Update the tink CLI | `tink update` |
+| Update the Tink binary | `tink update` only; re-embedding requires separate authority |
 | Remove scaffolding / destroy Tink setup | `tink destroy` (TTY) or `tink destroy --yes` (scripts) |
 
-"Set up Tink" does **not** authorize ZEN, tink-skills, or destroy.
+"Set up Tink" does **not** authorize ZEN, tink-skills, re-embedding, or destroy.
 
 ## Ownership (always)
 
 - Leave `.tink-source.json` untouched — it is the refresh **receipt**.
+- Leave `.tink-skillset.json` untouched — it is skillset ownership and digest
+  evidence.
 - On a refusal, stop and report it. Authorized deletes are only:
   - `tink skill remove NAME` → `.agents/skills/<name>/` and drops that name
     from the by-project catalog
+  - `tink skillset remove NAME-skillset` → only the receipt-backed project
+    skillset tree; preserves its catalog definition and library copy
   - `tink destroy` → `.agents/`, `ZEN.md`, and `AGENTS.md`, and drops this
     project's by-project catalog entry
 - Treat local skills as non-refreshable unless they carry a valid receipt.
-- Never execute code from a skill while adding, checking, refreshing, removing,
-  or destroying.
-- Library (`~/.tink/skills/`) is **not** an agent discovery root; do not
-  symlink or copy from it by hand — use `tink skill add NAME`.
-- Do not prune the library by hand. `skill remove` and `destroy` sync the
-  by-project catalog; they do not delete library trees.
+- Never execute code from a skill while Tink manages it.
+- Library (`~/.tink/skills/`) is **not** an agent discovery root; use
+  `tink skill add NAME` instead of copying or linking it.
+- Skillsets are nested at
+  `.agents/skills/NAME-skillset/<member>/SKILL.md`; each member remains a valid
+  named skill. Never flatten, merge, or manually copy members.
+- Do not prune the library by hand. Project removals preserve library trees.
