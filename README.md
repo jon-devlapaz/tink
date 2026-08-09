@@ -162,8 +162,9 @@ its pinned catalog definition; local project modifications are refused. Library
 drift is repaired only from a valid project tree.
 `skillset remove NAME-skillset` removes only the project tree; it preserves the
 shared catalog definition and home library copy.
-`skillset list` lists receipt-backed skillsets installed in the current project.
-`skillset list --library` lists receipt-backed skillsets in the home library.
+`skillset list` groups each receipt-backed project skillset with its member
+skills. `skillset list --library` shows the same grouped view for the home
+library.
 
 `tink inspect <GITHUB_URL>` performs a read-only inspection of a public GitHub
 repository, folder, or skill URL. It reports directories containing valid

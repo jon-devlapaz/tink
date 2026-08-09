@@ -586,12 +586,16 @@ fn k1_skillset_add_installs_explicit_members_and_checks_digest() {
         .args(["skillset", "list"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("common-skillset"));
+        .stdout(predicate::str::contains(
+            "common-skillset (2 skills)\n  alpha\n  beta\n",
+        ));
     ws.cmd(&project)
         .args(["skillset", "list", "--library"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("common-skillset"));
+        .stdout(predicate::str::contains(
+            "common-skillset (2 skills)\n  alpha\n  beta\n",
+        ));
 
     fs::write(
         library.join("alpha/SKILL.md"),
