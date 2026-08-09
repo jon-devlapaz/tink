@@ -14,6 +14,7 @@ form for add, list, check, refresh, and remove.
 | Add from multi-skill repo | `tink skill add SOURCE --skill NAME` |
 | Add from library | `tink skill add NAME` |
 | Harvest harness skills into library | `tink skill harvest` |
+| Inspect a public GitHub repository or tree | `tink inspect GITHUB_URL` |
 | List (this project) | `tink skill list` |
 | List (catalog) | `tink skill list --catalog` |
 | List (library) | `tink skill list --library` |
@@ -24,6 +25,11 @@ form for add, list, check, refresh, and remove.
 | Refresh all clean imports | `tink skill refresh` |
 | Refresh one | `tink skill refresh NAME` |
 | Remove one project skill | `tink skill remove NAME` |
+| Add a pinned skillset | `tink skillset add NAME-skillset` |
+| List project skillsets | `tink skillset list` |
+| List library skillsets | `tink skillset list --library` |
+| Refresh a clean pinned skillset | `tink skillset refresh NAME-skillset` |
+| Remove one project skillset | `tink skillset remove NAME-skillset` |
 | Update the tink CLI binary | `tink update` |
 | Refresh live manage-tink after major upgrade | `tink skill remove manage-tink` then `tink init --no-zen --no-tink-skills` |
 | Destroy scaffolding | `tink destroy --yes` (non-TTY/scripts) or `tink destroy` (TTY, confirm `y`) |
@@ -31,6 +37,10 @@ form for add, list, check, refresh, and remove.
 ## Layout facts
 
 - Live skills: `<project>/.agents/skills/<name>/` with `SKILL.md`.
+- Live skillsets:
+  `<project>/.agents/skills/<name>-skillset/<member>/SKILL.md`. Names must be
+  typed canonically with `-skillset`; Tink does not infer the suffix on
+  mutating commands.
 - Home (`$TINK_HOME` or `~/.tink`) is not an agent discovery root. Installs
   library trees at `skills/<name>/`. List the library with
   `tink skill list --library`; promote into a project with
@@ -59,3 +69,14 @@ form for add, list, check, refresh, and remove.
   scaffolding and this project's catalog entry; it does not delete library
   trees or other projects' catalog rows.
   Project skill overwrites are still refused.
+- `tink inspect GITHUB_URL` is read-only. It recursively discovers valid
+  `SKILL.md` folders and reports inferred source skillsets, standalone skills,
+  diagnostics, and the immutable inspected revision. It does not install
+  anything or write a catalog definition.
+- Skillset definitions live at
+  `catalog/by-skillset/<name>-skillset/meta.json` and pin an HTTPS Git source,
+  full revision, source root, and explicit members. Installed project and
+  library trees carry `.tink-skillset.json`. A valid project tree is primary:
+  it may repair its library copy, while library state never overwrites a
+  divergent project. `skillset remove` deletes only the project tree and keeps
+  both the definition and library copy.
