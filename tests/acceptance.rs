@@ -626,6 +626,67 @@ fn a8_add_uses_library_when_remote_tip_matches() {
     );
 }
 
+#[test]
+fn a9_add_catalog_failure_is_resumable() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills"])
+        .assert()
+        .success();
+
+    let source = ws.root.join("demo-skill");
+    write_skill(&source, "demo-skill", "Do the work.");
+    let args = ["skill", "add", source.to_str().unwrap()];
+    let catalog = ws.catalog_meta("app");
+    let catalog_before = fs::read(&catalog).unwrap();
+    let malformed_catalog = b"{not-json}\n";
+    fs::write(&catalog, malformed_catalog).unwrap();
+
+    ws.cmd(&project)
+        .args(args)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Invalid catalog meta"));
+
+    let installed_root = Workspace::skill_path(&project, "demo-skill");
+    let library_root = ws.library_skill("demo-skill");
+    let installed = installed_root.join("SKILL.md");
+    let library = library_root.join("SKILL.md");
+    assert!(installed.is_file());
+    assert!(library.is_file());
+    assert_eq!(fs::read(&catalog).unwrap(), malformed_catalog);
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
+    let source_before = fs::read(source.join("SKILL.md")).unwrap();
+    let installed_before = fs::read(&installed).unwrap();
+    let library_before = fs::read(&library).unwrap();
+    assert_eq!(installed_before, source_before);
+    assert_eq!(library_before, source_before);
+    assert_eq!(fs::read_dir(&installed_root).unwrap().count(), 1);
+    assert_eq!(fs::read_dir(&library_root).unwrap().count(), 1);
+
+    fs::write(&catalog, catalog_before).unwrap();
+    ws.cmd(&project)
+        .args(args)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Unchanged demo-skill"));
+
+    ws.assert_cataloged("app", "manage-tink");
+    ws.assert_cataloged("app", "demo-skill");
+    let meta: serde_json::Value =
+        serde_json::from_slice(&fs::read(&catalog).unwrap()).expect("valid catalog meta");
+    let skills = meta["skills"].as_array().expect("catalog skills");
+    assert_eq!(skills.len(), 2);
+    assert!(skills.contains(&serde_json::json!("demo-skill")));
+    assert!(skills.contains(&serde_json::json!("manage-tink")));
+    assert_eq!(fs::read(installed).unwrap(), installed_before);
+    assert_eq!(fs::read(library).unwrap(), library_before);
+    assert_eq!(fs::read_dir(installed_root).unwrap().count(), 1);
+    assert_eq!(fs::read_dir(library_root).unwrap().count(), 1);
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
+}
+
 // --- K*: skillsets ---
 
 #[test]

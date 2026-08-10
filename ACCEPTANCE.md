@@ -77,6 +77,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | A6 | `skill add` when library has same name but different tree (project missing) | Exit 0; installs project; repairs library; warns on stderr that the home copy was updated |
 | A7 | `skill add` skill named `by-project` | Exit ≠ 0; reserved name; no project/library write |
 | A8 | `skill add` same GitHub tip already in library | Exit 0; installs project from library (no clone); stdout notes library |
+| A9 | `skill add` when catalog metadata is malformed, repair the catalog, then rerun the same command | First run fails after preserving valid project/library copies; second run exits 0, catalogs the skill, and leaves those copies byte-identical |
 
 ### Remote add
 
