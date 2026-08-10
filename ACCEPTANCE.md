@@ -11,8 +11,12 @@ from GitHub Releases via `tink update`.
 **Authority:** This file is the evaluator. Implementation stops when every row
 below has an automated test that passes on macOS with `git` on `PATH`.
 
+**Delivery gate:** The automatic `main`-push release path runs formatting and
+tests on Ubuntu before version, tag, push, or dispatch mutations. Direct tag
+pushes and manual release dispatches remain outside that behavior gate.
+
 **Out of v1:** weekly GitHub update workflows, private GitHub auth, Windows,
-Linux CI as a gate, pruning the library.
+branch-wide Linux CI beyond the automatic release gate, pruning the library.
 
 **Dogfood:** Prefer an installed `tink` from this repo, or `cargo run -q -- …`.
 
@@ -27,7 +31,7 @@ Skill verbs live only under `tink skill`. There are no top-level `add` /
 | `tink skill add <source> [--skill <name-or-path>]` | Install one local path, public GitHub skill, or library skill by name; remote selectors may be unique names or repository-relative paths |
 | `tink skill list` | List project skills under `.agents/skills/` (read-only) |
 | `tink skill list --catalog` | List offline by-project catalog (`project`, `root`, `skill` TSV) |
-| `tink skill list --library` | List skill names in the library (`skills/<name>/` with `SKILL.md`) |
+| `tink skill list --library` | List standalone skill names in the library; receipt-backed skillset roots are excluded |
 | `tink skill harvest` | Copy complete skill trees from known harness roots into the library (create-only; no project writes) |
 | `tink skill check` | Validate project skills; no network; no writes |
 | `tink skill refresh [name]` | Refresh clean GitHub imports; refuse local edits |
@@ -167,6 +171,9 @@ Ids are stable. Tests must name or comment the id they prove.
 | H8 | `skill harvest` skips library sources and unsafe (symlink-inside) skill trees; still harvests cwd skills under `TINK_HOME` outside `skills/` | Library/unsafe omitted; non-library path under home deposited |
 | H9 | Shell completion for `tink skill add <prefix>` | Offers matching names from the current library without creating the home or library |
 | H10 | `skill list --library` when a valid library skill contains a nested symlink | Exit ≠ 0; mentions the symlink; does not advertise the unsafe skill or alter either side of the link |
+| H11 | A library root contains both `SKILL.md` and `.tink-skillset.json` | `skill list --library` excludes it; `skill add <name>` exits nonzero and directs the user to `tink skillset add <name>` |
+| H12 | `skill add <source>` would deposit a standalone skill over a receipt-bearing library root with the same name | Exit nonzero before project publication; preserve every existing library file and identify the standalone/skillset collision |
+| H13 | `skill add <source>` exactly matches a receipt-bearing library root with the same name | Do not reuse the managed root as a standalone cache hit; exit nonzero, preserve the library bytes, and publish no project tree |
 
 ### CLI surface
 

@@ -59,9 +59,10 @@ canonical name is missing, stop and ask for the missing authority or name.
 ### Step 3: Execute the Primary Mutation
 
 Run the selected command once. Honor create-only and divergence refusals. Use
-`tink skill add NAME` to promote a bare library skill, `tink skill harvest` to
-fill the library from known harness roots, and only the matching `tink
-skillset add`, `refresh`, or `remove` command for a skillset mutation.
+`tink skill add NAME` to promote a bare library skill. Receipt-backed roots
+remain skillsets. Use `tink skill harvest` to fill the library from known
+harness roots, and only the matching `tink skillset add`, `refresh`, or
+`remove` command for a skillset mutation.
 
 **Expected:** The command finishes and its stdout, stderr, and exit status are
 known.
@@ -136,6 +137,7 @@ from the mutation command alone.
 ## Common Pitfalls
 
 - Treating the home library as an agent discovery root.
+- Treating a receipt-backed library skillset as a standalone skill.
 - Inferring a skillset suffix or definition from inspection output.
 - Combining a binary update with project-skill replacement without approval.
 - Hand-editing receipts, catalog metadata, or divergent managed trees.
@@ -171,7 +173,8 @@ from the mutation command alone.
 
 - Leave `.tink-source.json` untouched — it is the refresh **receipt**.
 - Leave `.tink-skillset.json` untouched — it is skillset ownership and digest
-  evidence.
+  evidence. Its presence takes precedence over a root `SKILL.md`; standalone
+  library commands must not expose, promote, or replace that root.
 - On a refusal, stop and report it. Authorized deletes are only:
   - `tink skill remove NAME` → `.agents/skills/<name>/` and drops that name
     from the by-project catalog

@@ -53,7 +53,8 @@ fn library_root(home: Option<&Path>) -> Result<PathBuf, Error> {
     Ok(root)
 }
 
-/// Validated skill trees currently in the library (skips reserved / unreadable).
+/// Validated standalone skill trees currently in the library.
+/// Skips reserved, unreadable, and receipt-backed skillset roots.
 fn iter_library_skills(library: &Path) -> Result<Vec<Skill>, Error> {
     if !library.exists() {
         return Ok(Vec::new());
@@ -78,6 +79,9 @@ fn iter_library_skills(library: &Path) -> Result<Vec<Skill>, Error> {
         if path.is_symlink() || !path.is_dir() {
             continue;
         }
+        if crate::skillsets::has_receipt_entry(&path) {
+            continue;
+        }
         if let Ok(skill) = skills::read_skill(&path, true) {
             skills::validate_skill_tree(&path)?;
             skills.push(skill);
@@ -91,11 +95,19 @@ fn iter_library_skills(library: &Path) -> Result<Vec<Skill>, Error> {
 ///
 /// Identical → noop; missing → create; divergent → replace (caller should warn).
 /// Project installs still refuse overwrites separately.
+/// Receipt-backed skillset roots are never replaced by standalone skills.
 pub fn deposit(
     skill: &Skill,
     provenance: Option<&Provenance>,
 ) -> Result<(PathBuf, LibraryWrite), Error> {
     let library = library_root(None)?;
+    let target = library.join(&skill.name);
+    if crate::skillsets::has_receipt_entry(&target) {
+        return Err(Error::msg(format!(
+            "Library entry is a skillset; refusing standalone skill collision: {}",
+            skill.name
+        )));
+    }
     match skills::preflight_install(skill, &library, provenance)? {
         PreflightOutcome::Ready => {
             let (path, _) = skills::install_local(skill, &library, provenance)?;
@@ -139,11 +151,12 @@ pub fn deposit_create_only(skill: &Skill) -> Result<(PathBuf, CreateOnlyWrite), 
     }
 }
 
-/// When the library already holds the exact tree we would install, return it.
+/// When the library already holds the exact standalone tree we would install, return it.
+/// Receipt-backed roots remain owned by the skillset lifecycle and are never cache hits.
 pub fn matching(skill: &Skill, provenance: Option<&Provenance>) -> Result<Option<Skill>, Error> {
     let library = library_root(None)?;
     let target = library.join(&skill.name);
-    if !target.is_dir() {
+    if !target.is_dir() || crate::skillsets::has_receipt_entry(&target) {
         return Ok(None);
     }
     match skills::preflight_install(skill, &library, provenance)? {
@@ -154,9 +167,10 @@ pub fn matching(skill: &Skill, provenance: Option<&Provenance>) -> Result<Option
     }
 }
 
-/// List skill names present in the home library.
+/// List standalone skill names present in the home library.
 ///
-/// Creates nothing; empty when home or library root is missing.
+/// Creates nothing; empty when home or library root is missing. Receipt-backed
+/// skillset roots are excluded.
 pub fn list_names(home: Option<&Path>) -> Result<Vec<String>, Error> {
     let Some(home) = existing_inventory_root(home)? else {
         return Ok(Vec::new());
@@ -168,7 +182,8 @@ pub fn list_names(home: Option<&Path>) -> Result<Vec<String>, Error> {
         .collect())
 }
 
-/// Load one skill from the library by directory name.
+/// Load one standalone skill from the library by directory name.
+/// Receipt-backed roots remain owned by the skillset lifecycle.
 pub fn load(name: &str) -> Result<Skill, Error> {
     let library = library_root(None)?;
     let path = library.join(name);
@@ -180,6 +195,11 @@ pub fn load(name: &str) -> Result<Skill, Error> {
     }
     if !path.is_dir() {
         return Err(Error::msg(format!("Library skill not found: {name}")));
+    }
+    if crate::skillsets::has_receipt_entry(&path) {
+        return Err(Error::msg(format!(
+            "Library entry is a skillset; use `tink skillset add {name}`"
+        )));
     }
     skills::read_skill(&path, true)
 }

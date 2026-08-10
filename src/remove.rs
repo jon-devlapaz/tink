@@ -42,9 +42,7 @@ pub fn remove_skill(project_root: &Path, name: &str) -> Result<RemoveReport, Err
             target.display()
         )));
     }
-    if target.join(crate::skillsets::RECEIPT_FILE).exists()
-        || target.join(crate::skillsets::RECEIPT_FILE).is_symlink()
-    {
+    if crate::skillsets::has_receipt_entry(&target) {
         return Err(Error::msg(format!(
             "Skillset root detected; use `tink skillset remove {name}`"
         )));

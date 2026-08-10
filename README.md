@@ -139,7 +139,8 @@ tink skill refresh skill-name
 tink skill remove skill-name
 ```
 
-- Bare `skill-name` promotes from the library (`tink skill list --library`).
+- A bare standalone `skill-name` promotes from the library (`tink skill list --library`).
+  Receipt-backed roots remain skillsets and require `tink skillset ...` commands.
 - `--skill` recursively selects a unique skill name from a remote repository.
   If that name occurs more than once, use the repository-relative path reported
   by the error or by `tink inspect`.
@@ -169,7 +170,8 @@ drift is repaired only from a valid project tree.
 shared catalog definition and home library copy.
 `skillset list` groups each receipt-backed project skillset with its member
 skills. `skillset list --library` shows the same grouped view for the home
-library.
+library. Receipt ownership takes precedence over a root `SKILL.md`: standalone
+library list/add commands never expose, promote, or replace that skillset root.
 
 `tink inspect <GITHUB_URL>` performs a read-only inspection of a public GitHub
 repository, folder, or skill URL. It reports directories containing valid
@@ -196,8 +198,8 @@ tink update
 **Breaking in 0.3.0:** `skill list --home` → `--catalog`; `skill list --stash` → `--library`. On-disk layout is still `$TINK_HOME/skills/` and `catalog/by-project/`. After a major CLI upgrade, refresh the live project skill: `tink skill remove manage-tink && tink init --no-zen --no-tink-skills`.
 
 If the GitHub tip is already in the library and matches the tip byte-for-byte,
-`skill add` may install from the library. If the library differs, tink repairs it
-and warns. A bare skill name (not a path and not `owner/repo`) promotes from
+`skill add` may install from the library. If a standalone library skill differs,
+tink repairs it and warns. A bare standalone skill name (not a path and not `owner/repo`) promotes from
 the library into the project. `skill remove` deletes the project skill
 directory and drops that name from the by-project catalog; it does not delete
 library trees. `destroy` also drops this project's catalog entry.
