@@ -44,7 +44,8 @@ form for add, list, check, refresh, and remove.
 - Home (`$TINK_HOME` or `~/.tink`) is not an agent discovery root. Installs
   library trees at `skills/<name>/`. List the library with
   `tink skill list --library`; promote into a project with
-  `tink skill add NAME` (bare library skill name). `tink skill harvest` copies complete trees
+  `tink skill add NAME` (bare standalone library skill name). Receipt-backed
+  roots are excluded from both standalone operations. `tink skill harvest` copies complete trees
   from known harness roots into the library create-only (never overwrites a
   divergent library entry). Global roots include `~/.agents/skills`,
   `~/.claude/skills`, `~/.codex/skills`, `~/.cursor/skills`,
@@ -78,5 +79,7 @@ form for add, list, check, refresh, and remove.
   full revision, source root, and explicit members. Installed project and
   library trees carry `.tink-skillset.json`. A valid project tree is primary:
   it may repair its library copy, while library state never overwrites a
-  divergent project. `skillset remove` deletes only the project tree and keeps
+  divergent project. Receipt presence owns the root even when it also contains
+  `SKILL.md`; standalone skill commands never expose, promote, or replace it.
+  `skillset remove` deletes only the project tree and keeps
   both the definition and library copy.

@@ -2631,6 +2631,117 @@ fn h9_completion_offers_current_library_matches_without_creating_home() {
         );
 }
 
+#[test]
+fn h11_receipt_bearing_library_root_is_not_a_standalone_skill() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let root = ws.library_skill("bundle-skillset");
+    write_skill(
+        &root,
+        "bundle-skillset",
+        "root skill must not override skillset ownership",
+    );
+    fs::write(root.join(".tink-skillset.json"), "{}\n").unwrap();
+
+    ws.cmd(&project)
+        .args(["skill", "list", "--library"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("bundle-skillset").not());
+
+    ws.cmd(&project)
+        .args(["skill", "add", "bundle-skillset"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Library entry is a skillset").and(
+            predicate::str::contains("tink skillset add bundle-skillset"),
+        ));
+    assert!(!Workspace::skill_path(&project, "bundle-skillset").exists());
+}
+
+#[test]
+fn h12_standalone_add_preserves_receipt_bearing_library_root() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let library_root = ws.library_skill("bundle-skillset");
+    write_skill(&library_root, "bundle-skillset", "managed root");
+    fs::write(library_root.join(".tink-skillset.json"), "owned receipt\n").unwrap();
+    fs::write(library_root.join("keep.txt"), "preserve me\n").unwrap();
+    let before_skill = fs::read(library_root.join("SKILL.md")).unwrap();
+    let before_receipt = fs::read(library_root.join(".tink-skillset.json")).unwrap();
+    let before_keep = fs::read(library_root.join("keep.txt")).unwrap();
+
+    let source = ws.root.join("incoming-skill");
+    write_skill(&source, "bundle-skillset", "standalone collision");
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Library entry is a skillset").and(
+            predicate::str::contains("refusing standalone skill collision"),
+        ));
+
+    assert_eq!(
+        fs::read(library_root.join("SKILL.md")).unwrap(),
+        before_skill
+    );
+    assert_eq!(
+        fs::read(library_root.join(".tink-skillset.json")).unwrap(),
+        before_receipt
+    );
+    assert_eq!(
+        fs::read(library_root.join("keep.txt")).unwrap(),
+        before_keep
+    );
+    assert!(!Workspace::skill_path(&project, "bundle-skillset").exists());
+}
+
+#[test]
+fn h13_exact_cache_match_does_not_publish_skillset_as_standalone() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let library_root = ws.library_skill("bundle-skillset");
+    write_skill(&library_root, "bundle-skillset", "identical managed root");
+    fs::write(library_root.join(".tink-skillset.json"), "owned receipt\n").unwrap();
+    let before_skill = fs::read(library_root.join("SKILL.md")).unwrap();
+    let before_receipt = fs::read(library_root.join(".tink-skillset.json")).unwrap();
+
+    let source = ws.root.join("identical-source");
+    write_skill(&source, "bundle-skillset", "identical managed root");
+    fs::write(source.join(".tink-skillset.json"), "owned receipt\n").unwrap();
+
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Library entry is a skillset"));
+
+    assert_eq!(
+        fs::read(library_root.join("SKILL.md")).unwrap(),
+        before_skill
+    );
+    assert_eq!(
+        fs::read(library_root.join(".tink-skillset.json")).unwrap(),
+        before_receipt
+    );
+    assert!(!Workspace::skill_path(&project, "bundle-skillset").exists());
+}
+
 // --- V*: CLI surface (skill nest) ---
 
 #[test]

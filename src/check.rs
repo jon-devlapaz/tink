@@ -22,9 +22,7 @@ fn read_skill_entry(path: &Path) -> Result<Option<Skill>, Error> {
             "Unexpected entry in .agents/skills: {name}"
         )));
     }
-    if path.join(crate::skillsets::RECEIPT_FILE).exists()
-        || path.join(crate::skillsets::RECEIPT_FILE).is_symlink()
-    {
+    if crate::skillsets::has_receipt_entry(path) {
         crate::skillsets::validate_installed(path)?;
         return Ok(None);
     }

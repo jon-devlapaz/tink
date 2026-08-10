@@ -1,4 +1,8 @@
-//! Pinned nested skillset installation.
+//! Pinned nested skillset lifecycle.
+//!
+//! Receipt entry presence classifies a root as a skillset before receipt contents are
+//! trusted. The project tree is authoritative; library copies are derived from a
+//! validated project tree.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -14,8 +18,18 @@ use crate::paths::{map_io, refuse_symlink};
 use crate::skills;
 use crate::sources;
 
-pub const RECEIPT_FILE: &str = ".tink-skillset.json";
+const RECEIPT_FILE: &str = ".tink-skillset.json";
 const NAME_SUFFIX: &str = "-skillset";
+
+/// Whether `path` contains a skillset receipt entry.
+///
+/// This is classification, not validation. Receipt presence claims the root for the
+/// skillset domain and prevents standalone handling; callers that need valid contents
+/// must validate them separately.
+pub(crate) fn has_receipt_entry(path: &Path) -> bool {
+    let receipt = path.join(RECEIPT_FILE);
+    receipt.exists() || receipt.is_symlink()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LibraryWrite {
@@ -457,7 +471,7 @@ pub fn list_installed(project_root: &Path) -> Result<Vec<ListedSkillset>, Error>
                 "Unexpected entry in .agents/skills: {name}"
             )));
         }
-        if path.join(RECEIPT_FILE).exists() || path.join(RECEIPT_FILE).is_symlink() {
+        if has_receipt_entry(&path) {
             let installed = read_installed(&path)?;
             skillsets.push(ListedSkillset {
                 name: installed.name,
@@ -476,7 +490,7 @@ pub fn project_counts(project_root: &Path) -> Result<(usize, usize), Error> {
     let mut member_count = 0;
     for entry in fs::read_dir(&skills_root).map_err(|e| map_io(&skills_root, e))? {
         let path = entry.map_err(|e| map_io(&skills_root, e))?.path();
-        if path.join(RECEIPT_FILE).exists() || path.join(RECEIPT_FILE).is_symlink() {
+        if has_receipt_entry(&path) {
             let installed = read_installed(&path)?;
             skillset_count += 1;
             member_count += installed.receipt.members.len();
@@ -592,7 +606,7 @@ pub fn list_library(home_root: Option<&Path>) -> Result<Vec<ListedSkillset>, Err
         if path.is_symlink() || !path.is_dir() {
             continue;
         }
-        if path.join(RECEIPT_FILE).exists() || path.join(RECEIPT_FILE).is_symlink() {
+        if has_receipt_entry(&path) {
             let installed = read_installed(&path)?;
             skillsets.push(ListedSkillset {
                 name: installed.name,
@@ -637,5 +651,19 @@ mod tests {
         assert!(parse_source("https://git.example.test/team/skills.git").is_ok());
         assert!(parse_source("owner/skills").is_err());
         assert!(parse_source("https://user@git.example.test/skills.git").is_err());
+    }
+
+    #[test]
+    fn receipt_entry_presence_includes_dangling_symlinks() {
+        let root = tempfile::tempdir().unwrap();
+        let receipt = root.path().join(RECEIPT_FILE);
+
+        assert!(!has_receipt_entry(root.path()));
+        fs::write(&receipt, "receipt").unwrap();
+        assert!(has_receipt_entry(root.path()));
+
+        fs::remove_file(&receipt).unwrap();
+        std::os::unix::fs::symlink(root.path().join("missing"), &receipt).unwrap();
+        assert!(has_receipt_entry(root.path()));
     }
 }
