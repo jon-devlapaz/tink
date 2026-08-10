@@ -2,8 +2,9 @@
 
 Tests are Tink's behavior sensors. [`ACCEPTANCE.md`](../ACCEPTANCE.md) records the
 intended CLI and on-disk boundary; workflow files define delivery automation. Unit and
-acceptance tests provide executable evidence, with known traceability drift recorded
-below. A passing check proves only its assertions.
+acceptance tests provide executable evidence. A repository-local traceability test
+keeps row and sensor identifiers unique and exposes explicit manual or partial gaps.
+A passing check proves only its assertions.
 
 ## Required local gate
 
@@ -15,8 +16,9 @@ cargo test --locked
 git diff --check
 ```
 
-`cargo test --locked` runs module unit tests and `tests/acceptance.rs`. Use a focused
-acceptance filter while iterating, then run the complete gate before closure:
+`cargo test --locked` runs module unit tests, `tests/acceptance.rs`, and the acceptance
+traceability guard. Use a focused acceptance filter while iterating, then run the
+complete gate before closure:
 
 ```console
 cargo test --test acceptance h13_exact_cache_match_does_not_publish_skillset_as_standalone -- --nocapture
@@ -93,19 +95,17 @@ than copying every row here.
    [`ARCHITECTURE.md`](ARCHITECTURE.md). Record experiment history in
    [`DEEP-REFACTOR-LOG.md`](DEEP-REFACTOR-LOG.md).
 
-## Known sensor gaps
+## Traceability and known sensor gaps
 
-- Acceptance row C4 describes no-network/no-write instrumentation, while the current
-  `c4_check_fails_with_corrupt_installed_skill` test proves corrupt-frontmatter
-  refusal. The stated C4 sensor remains unautomated and its ID has drifted.
-- Manifest tests use `M*`, but `ACCEPTANCE.md` has no manifest section; two test
-  functions use the `M2` prefix. Two remote-add tests likewise use `R2`.
-  Traceability is therefore not one-to-one.
-- Additional useful tests (`A3b`, `V3`, `L6`, `X6`, and `G4b`-`G4e`) are executable but
-  not represented by distinct acceptance rows.
-- Acceptance S1 promises no Git mutation for every successful command, but the only
-  `S*` test covers `init` not creating `.git`; S2 (home is never discovery) has no
-  named acceptance test. Both cross-cutting claims have only partial sensor coverage.
+`tests/acceptance_traceability.rs` rejects duplicate row IDs, duplicate executable
+sensor IDs, missing named sensors, and executable sensors without a row. Most rows map
+to the same-named `tests/acceptance.rs` function. An explicit `Sensor: <ID>` marker
+records deliberate bundled coverage; `Sensor: manual` records an unresolved proof gap.
+
+- C4 still needs no-network/no-write instrumentation.
+- S1 is automated only for `init` not creating a Git repository; its command-wide
+  no-stage/commit/push claim remains partial.
+- S2 (home is never an agent discovery root) remains manual.
 - No automated test proves concurrent Tink mutations safe; production code has no
   inter-process library lock.
 - Direct-tag and manual release entrypoints bypass behavior verification, while a

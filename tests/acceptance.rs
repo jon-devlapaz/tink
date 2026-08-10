@@ -1346,7 +1346,7 @@ fn r2_add_rejects_non_github_remote() {
 }
 
 #[test]
-fn r2_add_rejects_embedded_lock_source() {
+fn r12_add_rejects_embedded_lock_source() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project).arg("init").assert().success();
@@ -1848,7 +1848,7 @@ fn c3_check_refuses_agents_symlink() {
 }
 
 #[test]
-fn c4_check_fails_with_corrupt_installed_skill() {
+fn c5_check_fails_with_corrupt_installed_skill() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project).arg("init").assert().success();
@@ -2018,7 +2018,7 @@ fn m5_skill_sync_keeps_missing_local_source_local() {
 }
 
 #[test]
-fn m2_skill_verify_requires_manifest() {
+fn m6_skill_verify_requires_manifest() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)

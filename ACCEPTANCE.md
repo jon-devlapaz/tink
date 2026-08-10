@@ -8,8 +8,9 @@ imports, removes a project skill on request, ensures a home root at `~/.tink`
 harness locations into that library (create-only), and can update the CLI binary
 from GitHub Releases via `tink update`.
 
-**Authority:** This file is the evaluator. Implementation stops when every row
-below has an automated test that passes on macOS with `git` on `PATH`.
+**Authority:** This file is the evaluator. A row is complete when its named automated
+sensor passes on macOS with `git` on `PATH`. Rows explicitly marked
+`Sensor: manual` remain known gaps rather than implied automated proof.
 
 **Delivery gate:** The automatic `main`-push release path runs formatting and
 tests on Ubuntu before version, tag, push, or dispatch mutations. Direct tag
@@ -34,6 +35,9 @@ Skill verbs live only under `tink skill`. There are no top-level `add` /
 | `tink skill list --library` | List standalone skill names in the library; receipt-backed skillset roots are excluded |
 | `tink skill harvest` | Copy complete skill trees from known harness roots into the library (create-only; no project writes) |
 | `tink skill check` | Validate project skills; no network; no writes |
+| `tink skill lock [--source <name=source>]` | Record the installed project skills in `.tink/skills.toml` and `.tink/skills.lock` |
+| `tink skill sync` | Restore the locked project skills from their typed sources |
+| `tink skill verify` | Verify installed project skills against the manifest and lockfile |
 | `tink skill refresh [name]` | Refresh clean GitHub imports; refuse local edits |
 | `tink skill remove <name>` | Delete one project skill under `.agents/skills/<name>/` and drop that name from the by-project catalog (not library) |
 | `tink inspect <GITHUB_URL>` | Inspect skills and source-defined skillsets in a public GitHub URL without writing project or home state |
@@ -78,6 +82,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | A1 | `skill add` valid local skill dir | Installs under `.agents/skills/<name>/`; records name in catalog; copies tree into library at `$TINK_HOME/skills/<name>/` |
 | A2 | `skill add` same skill again (byte-identical) | Success noop; project + library unchanged |
 | A3 | `skill add` when project target exists and differs | Exit ≠ 0; "Refusing to overwrite"; project target unchanged |
+| A3B | Re-add an unchanged local skill whose stale `.tink-source.json` is its only divergence | Exit 0; removes the inapplicable remote-source sidecar |
 | A4 | `skill add` skill tree containing a symlink | Exit ≠ 0; refuse |
 | A5 | `skill add` multi-skill source without `--skill` | Exit ≠ 0; lists choices |
 | A6 | `skill add` when library has same name but different tree (project missing) | Exit 0; installs project; repairs library; warns on stderr that the home copy was updated |
@@ -104,14 +109,15 @@ Ids are stable. Tests must name or comment the id they prove.
 | R9 | A matching library copy exists for one of several same-name remote skills | Name-only add still checks the repository and refuses ambiguity; the cache cannot choose a path implicitly |
 | R10 | A canonical nested skill and a directory/name-mismatched `SKILL.md` declare the same name | Name selection ignores the malformed candidate and installs the one valid tree; inspection may still diagnose both |
 | R11 | Root and nested skills share a name, then `--skill .` selects the listed root path | Installs the root skill and records receipt path `"."` |
+| R12 | `skill add tink:embedded/manage-tink` through the free-form add boundary | Exit ≠ 0; embedded lock sources are not accepted as remote add sources |
 
 ### Skillsets
 
 | Id | Action | Expect |
 |---|---|---|
 | K1 | `skillset add <name>-skillset` with `$TINK_HOME/catalog/by-skillset/<name>-skillset/meta.json` | Installs the pinned members under `.agents/skills/<name>-skillset/`, validates the project, then mirrors that exact tree to `$TINK_HOME/skills/<name>-skillset/`; matching re-add is a no-op; library drift is repaired from the valid project |
-| K2 | `skillset remove <name>-skillset` after K1 | Removes only the project skillset tree; preserves the shared catalog definition and home library copy; `skill remove` refuses the skillset root |
-| K3 | `skillset list [--library]` after K1 | Groups each receipt-backed project or library skillset with its member skill names without network or writes |
+| K2 | `skillset remove <name>-skillset` after K1 | Removes only the project skillset tree; preserves the shared catalog definition and home library copy; `skill remove` refuses the skillset root. Sensor: K1. |
+| K3 | `skillset list [--library]` after K1 | Groups each receipt-backed project or library skillset with its member skill names without network or writes. Sensor: K1. |
 | K4 | Any skillset command receives a name without `-skillset` | Exit ≠ 0; clear canonical-name error; no skillset tree written |
 | K5 | `skillset add` finds an ordinary or unowned library entry at the canonical name | Exit ≠ 0 before network/project publication; preserve the library entry |
 | K6 | `skillset remove` finds a missing or invalid receipt | Exit ≠ 0; preserve the complete project directory |
@@ -129,6 +135,10 @@ Ids are stable. Tests must name or comment the id they prove.
 | G2 | `inspect` a group tree URL | Reports only the one inferred skillset and skills beneath that boundary |
 | G3 | `inspect` a skill tree URL | Reports one skill and zero skillsets |
 | G4 | `inspect` a repository with one non-`skills` structural wrapper | Infers grouped skillsets without relying on a literal `skills/` directory |
+| G4B | `inspect` a flat repository containing multiple root skills | Proposes one unnamed skillset without exposing the temporary checkout directory name |
+| G4C | `inspect` a mixed root with one root skill and a separate `skills/` collection | Refuses to collapse unrelated levels; reports standalone skills and requests a narrower URL |
+| G4D | `inspect` a repository or tree rooted at a literal `skills/` collection | Treats `skills` as a collection root rather than proposing `skills-skillset` |
+| G4E | `inspect` a grouped repository whose derived canonical name would exceed the name limit | Leaves that proposal unnamed and explains that no valid canonical name is available |
 | G5 | `inspect` duplicate names and invalid `SKILL.md` files | Succeeds with visible diagnostics and excludes invalid candidates from the skill count |
 | G6 | `inspect` an empty valid directory | Succeeds with zero skills and a structural diagnostic |
 | G7 | `inspect` unsupported URLs, missing or ambiguous slash-containing refs, and missing boundaries | Exits nonzero with actionable errors |
@@ -141,7 +151,19 @@ Ids are stable. Tests must name or comment the id they prove.
 | C1 | `skill check` after valid `init` + `skill add` | Exit 0 |
 | C2 | `skill check` without `.agents/skills` | Exit ≠ 0 |
 | C3 | `skill check` when `.agents` is a symlink | Exit ≠ 0; refuse |
-| C4 | `skill check` | Performs no network I/O and no filesystem writes (manual / future instrumentation; not automated in v1 harness) |
+| C4 | `skill check` | Performs no network I/O and no filesystem writes. Sensor: manual. |
+| C5 | `skill check` after an installed skill's frontmatter name is corrupted | Exit ≠ 0; reports the skill-name mismatch |
+
+### Project manifest
+
+| Id | Action | Expect |
+|---|---|---|
+| M1 | `skill verify` with matching empty manifest and lockfile in an empty project | Exit 0; reports zero verified manifest skills |
+| M2 | `skill lock --source reviewer=fixture/reviewer` after adding that local skill | Writes manifest and lockfile; subsequent `skill verify` succeeds |
+| M3 | `skill sync` after deleting an installed locked local skill whose source remains | Restores the skill; subsequent `skill verify` succeeds |
+| M4 | `skill sync` after deleting locked embedded `manage-tink` | Restores the embedded skill; subsequent `skill verify` succeeds |
+| M5 | `skill sync` after a slash-containing local source disappears | Exit ≠ 0 as a missing local path; does not reinterpret it as GitHub shorthand |
+| M6 | `skill verify` without a project manifest | Exit ≠ 0; reports the missing manifest |
 
 ### List
 
@@ -181,6 +203,7 @@ Ids are stable. Tests must name or comment the id they prove.
 |---|---|---|
 | V1 | `skill add` local skill | Installs under `.agents/skills/<name>/` |
 | V2 | `skill check` after valid project | Exit 0; stdout includes `OK` |
+| V3 | Run top-level `--help`, then a project command, after each command's current directory is removed | Help succeeds without resolving a project; the project command fails closed with a current-directory error |
 
 ### Refresh
 
@@ -227,8 +250,8 @@ Ids are stable. Tests must name or comment the id they prove.
 
 | Id | Action | Expect |
 |---|---|---|
-| S1 | Any successful command | Does not `git init`, stage, commit, or push |
-| S2 | Home root | Never treated as an agent discovery root |
+| S1 | Any successful command | Does not `git init`, stage, commit, or push. Sensor: S1 (partial: `init` only). |
+| S2 | Home root | Never treated as an agent discovery root. Sensor: manual. |
 | S3 | `skill remove` or `destroy --yes` when neither `TINK_HOME` nor `HOME` can resolve an inventory | Exit 0; completes local cleanup without creating or mutating inventory state |
 
 ## Proof
@@ -237,5 +260,5 @@ Ids are stable. Tests must name or comment the id they prove.
 cargo test
 ```
 
-A row is done only when its automated test passes. Passing tests prove only what
-they assert.
+A row is done only when its named automated sensor passes. Explicit manual or partial
+markers disclose remaining proof gaps. Passing tests prove only what they assert.
