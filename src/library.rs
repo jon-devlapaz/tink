@@ -79,6 +79,7 @@ fn iter_library_skills(library: &Path) -> Result<Vec<Skill>, Error> {
             continue;
         }
         if let Ok(skill) = skills::read_skill(&path, true) {
+            skills::validate_skill_tree(&path)?;
             skills.push(skill);
         }
     }
@@ -377,6 +378,31 @@ mod tests {
         fs::create_dir_all(unmarked.join("skills")).unwrap();
         let err = list_names(Some(&unmarked)).unwrap_err();
         assert!(err.to_string().contains("Not a Tink home"), "{err}");
+    }
+
+    #[test]
+    fn list_names_skips_malformed_root_manifest() {
+        let home = TempHome::new();
+        ensure_inventory_root(Some(&home.home)).unwrap();
+        let malformed = home.library_skill("broken-skill");
+        fs::create_dir_all(&malformed).unwrap();
+        fs::write(malformed.join("SKILL.md"), "not frontmatter\n").unwrap();
+
+        assert!(list_names(Some(&home.home)).unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn list_names_refuses_valid_manifest_with_unsafe_nested_tree() {
+        let home = TempHome::new();
+        ensure_inventory_root(Some(&home.home)).unwrap();
+        let unsafe_skill = home.library_skill("demo-skill");
+        write_skill(&unsafe_skill, "demo-skill", "valid manifest, unsafe tree");
+        std::os::unix::fs::symlink("/tmp", unsafe_skill.join("nested-link")).unwrap();
+
+        let err = list_names(Some(&home.home)).unwrap_err();
+
+        assert!(err.to_string().contains("symlink"), "{err}");
     }
 
     #[test]

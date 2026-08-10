@@ -65,6 +65,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | I9 | Run non-interactive `init` twice with an unchanged project | Second run exits 0, reports `Ready` / `Already present`, and leaves project/home contract files byte-identical |
 | I10 | Run `init --with-tink-skills` against an incomplete optional bundle, repair the bundle, then rerun the same command | First run fails but preserves completed setup; second run exits 0 and converges to `manage-tink` plus both bundle skills |
 | I11 | Run `init` with `TINK_HOME` pointed at the non-empty project directory | Exit ≠ 0; refuses to claim the directory and leaves the project byte-identical |
+| I12 | Run `init` with a marker-only partial Tink home left by interrupted initialization | Exit 0; recreates the owned library/catalog directories and leaves a valid inventory |
 
 ### Local add
 
@@ -158,6 +159,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | H7 | `skill harvest` when library diverges | Exit 0; library unchanged; stderr skip warn |
 | H8 | `skill harvest` skips library sources and unsafe (symlink-inside) skill trees; still harvests cwd skills under `TINK_HOME` outside `skills/` | Library/unsafe omitted; non-library path under home deposited |
 | H9 | Shell completion for `tink skill add <prefix>` | Offers matching names from the current library without creating the home or library |
+| H10 | `skill list --library` when a valid library skill contains a nested symlink | Exit ≠ 0; mentions the symlink; does not advertise the unsafe skill or alter either side of the link |
 
 ### CLI surface
 
@@ -187,6 +189,8 @@ Ids are stable. Tests must name or comment the id they prove.
 | X3 | `skill remove` when `.agents` is a symlink | Exit ≠ 0; mentions symlink; tree unchanged |
 | X4 | Successful `skill remove <name>` | Does **not** delete `$TINK_HOME/skills/<name>/` |
 | X5 | `init` installs `manage-tink` | Embedded skill covers standalone skill lifecycle, manifests, library promotion/harvest, read-only GitHub inspection, canonical nested skillsets, project-first library authority, catalog effects, CLI update, and destroy; removals preserve library state |
+| X6 | `skill remove <name>` when that project's catalog metadata is malformed | Exit ≠ 0; project and library skill trees remain intact |
+| X7 | `skill remove <name>` when `$TINK_HOME/catalog` is a symlink | Exit ≠ 0; mentions the symlink; project skill and external catalog target remain byte-identical |
 
 ### Destroy
 
@@ -195,6 +199,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | D1 | `destroy --yes` after `init --with-zen` (extra skill allowed) | Removes `.agents/`, `ZEN.md`, `AGENTS.md`; leaves library + `layout.json` intact; drops this project's by-project catalog entry (`skill list --catalog` has no rows for it) |
 | D2 | `destroy` without `--yes` (non-TTY) | Exit ≠ 0; refuses without confirmation; project files unchanged |
 | D3 | `destroy --yes` when `.agents` is a symlink | Exit ≠ 0; mentions symlink |
+| D4 | `destroy --yes` when `$TINK_HOME/catalog` is a symlink | Exit ≠ 0; mentions the symlink; project scaffolding and external catalog target remain byte-identical |
 
 ### Update (CLI binary)
 
@@ -210,6 +215,7 @@ Ids are stable. Tests must name or comment the id they prove.
 |---|---|---|
 | S1 | Any successful command | Does not `git init`, stage, commit, or push |
 | S2 | Home root | Never treated as an agent discovery root |
+| S3 | `skill remove` or `destroy --yes` when neither `TINK_HOME` nor `HOME` can resolve an inventory | Exit 0; completes local cleanup without creating or mutating inventory state |
 
 ## Proof
 

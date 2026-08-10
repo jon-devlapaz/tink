@@ -151,6 +151,7 @@ pub fn ensure_inventory_root(root: Option<&Path>) -> Result<(PathBuf, bool), Err
     preflight_inventory_root(&root)?;
     mkdir_p(&root)?;
     validate_direct_owners(&root)?;
+    publish_layout_marker(&root)?;
     mkdir_p(&skills_library_path(&root))?;
     migrate_catalog_if_needed(&root)?;
     mkdir_p(&by_project_path(&root))?;
@@ -244,14 +245,7 @@ fn migrate_catalog_if_needed(home: &Path) -> Result<(), Error> {
 }
 
 fn write_layout_marker(root: &Path) -> Result<(), Error> {
-    let layout_path = root.join(LAYOUT_FILENAME);
-    require_file(&layout_path)?;
-    if layout_path.is_file() {
-        validate_layout_marker(root, &layout_path)?;
-    } else {
-        let body = format!("{{\n  \"kind\": \"{LAYOUT_KIND}\"\n}}\n");
-        fs::write(&layout_path, body).map_err(|e| map_io(&layout_path, e))?;
-    }
+    publish_layout_marker(root)?;
 
     let readme = root.join("README.md");
     require_file(&readme)?;
@@ -263,6 +257,19 @@ fn write_layout_marker(root: &Path) -> Result<(), Error> {
     };
     if refresh_readme {
         fs::write(&readme, HOME_README).map_err(|e| map_io(&readme, e))?;
+    }
+    Ok(())
+}
+
+/// Publish the ownership marker before creating owned child directories.
+fn publish_layout_marker(root: &Path) -> Result<(), Error> {
+    let layout_path = root.join(LAYOUT_FILENAME);
+    require_file(&layout_path)?;
+    if layout_path.is_file() {
+        validate_layout_marker(root, &layout_path)?;
+    } else {
+        let body = format!("{{\n  \"kind\": \"{LAYOUT_KIND}\"\n}}\n");
+        fs::write(&layout_path, body).map_err(|e| map_io(&layout_path, e))?;
     }
     Ok(())
 }
@@ -402,6 +409,25 @@ mod tests {
     }
 
     #[test]
+    fn ensure_resumes_after_marker_only_interruption() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("inv");
+        fs::create_dir(&root).unwrap();
+
+        publish_layout_marker(&root).unwrap();
+        assert!(root.join(LAYOUT_FILENAME).is_file());
+        assert!(!root.join("README.md").exists());
+        assert!(!root.join("skills").exists());
+        assert!(!root.join("catalog").exists());
+
+        ensure_inventory_root(Some(&root)).unwrap();
+
+        assert!(root.join("README.md").is_file());
+        assert!(skills_library_path(&root).is_dir());
+        assert!(by_project_path(&root).is_dir());
+    }
+
+    #[test]
     fn ensure_refuses_nonempty_unmarked_root_without_writes() {
         let temp = TempDir::new().unwrap();
         let root = temp.path().join("project");
@@ -505,12 +531,16 @@ mod tests {
                 format!("{{\"kind\":\"{LAYOUT_KIND}\"}}"),
             )
             .unwrap();
+            let readme = root.join("README.md");
+            fs::write(&readme, "existing home text\n").unwrap();
+            let before = fs::read(&readme).unwrap();
             std::os::unix::fs::symlink(&target, root.join(owner)).unwrap();
 
             let err = ensure_inventory_root(Some(&root)).unwrap_err();
 
             assert!(err.to_string().contains("symlink"), "{err}");
             assert!(fs::read_dir(&target).unwrap().next().is_none());
+            assert_eq!(fs::read(&readme).unwrap(), before);
         }
     }
 
