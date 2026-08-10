@@ -1694,6 +1694,7 @@ fn l3_skill_list_catalog_prints_tsv() {
 fn l6_skill_list_catalog_skips_malformed_meta_entries() {
     let ws = Workspace::new();
     let project = ws.project("app");
+    ws.initialize_inventory();
 
     let by_project = ws.inventory.join("catalog").join("by-project");
     let good = by_project.join("good-project");
@@ -1771,6 +1772,84 @@ fn l4_skill_list_warns_on_zen_without_agents_still_lists() {
         .stderr(predicate::str::contains(
             "ZEN.md is not referenced by a regular AGENTS.md",
         ));
+}
+
+#[test]
+fn l7_skill_list_and_check_reject_nested_symlink_drift() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    let source = ws.root.join("demo-skill");
+    write_skill(&source, "demo-skill", "safe before local drift");
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let outside = ws.root.join("outside.txt");
+    fs::write(&outside, "outside\n").unwrap();
+    let link = Workspace::skill_path(&project, "demo-skill").join("escape");
+    std::os::unix::fs::symlink(&outside, &link).unwrap();
+
+    for command in [["skill", "list"], ["skill", "check"]] {
+        ws.cmd(&project)
+            .args(command)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("symlink"));
+    }
+    assert!(link.is_symlink());
+    assert_eq!(fs::read_to_string(&outside).unwrap(), "outside\n");
+}
+
+#[test]
+fn l8_skill_list_refuses_unmarked_existing_home_without_writes() {
+    let root = TempDir::new().unwrap();
+    let project = root.path().join("project");
+    let home = root.path().join("unrelated-home");
+    fs::create_dir_all(&project).unwrap();
+    fs::create_dir_all(&home).unwrap();
+    let readme = home.join("README.md");
+    fs::write(&readme, "# Important unrelated directory\n").unwrap();
+    let before = fs::read(&readme).unwrap();
+
+    for mode in ["--library", "--catalog"] {
+        Command::cargo_bin("tink")
+            .unwrap()
+            .current_dir(&project)
+            .env("TINK_HOME", &home)
+            .args(["skill", "list", mode])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("Tink home"));
+    }
+
+    assert_eq!(fs::read(&readme).unwrap(), before);
+    assert_eq!(fs::read_dir(&home).unwrap().count(), 1);
+}
+
+#[test]
+fn l9_skill_list_refuses_symlinked_home_owner_directories() {
+    for (owner, mode) in [("skills", "--library"), ("catalog", "--catalog")] {
+        let ws = Workspace::new();
+        let project = ws.project("app");
+        ws.initialize_inventory();
+        let owned = ws.inventory.join(owner);
+        let outside = ws.root.join(format!("outside-{owner}"));
+        fs::rename(&owned, &outside).unwrap();
+        std::os::unix::fs::symlink(&outside, &owned).unwrap();
+
+        ws.cmd(&project)
+            .args(["skill", "list", mode])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("symlink"));
+        assert!(owned.is_symlink());
+        assert!(outside.is_dir());
+    }
 }
 
 // --- H*: library ---
@@ -2106,6 +2185,7 @@ fn h9_completion_offers_current_library_matches_without_creating_home() {
         .success()
         .stdout(predicate::str::contains("--skill"));
 
+    ws.initialize_inventory();
     write_skill(
         ws.library_skill("demo-skill").as_path(),
         "demo-skill",

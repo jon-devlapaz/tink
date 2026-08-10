@@ -140,6 +140,10 @@ Ids are stable. Tests must name or comment the id they prove.
 | L3 | `skill list --catalog` after init+add | Exit 0; header `project\\troot\\tskill` plus TSV rows for cataloged skills |
 | L4 | `skill list` when `ZEN.md` exists without `AGENTS.md` reference | Exit 0; lists skills; warns on stderr about ZEN/AGENTS; `skill check` still fails |
 | L5 | `skill list --stash` or `skill list --home` | Exit ≠ 0; stderr mentions the flag or unexpected argument (removed in 0.3.0; use `--library` / `--catalog`) |
+| L6 | `skill list --catalog` with valid and malformed project metadata | Exit 0; lists valid rows and omits malformed entries |
+| L7 | Insert a nested symlink into an installed standalone skill, then run `skill list` and `skill check` | Both exit ≠ 0 and mention the symlink; the installed tree is untouched |
+| L8 | `skill list --library` or `--catalog` with an existing non-empty unmarked `TINK_HOME` | Exit ≠ 0; refuses the unrelated directory and leaves it byte-identical |
+| L9 | `skill list --library` or `--catalog` when the corresponding direct home owner (`skills/` or `catalog/`) is a symlink | Exit ≠ 0; refuses the symlink without following or replacing it |
 
 ### Library
 

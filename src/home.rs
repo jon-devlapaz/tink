@@ -91,6 +91,30 @@ pub fn resolve_home() -> Result<PathBuf, Error> {
     absolutize(PathBuf::from(home).join(TINK_HOME_NAME))
 }
 
+/// Resolve an existing, owned inventory root without creating anything.
+///
+/// Missing homes are treated as absent. Existing homes must have the Tink
+/// layout marker and safe direct owner directories before callers inspect them.
+pub fn existing_inventory_root(root: Option<&Path>) -> Result<Option<PathBuf>, Error> {
+    let root = match root {
+        Some(path) => absolutize(path.to_path_buf())?,
+        None => resolve_home()?,
+    };
+    refuse_symlink(&root)?;
+    if !root.exists() {
+        return Ok(None);
+    }
+    if !root.is_dir() {
+        return Err(Error::msg(format!(
+            "Refusing to read non-directory inventory root: {}",
+            root.display()
+        )));
+    }
+    validate_layout_marker(&root, &root.join(LAYOUT_FILENAME))?;
+    validate_direct_owners(&root)?;
+    Ok(Some(root))
+}
+
 /// Path to `catalog/by-project` under a home root.
 pub fn by_project_path(home: &Path) -> PathBuf {
     home.join("catalog").join(BY_PROJECT)
@@ -126,6 +150,7 @@ pub fn ensure_inventory_root(root: Option<&Path>) -> Result<(PathBuf, bool), Err
     }
     preflight_inventory_root(&root)?;
     mkdir_p(&root)?;
+    validate_direct_owners(&root)?;
     mkdir_p(&skills_library_path(&root))?;
     migrate_catalog_if_needed(&root)?;
     mkdir_p(&by_project_path(&root))?;
@@ -161,13 +186,29 @@ fn preflight_inventory_root(root: &Path) -> Result<(), Error> {
     )))
 }
 
+/// Refuse direct Tink-owned paths that would make creation or inspection
+/// traverse a symlink or replace a non-directory.
+fn validate_direct_owners(root: &Path) -> Result<(), Error> {
+    for name in ["catalog", "skills"] {
+        let owner = root.join(name);
+        refuse_symlink(&owner)?;
+        if owner.exists() && !owner.is_dir() {
+            return Err(Error::msg(format!(
+                "Refusing non-directory Tink home owner: {}",
+                owner.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// True when `skills/by-project` looks like the old name catalog (not a skill tree).
 pub(crate) fn looks_like_legacy_catalog(path: &Path) -> bool {
     path.is_dir() && !path.join("SKILL.md").is_file()
 }
 
-/// Older homes kept the name catalog at `skills/by-project/`; move it out so
-/// `skills/<name>/` can hold library trees.
+/// Older marked homes kept the name catalog at `skills/by-project/`; move it
+/// out so `skills/<name>/` can hold library trees.
 fn migrate_catalog_if_needed(home: &Path) -> Result<(), Error> {
     let old = home.join("skills").join(BY_PROJECT);
     let new = by_project_path(home);
@@ -227,6 +268,13 @@ fn write_layout_marker(root: &Path) -> Result<(), Error> {
 }
 
 fn validate_layout_marker(root: &Path, layout: &Path) -> Result<(), Error> {
+    refuse_symlink(layout)?;
+    if !layout.is_file() {
+        return Err(Error::msg(format!(
+            "Not a Tink home inventory: {}",
+            root.display()
+        )));
+    }
     let raw = fs::read_to_string(layout).map_err(|e| map_io(layout, e))?;
     let value: serde_json::Value = serde_json::from_str(&raw)
         .map_err(|_| Error::msg(format!("Not a Tink home inventory: {}", root.display())))?;
@@ -387,6 +435,83 @@ mod tests {
         assert!(!root.join("skills").exists());
         assert!(!root.join("catalog").exists());
         assert!(!root.join("README.md").exists());
+    }
+
+    #[test]
+    fn existing_home_requires_marker_but_keeps_missing_home_empty() {
+        let temp = TempDir::new().unwrap();
+        let missing = temp.path().join("missing");
+        assert!(existing_inventory_root(Some(&missing)).unwrap().is_none());
+
+        let unmarked = temp.path().join("unmarked");
+        fs::create_dir(&unmarked).unwrap();
+        let err = existing_inventory_root(Some(&unmarked)).unwrap_err();
+        assert!(err.to_string().contains("Not a Tink home"), "{err}");
+
+        fs::write(
+            unmarked.join(LAYOUT_FILENAME),
+            format!("{{\"kind\":\"{LAYOUT_KIND}\"}}"),
+        )
+        .unwrap();
+        assert_eq!(
+            existing_inventory_root(Some(&unmarked)).unwrap(),
+            Some(unmarked)
+        );
+    }
+
+    #[test]
+    fn existing_home_keeps_marked_legacy_layout_compatible() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("legacy");
+        fs::create_dir_all(root.join("skills").join(BY_PROJECT)).unwrap();
+        fs::write(
+            root.join(LAYOUT_FILENAME),
+            format!("{{\"kind\":\"{LAYOUT_KIND}\"}}"),
+        )
+        .unwrap();
+
+        assert_eq!(existing_inventory_root(Some(&root)).unwrap(), Some(root));
+    }
+
+    #[test]
+    fn existing_home_refuses_non_directory_direct_owners() {
+        let temp = TempDir::new().unwrap();
+        for owner in ["catalog", "skills"] {
+            let root = temp.path().join(format!("{owner}-home"));
+            fs::create_dir(&root).unwrap();
+            fs::write(
+                root.join(LAYOUT_FILENAME),
+                format!("{{\"kind\":\"{LAYOUT_KIND}\"}}"),
+            )
+            .unwrap();
+            fs::write(root.join(owner), "not a directory\n").unwrap();
+
+            let err = existing_inventory_root(Some(&root)).unwrap_err();
+
+            assert!(err.to_string().contains("non-directory"), "{err}");
+        }
+    }
+
+    #[test]
+    fn ensure_refuses_direct_owner_symlinks_before_traversal() {
+        let temp = TempDir::new().unwrap();
+        for owner in ["catalog", "skills"] {
+            let root = temp.path().join(owner);
+            let target = temp.path().join(format!("{owner}-target"));
+            fs::create_dir_all(&root).unwrap();
+            fs::create_dir(&target).unwrap();
+            fs::write(
+                root.join(LAYOUT_FILENAME),
+                format!("{{\"kind\":\"{LAYOUT_KIND}\"}}"),
+            )
+            .unwrap();
+            std::os::unix::fs::symlink(&target, root.join(owner)).unwrap();
+
+            let err = ensure_inventory_root(Some(&root)).unwrap_err();
+
+            assert!(err.to_string().contains("symlink"), "{err}");
+            assert!(fs::read_dir(&target).unwrap().next().is_none());
+        }
     }
 
     #[test]

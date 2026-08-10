@@ -29,6 +29,7 @@ fn read_skill_entry(path: &Path) -> Result<Option<Skill>, Error> {
         return Ok(None);
     }
     let skill = skills::read_skill(path, true)?;
+    skills::validate_skill_tree(path)?;
     provenance::read(&skill)?;
     Ok(Some(skill))
 }
@@ -93,4 +94,60 @@ pub fn check_project(root: &Path) -> Result<Vec<Skill>, Error> {
     let skills = load_project_skills(root)?;
     check_zen_coupling(root)?;
     Ok(skills)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn write_skill(root: &Path) {
+        fs::create_dir_all(root).unwrap();
+        fs::write(
+            root.join("SKILL.md"),
+            "---\nname: demo-skill\ndescription: A valid test skill.\n---\n",
+        )
+        .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_project_skills_refuses_nested_symlink() {
+        let temp = TempDir::new().unwrap();
+        let skill = temp.path().join(".agents/skills/demo-skill");
+        write_skill(&skill);
+        std::os::unix::fs::symlink("/tmp", skill.join("nested-link")).unwrap();
+
+        let err = load_project_skills(temp.path()).unwrap_err();
+
+        assert!(err.to_string().contains("symlink"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_project_skills_refuses_nested_special_file() {
+        let temp = TempDir::new().unwrap();
+        let skill = temp.path().join(".agents/skills/demo-skill");
+        write_skill(&skill);
+        let _socket = std::os::unix::net::UnixListener::bind(skill.join("socket")).unwrap();
+
+        let err = load_project_skills(temp.path()).unwrap_err();
+
+        assert!(err.to_string().contains("special file"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_project_skills_ignores_git_contents() {
+        let temp = TempDir::new().unwrap();
+        let skill = temp.path().join(".agents/skills/demo-skill");
+        write_skill(&skill);
+        fs::create_dir_all(skill.join(".git")).unwrap();
+        std::os::unix::fs::symlink("/tmp", skill.join(".git/ignored-link")).unwrap();
+
+        let skills = load_project_skills(temp.path()).unwrap();
+
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "demo-skill");
+    }
 }

@@ -11,7 +11,8 @@ use serde_json::{Value, json};
 
 use crate::error::Error;
 use crate::home::{
-    BY_PROJECT, by_project_path, ensure_inventory_root, looks_like_legacy_catalog, resolve_home,
+    BY_PROJECT, by_project_path, ensure_inventory_root, existing_inventory_root,
+    looks_like_legacy_catalog, resolve_home,
 };
 use crate::paths::{map_io, mkdir_p, refuse_symlink, require_directory, require_file};
 
@@ -292,14 +293,9 @@ pub struct CatalogEntry {
 
 /// Read `$TINK_HOME` / `~/.tink` by-project catalogs (read-only; creates nothing).
 pub fn list_catalog(home: Option<&Path>) -> Result<Vec<CatalogEntry>, Error> {
-    let home = match home {
-        Some(path) => path.to_path_buf(),
-        None => resolve_home()?,
-    };
-    if !home.exists() {
+    let Some(home) = existing_inventory_root(home)? else {
         return Ok(Vec::new());
-    }
-    refuse_symlink(&home)?;
+    };
     let new = by_project_path(&home);
     let legacy = home.join("skills").join(BY_PROJECT);
     let legacy_catalog = looks_like_legacy_catalog(&legacy);
@@ -384,8 +380,24 @@ mod tests {
         let home = temp.path().join("home");
         fs::create_dir_all(home.join("skills").join(BY_PROJECT).join("app")).unwrap();
         fs::create_dir_all(by_project_path(&home).join("app")).unwrap();
+        fs::write(
+            home.join(crate::home::LAYOUT_FILENAME),
+            format!("{{\"kind\":\"{}\"}}", crate::home::LAYOUT_KIND),
+        )
+        .unwrap();
         let err = list_catalog(Some(&home)).unwrap_err();
         assert!(err.to_string().contains("Catalog split"), "{err}");
+    }
+
+    #[test]
+    fn list_catalog_requires_owned_home_before_reading_catalog() {
+        let temp = TempDir::new().unwrap();
+        let home = temp.path().join("home");
+        fs::create_dir_all(by_project_path(&home)).unwrap();
+
+        let err = list_catalog(Some(&home)).unwrap_err();
+
+        assert!(err.to_string().contains("Not a Tink home"), "{err}");
     }
 
     #[test]

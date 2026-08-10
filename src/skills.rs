@@ -235,6 +235,11 @@ fn require_safe_tree(root: &Path) -> Result<BTreeMap<String, EntryKind>, Error> 
     }
 }
 
+/// Reject symlinks and special files anywhere in a skill tree, except `.git`.
+pub fn validate_skill_tree(root: &Path) -> Result<(), Error> {
+    require_safe_tree(root).map(|_| ())
+}
+
 fn tree_contents(root: &Path) -> Result<Option<BTreeMap<String, EntryKind>>, Error> {
     match collect_tree(root)? {
         Collected::Tree(tree) => Ok(Some(tree)),
