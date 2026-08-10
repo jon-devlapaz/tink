@@ -62,6 +62,8 @@ Ids are stable. Tests must name or comment the id they prove.
 | I6 | `init` (default) | Installs `.agents/skills/manage-tink/`; catalogs `manage-tink`; copies tree into library at `skills/manage-tink/` |
 | I7 | `init --no-manage-tink` | Does **not** install `manage-tink` |
 | I8 | `init` with relative `TINK_HOME` (e.g. `../home`) from project cwd | Exit 0; home is the absolutized sibling path (not nested under the project); stdout shows an absolute home path |
+| I9 | Run non-interactive `init` twice with an unchanged project | Second run exits 0, reports `Ready` / `Already present`, and leaves project/home contract files byte-identical |
+| I10 | Run `init --with-tink-skills` against an incomplete optional bundle, repair the bundle, then rerun the same command | First run fails but preserves completed setup; second run exits 0 and converges to `manage-tink` plus both bundle skills |
 
 ### Local add
 

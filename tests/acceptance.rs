@@ -293,6 +293,106 @@ fn i8_relative_tink_home_resolves_absolute_not_nested() {
     );
 }
 
+#[test]
+fn i9_init_rerun_is_idempotent() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    let args = ["init", "--no-zen", "--no-tink-skills"];
+
+    ws.cmd(&project).args(args).assert().success();
+
+    let contract_files = [
+        project.join(".agents").join("skills").join("README.md"),
+        Workspace::skill_path(&project, "manage-tink").join("SKILL.md"),
+        ws.catalog_meta("app"),
+        ws.library_skill("manage-tink").join("SKILL.md"),
+        ws.inventory.join("layout.json"),
+    ];
+    let before: Vec<Vec<u8>> = contract_files
+        .iter()
+        .map(|path| fs::read(path).unwrap_or_else(|_| panic!("missing {}", path.display())))
+        .collect();
+
+    ws.cmd(&project).args(args).assert().success().stdout(
+        predicate::str::contains("Ready")
+            .and(predicate::str::contains("Already present manage-tink")),
+    );
+
+    let after: Vec<Vec<u8>> = contract_files
+        .iter()
+        .map(|path| fs::read(path).unwrap_or_else(|_| panic!("missing {}", path.display())))
+        .collect();
+    assert_eq!(after, before, "re-running init changed contract files");
+}
+
+#[test]
+fn i10_init_bundle_failure_is_resumable() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    let remote = ws.root.join("tink-skills");
+    init_repo(&remote);
+    write_skill(
+        &remote.join("skills").join("skill-scout"),
+        "skill-scout",
+        "Scout for skills.",
+    );
+    commit_all(&remote, "add skill-scout");
+
+    let redirect = github_redirect(&remote, "https://github.com/jon-devlapaz/tink-skills.git");
+    let args = ["init", "--no-zen", "--with-tink-skills"];
+
+    let mut first = ws.cmd(&project);
+    first.args(args);
+    for (key, value) in &redirect {
+        first.env(key, value);
+    }
+    first
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("skill-eval-loop"));
+
+    ws.assert_cataloged("app", "manage-tink");
+    ws.assert_cataloged("app", "skill-scout");
+    assert!(!Workspace::skill_path(&project, "skill-eval-loop").exists());
+    assert!(!ws.library_skill("skill-eval-loop").exists());
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
+    let manage_before =
+        fs::read(Workspace::skill_path(&project, "manage-tink").join("SKILL.md")).unwrap();
+    let scout_before =
+        fs::read(Workspace::skill_path(&project, "skill-scout").join("SKILL.md")).unwrap();
+
+    write_skill(
+        &remote.join("skills").join("skill-eval-loop"),
+        "skill-eval-loop",
+        "Evaluate skills.",
+    );
+    commit_all(&remote, "add skill-eval-loop");
+
+    let mut second = ws.cmd(&project);
+    second.args(args);
+    for (key, value) in &redirect {
+        second.env(key, value);
+    }
+    second
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Added skill-eval-loop"));
+
+    ws.assert_cataloged("app", "manage-tink");
+    ws.assert_cataloged("app", "skill-scout");
+    ws.assert_cataloged("app", "skill-eval-loop");
+    assert_eq!(
+        fs::read(Workspace::skill_path(&project, "manage-tink").join("SKILL.md")).unwrap(),
+        manage_before,
+        "resuming init changed manage-tink"
+    );
+    assert_eq!(
+        fs::read(Workspace::skill_path(&project, "skill-scout").join("SKILL.md")).unwrap(),
+        scout_before,
+        "resuming init changed skill-scout"
+    );
+}
+
 // --- A*: local add ---
 
 #[test]
