@@ -80,6 +80,7 @@ fn frontmatter_value(lines: &[&str], key: &str) -> Option<String> {
 }
 
 pub fn read_skill(path: &Path, require_directory_name: bool) -> Result<Skill, Error> {
+    refuse_symlink(path)?;
     let skill_file = path.join("SKILL.md");
     refuse_symlink(&skill_file)?;
     if !skill_file.is_file() {
@@ -182,6 +183,7 @@ enum Collected {
 }
 
 fn collect_tree(root: &Path) -> Result<Collected, Error> {
+    refuse_symlink(root)?;
     let mut contents = BTreeMap::new();
     fn walk(
         root: &Path,
@@ -227,6 +229,46 @@ fn require_safe_tree(root: &Path) -> Result<BTreeMap<String, EntryKind>, Error> 
     match collect_tree(root)? {
         Collected::Tree(tree) => Ok(tree),
         Collected::Unsupported { path, what } => Err(Error::msg(format!(
+            "Refusing to copy {what}: {}",
+            path.display()
+        ))),
+    }
+}
+
+fn validate_tree_structure(root: &Path) -> Result<Option<(PathBuf, &'static str)>, Error> {
+    refuse_symlink(root)?;
+    fn walk(root: &Path, dir: &Path) -> Result<Option<(PathBuf, &'static str)>, Error> {
+        for entry in fs::read_dir(dir).map_err(|e| map_io(dir, e))? {
+            let entry = entry.map_err(|e| map_io(dir, e))?;
+            let path = entry.path();
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|_| Error::msg(format!("path escape: {}", path.display())))?;
+            if relative == Path::new(".git") || relative.starts_with(".git") {
+                continue;
+            }
+            if path.is_symlink() {
+                return Ok(Some((path, "symlink")));
+            }
+            let ft = entry.file_type().map_err(|e| map_io(&path, e))?;
+            if ft.is_dir() {
+                if let Some(bad) = walk(root, &path)? {
+                    return Ok(Some(bad));
+                }
+            } else if !ft.is_file() {
+                return Ok(Some((path, "special file")));
+            }
+        }
+        Ok(None)
+    }
+    walk(root, root)
+}
+
+/// Reject symlinks and special files anywhere in a skill tree, except `.git`.
+pub fn validate_skill_tree(root: &Path) -> Result<(), Error> {
+    match validate_tree_structure(root)? {
+        None => Ok(()),
+        Some((path, what)) => Err(Error::msg(format!(
             "Refusing to copy {what}: {}",
             path.display()
         ))),
@@ -420,6 +462,7 @@ pub fn preflight_install(
 ) -> Result<PreflightOutcome, Error> {
     let expected = expected_install_tree(skill, provenance)?;
     let target = destination_root.join(&skill.name);
+    refuse_symlink(&target)?;
     if !target.exists() && !target.is_symlink() {
         return Ok(PreflightOutcome::Ready);
     }
@@ -505,4 +548,28 @@ pub fn replace_verified(
     }
     let _ = fs::remove_dir_all(&backup);
     Ok(target)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[cfg(unix)]
+    #[test]
+    fn validate_skill_tree_reads_only_metadata_for_regular_files() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new().unwrap();
+        let tree = temp.path().join("skill");
+        fs::create_dir_all(&tree).unwrap();
+        let unreadable = tree.join("private.txt");
+        fs::write(&unreadable, "contents must not be read\n").unwrap();
+        fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = validate_skill_tree(&tree);
+        fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o600)).unwrap();
+
+        assert!(result.is_ok(), "{result:?}");
+    }
 }

@@ -91,6 +91,30 @@ pub fn resolve_home() -> Result<PathBuf, Error> {
     absolutize(PathBuf::from(home).join(TINK_HOME_NAME))
 }
 
+/// Resolve an existing, owned inventory root without creating anything.
+///
+/// Missing homes are treated as absent. Existing homes must have the Tink
+/// layout marker and safe direct owner directories before callers inspect them.
+pub fn existing_inventory_root(root: Option<&Path>) -> Result<Option<PathBuf>, Error> {
+    let root = match root {
+        Some(path) => absolutize(path.to_path_buf())?,
+        None => resolve_home()?,
+    };
+    refuse_symlink(&root)?;
+    if !root.exists() {
+        return Ok(None);
+    }
+    if !root.is_dir() {
+        return Err(Error::msg(format!(
+            "Refusing to read non-directory inventory root: {}",
+            root.display()
+        )));
+    }
+    validate_layout_marker(&root, &root.join(LAYOUT_FILENAME))?;
+    validate_direct_owners(&root)?;
+    Ok(Some(root))
+}
+
 /// Path to `catalog/by-project` under a home root.
 pub fn by_project_path(home: &Path) -> PathBuf {
     home.join("catalog").join(BY_PROJECT)
@@ -124,7 +148,10 @@ pub fn ensure_inventory_root(root: Option<&Path>) -> Result<(PathBuf, bool), Err
             root.display()
         )));
     }
+    preflight_inventory_root(&root)?;
     mkdir_p(&root)?;
+    validate_direct_owners(&root)?;
+    publish_layout_marker(&root)?;
     mkdir_p(&skills_library_path(&root))?;
     migrate_catalog_if_needed(&root)?;
     mkdir_p(&by_project_path(&root))?;
@@ -133,13 +160,56 @@ pub fn ensure_inventory_root(root: Option<&Path>) -> Result<(PathBuf, bool), Err
     Ok((root, created))
 }
 
+/// Refuse to claim an unrelated existing directory as Tink home.
+///
+/// A valid layout marker establishes ownership. An existing empty directory is
+/// also safe to initialize; every other non-empty unmarked directory is left
+/// byte-for-byte untouched.
+fn preflight_inventory_root(root: &Path) -> Result<(), Error> {
+    if !root.exists() {
+        return Ok(());
+    }
+    let layout = root.join(LAYOUT_FILENAME);
+    require_file(&layout)?;
+    if layout.is_file() {
+        return validate_layout_marker(root, &layout);
+    }
+    let is_empty = fs::read_dir(root)
+        .map_err(|e| map_io(root, e))?
+        .next()
+        .is_none();
+    if is_empty {
+        return Ok(());
+    }
+    Err(Error::msg(format!(
+        "Refusing to initialize non-empty directory as Tink home: {}",
+        root.display()
+    )))
+}
+
+/// Refuse direct Tink-owned paths that would make creation or inspection
+/// traverse a symlink or replace a non-directory.
+fn validate_direct_owners(root: &Path) -> Result<(), Error> {
+    for name in ["catalog", "skills"] {
+        let owner = root.join(name);
+        refuse_symlink(&owner)?;
+        if owner.exists() && !owner.is_dir() {
+            return Err(Error::msg(format!(
+                "Refusing non-directory Tink home owner: {}",
+                owner.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// True when `skills/by-project` looks like the old name catalog (not a skill tree).
 pub(crate) fn looks_like_legacy_catalog(path: &Path) -> bool {
     path.is_dir() && !path.join("SKILL.md").is_file()
 }
 
-/// Older homes kept the name catalog at `skills/by-project/`; move it out so
-/// `skills/<name>/` can hold library trees.
+/// Older marked homes kept the name catalog at `skills/by-project/`; move it
+/// out so `skills/<name>/` can hold library trees.
 fn migrate_catalog_if_needed(home: &Path) -> Result<(), Error> {
     let old = home.join("skills").join(BY_PROJECT);
     let new = by_project_path(home);
@@ -175,20 +245,7 @@ fn migrate_catalog_if_needed(home: &Path) -> Result<(), Error> {
 }
 
 fn write_layout_marker(root: &Path) -> Result<(), Error> {
-    let layout_path = root.join(LAYOUT_FILENAME);
-    require_file(&layout_path)?;
-    if layout_path.is_file() {
-        let existing = fs::read_to_string(&layout_path).map_err(|e| map_io(&layout_path, e))?;
-        if !existing.contains(LAYOUT_KIND) {
-            return Err(Error::msg(format!(
-                "Not a Tink home inventory: {}",
-                root.display()
-            )));
-        }
-    } else {
-        let body = format!("{{\n  \"kind\": \"{LAYOUT_KIND}\"\n}}\n");
-        fs::write(&layout_path, body).map_err(|e| map_io(&layout_path, e))?;
-    }
+    publish_layout_marker(root)?;
 
     let readme = root.join("README.md");
     require_file(&readme)?;
@@ -200,6 +257,39 @@ fn write_layout_marker(root: &Path) -> Result<(), Error> {
     };
     if refresh_readme {
         fs::write(&readme, HOME_README).map_err(|e| map_io(&readme, e))?;
+    }
+    Ok(())
+}
+
+/// Publish the ownership marker before creating owned child directories.
+fn publish_layout_marker(root: &Path) -> Result<(), Error> {
+    let layout_path = root.join(LAYOUT_FILENAME);
+    require_file(&layout_path)?;
+    if layout_path.is_file() {
+        validate_layout_marker(root, &layout_path)?;
+    } else {
+        let body = format!("{{\n  \"kind\": \"{LAYOUT_KIND}\"\n}}\n");
+        fs::write(&layout_path, body).map_err(|e| map_io(&layout_path, e))?;
+    }
+    Ok(())
+}
+
+fn validate_layout_marker(root: &Path, layout: &Path) -> Result<(), Error> {
+    refuse_symlink(layout)?;
+    if !layout.is_file() {
+        return Err(Error::msg(format!(
+            "Not a Tink home inventory: {}",
+            root.display()
+        )));
+    }
+    let raw = fs::read_to_string(layout).map_err(|e| map_io(layout, e))?;
+    let value: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|_| Error::msg(format!("Not a Tink home inventory: {}", root.display())))?;
+    if value.get("kind").and_then(serde_json::Value::as_str) != Some(LAYOUT_KIND) {
+        return Err(Error::msg(format!(
+            "Not a Tink home inventory: {}",
+            root.display()
+        )));
     }
     Ok(())
 }
@@ -231,6 +321,11 @@ mod tests {
         let legacy = root.join("skills").join(BY_PROJECT).join("app");
         fs::create_dir_all(&legacy).unwrap();
         fs::write(
+            root.join(LAYOUT_FILENAME),
+            format!("{{\n  \"kind\": \"{LAYOUT_KIND}\"\n}}\n"),
+        )
+        .unwrap();
+        fs::write(
             legacy.join("meta.json"),
             "{\"name\":\"app\",\"root\":\"/tmp/app\",\"skills\":[\"x\"]}\n",
         )
@@ -251,6 +346,11 @@ mod tests {
         let root = temp.path().join("inv");
         fs::create_dir_all(root.join("skills").join(BY_PROJECT).join("old")).unwrap();
         fs::create_dir_all(by_project_path(&root).join("new")).unwrap();
+        fs::write(
+            root.join(LAYOUT_FILENAME),
+            format!("{{\n  \"kind\": \"{LAYOUT_KIND}\"\n}}\n"),
+        )
+        .unwrap();
         let err = ensure_inventory_root(Some(&root)).unwrap_err();
         assert!(err.to_string().contains("Catalog split"), "{err}");
     }
@@ -261,6 +361,11 @@ mod tests {
         let root = temp.path().join("inv");
         fs::create_dir_all(root.join("skills")).unwrap();
         fs::write(root.join("skills").join(BY_PROJECT), "not a dir\n").unwrap();
+        fs::write(
+            root.join(LAYOUT_FILENAME),
+            format!("{{\n  \"kind\": \"{LAYOUT_KIND}\"\n}}\n"),
+        )
+        .unwrap();
         let err = ensure_inventory_root(Some(&root)).unwrap_err();
         assert!(
             err.to_string().contains("non-directory legacy catalog"),
@@ -287,6 +392,156 @@ mod tests {
         let readme = fs::read_to_string(root.join("README.md")).unwrap();
         assert!(readme.contains("catalog/by-project"));
         assert!(!readme.contains("skills/by-project/<project>"));
+    }
+
+    #[test]
+    fn ensure_initializes_existing_empty_root() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("inv");
+        fs::create_dir(&root).unwrap();
+
+        let (_, created) = ensure_inventory_root(Some(&root)).unwrap();
+
+        assert!(!created);
+        assert!(root.join(LAYOUT_FILENAME).is_file());
+        assert!(skills_library_path(&root).is_dir());
+        assert!(by_project_path(&root).is_dir());
+    }
+
+    #[test]
+    fn ensure_resumes_after_marker_only_interruption() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("inv");
+        fs::create_dir(&root).unwrap();
+
+        publish_layout_marker(&root).unwrap();
+        assert!(root.join(LAYOUT_FILENAME).is_file());
+        assert!(!root.join("README.md").exists());
+        assert!(!root.join("skills").exists());
+        assert!(!root.join("catalog").exists());
+
+        ensure_inventory_root(Some(&root)).unwrap();
+
+        assert!(root.join("README.md").is_file());
+        assert!(skills_library_path(&root).is_dir());
+        assert!(by_project_path(&root).is_dir());
+    }
+
+    #[test]
+    fn ensure_refuses_nonempty_unmarked_root_without_writes() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("project");
+        fs::create_dir(&root).unwrap();
+        let readme = root.join("README.md");
+        fs::write(&readme, "# Important project\n").unwrap();
+        let before = fs::read(&readme).unwrap();
+
+        let err = ensure_inventory_root(Some(&root)).unwrap_err();
+
+        assert!(err.to_string().contains("non-empty"), "{err}");
+        assert_eq!(fs::read(&readme).unwrap(), before);
+        assert!(!root.join(LAYOUT_FILENAME).exists());
+        assert!(!root.join("skills").exists());
+        assert!(!root.join("catalog").exists());
+    }
+
+    #[test]
+    fn ensure_refuses_malformed_marker_without_writes() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("inv");
+        fs::create_dir(&root).unwrap();
+        let layout = root.join(LAYOUT_FILENAME);
+        fs::write(&layout, "{not-json}\n").unwrap();
+        let before = fs::read(&layout).unwrap();
+
+        let err = ensure_inventory_root(Some(&root)).unwrap_err();
+
+        assert!(err.to_string().contains("Not a Tink home"), "{err}");
+        assert_eq!(fs::read(&layout).unwrap(), before);
+        assert!(!root.join("skills").exists());
+        assert!(!root.join("catalog").exists());
+        assert!(!root.join("README.md").exists());
+    }
+
+    #[test]
+    fn existing_home_requires_marker_but_keeps_missing_home_empty() {
+        let temp = TempDir::new().unwrap();
+        let missing = temp.path().join("missing");
+        assert!(existing_inventory_root(Some(&missing)).unwrap().is_none());
+
+        let unmarked = temp.path().join("unmarked");
+        fs::create_dir(&unmarked).unwrap();
+        let err = existing_inventory_root(Some(&unmarked)).unwrap_err();
+        assert!(err.to_string().contains("Not a Tink home"), "{err}");
+
+        fs::write(
+            unmarked.join(LAYOUT_FILENAME),
+            format!("{{\"kind\":\"{LAYOUT_KIND}\"}}"),
+        )
+        .unwrap();
+        assert_eq!(
+            existing_inventory_root(Some(&unmarked)).unwrap(),
+            Some(unmarked)
+        );
+    }
+
+    #[test]
+    fn existing_home_keeps_marked_legacy_layout_compatible() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("legacy");
+        fs::create_dir_all(root.join("skills").join(BY_PROJECT)).unwrap();
+        fs::write(
+            root.join(LAYOUT_FILENAME),
+            format!("{{\"kind\":\"{LAYOUT_KIND}\"}}"),
+        )
+        .unwrap();
+
+        assert_eq!(existing_inventory_root(Some(&root)).unwrap(), Some(root));
+    }
+
+    #[test]
+    fn existing_home_refuses_non_directory_direct_owners() {
+        let temp = TempDir::new().unwrap();
+        for owner in ["catalog", "skills"] {
+            let root = temp.path().join(format!("{owner}-home"));
+            fs::create_dir(&root).unwrap();
+            fs::write(
+                root.join(LAYOUT_FILENAME),
+                format!("{{\"kind\":\"{LAYOUT_KIND}\"}}"),
+            )
+            .unwrap();
+            fs::write(root.join(owner), "not a directory\n").unwrap();
+
+            let err = existing_inventory_root(Some(&root)).unwrap_err();
+
+            assert!(err.to_string().contains("non-directory"), "{err}");
+        }
+    }
+
+    #[test]
+    fn ensure_refuses_direct_owner_symlinks_before_traversal() {
+        let temp = TempDir::new().unwrap();
+        for owner in ["catalog", "skills"] {
+            let root = temp.path().join(owner);
+            let target = temp.path().join(format!("{owner}-target"));
+            fs::create_dir_all(&root).unwrap();
+            fs::create_dir(&target).unwrap();
+            fs::write(
+                root.join(LAYOUT_FILENAME),
+                format!("{{\"kind\":\"{LAYOUT_KIND}\"}}"),
+            )
+            .unwrap();
+            let readme = root.join("README.md");
+            fs::write(&readme, "existing home text\n").unwrap();
+            let before = fs::read(&readme).unwrap();
+            std::os::unix::fs::symlink(&target, root.join(owner)).unwrap();
+
+            let err = ensure_inventory_root(Some(&root)).unwrap_err();
+
+            assert!(err.to_string().contains("symlink"), "{err}");
+            assert!(fs::read_dir(&target).unwrap().next().is_none());
+            assert_eq!(fs::read(&readme).unwrap(), before);
+        }
     }
 
     #[test]

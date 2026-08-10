@@ -39,6 +39,15 @@ impl Workspace {
         cmd
     }
 
+    fn initialize_inventory(&self) {
+        let bootstrap = self.root.join("inventory-bootstrap");
+        fs::create_dir_all(&bootstrap).expect("inventory bootstrap project");
+        self.cmd(&bootstrap)
+            .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+            .assert()
+            .success();
+    }
+
     fn skill_path(project: &Path, name: &str) -> PathBuf {
         project.join(".agents").join("skills").join(name)
     }
@@ -293,6 +302,151 @@ fn i8_relative_tink_home_resolves_absolute_not_nested() {
     );
 }
 
+#[test]
+fn i9_init_rerun_is_idempotent() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    let args = ["init", "--no-zen", "--no-tink-skills"];
+
+    ws.cmd(&project).args(args).assert().success();
+
+    let contract_files = [
+        project.join(".agents").join("skills").join("README.md"),
+        Workspace::skill_path(&project, "manage-tink").join("SKILL.md"),
+        ws.catalog_meta("app"),
+        ws.library_skill("manage-tink").join("SKILL.md"),
+        ws.inventory.join("layout.json"),
+    ];
+    let before: Vec<Vec<u8>> = contract_files
+        .iter()
+        .map(|path| fs::read(path).unwrap_or_else(|_| panic!("missing {}", path.display())))
+        .collect();
+
+    ws.cmd(&project).args(args).assert().success().stdout(
+        predicate::str::contains("Ready")
+            .and(predicate::str::contains("Already present manage-tink")),
+    );
+
+    let after: Vec<Vec<u8>> = contract_files
+        .iter()
+        .map(|path| fs::read(path).unwrap_or_else(|_| panic!("missing {}", path.display())))
+        .collect();
+    assert_eq!(after, before, "re-running init changed contract files");
+}
+
+#[test]
+fn i10_init_bundle_failure_is_resumable() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    let remote = ws.root.join("tink-skills");
+    init_repo(&remote);
+    write_skill(
+        &remote.join("skills").join("skill-scout"),
+        "skill-scout",
+        "Scout for skills.",
+    );
+    commit_all(&remote, "add skill-scout");
+
+    let redirect = github_redirect(&remote, "https://github.com/jon-devlapaz/tink-skills.git");
+    let args = ["init", "--no-zen", "--with-tink-skills"];
+
+    let mut first = ws.cmd(&project);
+    first.args(args);
+    for (key, value) in &redirect {
+        first.env(key, value);
+    }
+    first
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("skill-eval-loop"));
+
+    ws.assert_cataloged("app", "manage-tink");
+    ws.assert_cataloged("app", "skill-scout");
+    assert!(!Workspace::skill_path(&project, "skill-eval-loop").exists());
+    assert!(!ws.library_skill("skill-eval-loop").exists());
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
+    let manage_before =
+        fs::read(Workspace::skill_path(&project, "manage-tink").join("SKILL.md")).unwrap();
+    let scout_before =
+        fs::read(Workspace::skill_path(&project, "skill-scout").join("SKILL.md")).unwrap();
+
+    write_skill(
+        &remote.join("skills").join("skill-eval-loop"),
+        "skill-eval-loop",
+        "Evaluate skills.",
+    );
+    commit_all(&remote, "add skill-eval-loop");
+
+    let mut second = ws.cmd(&project);
+    second.args(args);
+    for (key, value) in &redirect {
+        second.env(key, value);
+    }
+    second
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Added skill-eval-loop"));
+
+    ws.assert_cataloged("app", "manage-tink");
+    ws.assert_cataloged("app", "skill-scout");
+    ws.assert_cataloged("app", "skill-eval-loop");
+    assert_eq!(
+        fs::read(Workspace::skill_path(&project, "manage-tink").join("SKILL.md")).unwrap(),
+        manage_before,
+        "resuming init changed manage-tink"
+    );
+    assert_eq!(
+        fs::read(Workspace::skill_path(&project, "skill-scout").join("SKILL.md")).unwrap(),
+        scout_before,
+        "resuming init changed skill-scout"
+    );
+}
+
+#[test]
+fn i11_init_refuses_unrelated_existing_tink_home_without_writes() {
+    let root = TempDir::new().unwrap();
+    let project = root.path().join("project");
+    fs::create_dir_all(&project).unwrap();
+    let readme = project.join("README.md");
+    fs::write(&readme, "# Important project\n\nKeep this content.\n").unwrap();
+    let before = fs::read(&readme).unwrap();
+
+    Command::cargo_bin("tink")
+        .unwrap()
+        .current_dir(&project)
+        .env("TINK_HOME", ".")
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Tink home").and(predicate::str::contains("non-empty")));
+
+    assert_eq!(fs::read(&readme).unwrap(), before);
+    assert_eq!(fs::read_dir(&project).unwrap().count(), 1);
+    assert!(!project.join(".agents").exists());
+}
+
+#[test]
+fn i12_init_resumes_marker_only_partial_inventory() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    fs::create_dir_all(&ws.inventory).unwrap();
+    fs::write(
+        ws.inventory.join("layout.json"),
+        "{\n  \"kind\": \"tink-skill-inventory\"\n}\n",
+    )
+    .unwrap();
+
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    assert!(ws.inventory.join("skills").is_dir());
+    assert!(ws.inventory.join("catalog").join("by-project").is_dir());
+    assert!(ws.inventory.join("catalog").join("by-skillset").is_dir());
+    assert!(project.join(".agents").join("skills").is_dir());
+}
+
 // --- A*: local add ---
 
 #[test]
@@ -526,6 +680,163 @@ fn a8_add_uses_library_when_remote_tip_matches() {
     );
 }
 
+#[test]
+fn a9_add_catalog_failure_is_resumable() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills"])
+        .assert()
+        .success();
+
+    let source = ws.root.join("demo-skill");
+    write_skill(&source, "demo-skill", "Do the work.");
+    let args = ["skill", "add", source.to_str().unwrap()];
+    let catalog = ws.catalog_meta("app");
+    let catalog_before = fs::read(&catalog).unwrap();
+    let malformed_catalog = b"{not-json}\n";
+    fs::write(&catalog, malformed_catalog).unwrap();
+
+    ws.cmd(&project)
+        .args(args)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Invalid catalog meta"));
+
+    let installed_root = Workspace::skill_path(&project, "demo-skill");
+    let library_root = ws.library_skill("demo-skill");
+    let installed = installed_root.join("SKILL.md");
+    let library = library_root.join("SKILL.md");
+    assert!(installed.is_file());
+    assert!(library.is_file());
+    assert_eq!(fs::read(&catalog).unwrap(), malformed_catalog);
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
+    let source_before = fs::read(source.join("SKILL.md")).unwrap();
+    let installed_before = fs::read(&installed).unwrap();
+    let library_before = fs::read(&library).unwrap();
+    assert_eq!(installed_before, source_before);
+    assert_eq!(library_before, source_before);
+    assert_eq!(fs::read_dir(&installed_root).unwrap().count(), 1);
+    assert_eq!(fs::read_dir(&library_root).unwrap().count(), 1);
+
+    fs::write(&catalog, catalog_before).unwrap();
+    ws.cmd(&project)
+        .args(args)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Unchanged demo-skill"));
+
+    ws.assert_cataloged("app", "manage-tink");
+    ws.assert_cataloged("app", "demo-skill");
+    let meta: serde_json::Value =
+        serde_json::from_slice(&fs::read(&catalog).unwrap()).expect("valid catalog meta");
+    let skills = meta["skills"].as_array().expect("catalog skills");
+    assert_eq!(skills.len(), 2);
+    assert!(skills.contains(&serde_json::json!("demo-skill")));
+    assert!(skills.contains(&serde_json::json!("manage-tink")));
+    assert_eq!(fs::read(installed).unwrap(), installed_before);
+    assert_eq!(fs::read(library).unwrap(), library_before);
+    assert_eq!(fs::read_dir(installed_root).unwrap().count(), 1);
+    assert_eq!(fs::read_dir(library_root).unwrap().count(), 1);
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
+}
+
+#[test]
+fn a10_add_refuses_symlinked_skill_roots() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let outside = ws.root.join("outside");
+    write_skill(&outside, "linked-skill", "Outside the declared tree.");
+    let bundle = ws.root.join("bundle");
+    fs::create_dir_all(bundle.join("skills")).unwrap();
+    std::os::unix::fs::symlink(&outside, bundle.join("skills").join("linked-skill")).unwrap();
+
+    ws.cmd(&project)
+        .args([
+            "skill",
+            "add",
+            bundle.to_str().unwrap(),
+            "--skill",
+            "linked-skill",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("symlink"));
+    assert!(!Workspace::skill_path(&project, "linked-skill").exists());
+    assert!(!ws.library_skill("linked-skill").exists());
+
+    let direct = ws.root.join("direct-skill");
+    write_skill(&direct, "direct-skill", "Direct source target.");
+    let direct_link = ws.root.join("direct-link");
+    std::os::unix::fs::symlink(&direct, &direct_link).unwrap();
+    ws.cmd(&project)
+        .args(["skill", "add", direct_link.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("symlink"));
+    assert!(!Workspace::skill_path(&project, "direct-skill").exists());
+    assert!(!ws.library_skill("direct-skill").exists());
+    assert!(!ws.catalog_meta("app").exists());
+}
+
+#[test]
+fn a11_add_refuses_matching_project_target_symlink() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let source = ws.root.join("source");
+    let external = ws.root.join("external");
+    write_skill(&source, "demo-skill", "Same bytes.");
+    write_skill(&external, "demo-skill", "Same bytes.");
+    let target = Workspace::skill_path(&project, "demo-skill");
+    std::os::unix::fs::symlink(&external, &target).unwrap();
+
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("symlink"));
+    assert!(target.is_symlink());
+    assert!(!ws.library_skill("demo-skill").exists());
+    assert!(!ws.catalog_meta("app").exists());
+}
+
+#[test]
+fn a12_add_refuses_unrelated_existing_tink_home() {
+    let root = TempDir::new().unwrap();
+    let project = root.path().join("project");
+    let source = root.path().join("source");
+    fs::create_dir_all(&project).unwrap();
+    write_skill(&source, "demo-skill", "Safe source.");
+    let readme = project.join("README.md");
+    fs::write(&readme, "# Important project\n\nKeep this content.\n").unwrap();
+    let before = fs::read(&readme).unwrap();
+
+    Command::cargo_bin("tink")
+        .unwrap()
+        .current_dir(&project)
+        .env("TINK_HOME", ".")
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Tink home").and(predicate::str::contains("non-empty")));
+
+    assert_eq!(fs::read(&readme).unwrap(), before);
+    assert!(!project.join(".agents").exists());
+    assert!(!project.join("layout.json").exists());
+    assert!(!project.join("catalog").exists());
+    assert!(!project.join("skills").exists());
+}
+
 // --- K*: skillsets ---
 
 #[test]
@@ -666,6 +977,7 @@ fn k4_skillset_commands_require_canonical_suffix() {
 fn k5_skillset_add_refuses_unowned_library_collision() {
     let ws = Workspace::new();
     let project = ws.project("app");
+    ws.initialize_inventory();
     let name = "common-skillset";
     write_skill(
         &ws.library_skill(name),
@@ -747,6 +1059,7 @@ fn k7_skillset_setup_failures_are_actionable_and_non_mutating() {
 fn k8_skillset_readd_is_offline_when_project_is_unchanged() {
     let ws = Workspace::new();
     let project = ws.project("app");
+    ws.initialize_inventory();
     let repository = ws.root.join("skillset-repo");
     init_repo(&repository);
     write_skill(&repository.join("bundles/common/alpha"), "alpha", "member");
@@ -788,6 +1101,7 @@ fn k8_skillset_readd_is_offline_when_project_is_unchanged() {
 fn k9_skill_status_reports_grouped_members_honestly() {
     let ws = Workspace::new();
     let project = ws.project("app");
+    ws.initialize_inventory();
     let repository = ws.root.join("skillset-repo");
     init_repo(&repository);
     write_skill(&repository.join("bundles/common/alpha"), "alpha", "first");
@@ -828,6 +1142,7 @@ fn k9_skill_status_reports_grouped_members_honestly() {
 fn k10_skillset_refresh_updates_clean_tree_and_refuses_local_edits() {
     let ws = Workspace::new();
     let project = ws.project("app");
+    ws.initialize_inventory();
     let repository = ws.root.join("skillset-repo");
     init_repo(&repository);
     let source = "https://github.com/example/skillsets.git";
@@ -895,6 +1210,7 @@ fn k10_skillset_refresh_updates_clean_tree_and_refuses_local_edits() {
 fn k11_skillset_rejects_member_directory_name_mismatch() {
     let ws = Workspace::new();
     let project = ws.project("app");
+    ws.initialize_inventory();
     let repository = ws.root.join("skillset-repo");
     init_repo(&repository);
     write_skill(
@@ -1400,6 +1716,7 @@ fn l3_skill_list_catalog_prints_tsv() {
 fn l6_skill_list_catalog_skips_malformed_meta_entries() {
     let ws = Workspace::new();
     let project = ws.project("app");
+    ws.initialize_inventory();
 
     let by_project = ws.inventory.join("catalog").join("by-project");
     let good = by_project.join("good-project");
@@ -1479,6 +1796,84 @@ fn l4_skill_list_warns_on_zen_without_agents_still_lists() {
         ));
 }
 
+#[test]
+fn l7_skill_list_and_check_reject_nested_symlink_drift() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    let source = ws.root.join("demo-skill");
+    write_skill(&source, "demo-skill", "safe before local drift");
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let outside = ws.root.join("outside.txt");
+    fs::write(&outside, "outside\n").unwrap();
+    let link = Workspace::skill_path(&project, "demo-skill").join("escape");
+    std::os::unix::fs::symlink(&outside, &link).unwrap();
+
+    for command in [["skill", "list"], ["skill", "check"]] {
+        ws.cmd(&project)
+            .args(command)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("symlink"));
+    }
+    assert!(link.is_symlink());
+    assert_eq!(fs::read_to_string(&outside).unwrap(), "outside\n");
+}
+
+#[test]
+fn l8_skill_list_refuses_unmarked_existing_home_without_writes() {
+    let root = TempDir::new().unwrap();
+    let project = root.path().join("project");
+    let home = root.path().join("unrelated-home");
+    fs::create_dir_all(&project).unwrap();
+    fs::create_dir_all(&home).unwrap();
+    let readme = home.join("README.md");
+    fs::write(&readme, "# Important unrelated directory\n").unwrap();
+    let before = fs::read(&readme).unwrap();
+
+    for mode in ["--library", "--catalog"] {
+        Command::cargo_bin("tink")
+            .unwrap()
+            .current_dir(&project)
+            .env("TINK_HOME", &home)
+            .args(["skill", "list", mode])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("Tink home"));
+    }
+
+    assert_eq!(fs::read(&readme).unwrap(), before);
+    assert_eq!(fs::read_dir(&home).unwrap().count(), 1);
+}
+
+#[test]
+fn l9_skill_list_refuses_symlinked_home_owner_directories() {
+    for (owner, mode) in [("skills", "--library"), ("catalog", "--catalog")] {
+        let ws = Workspace::new();
+        let project = ws.project("app");
+        ws.initialize_inventory();
+        let owned = ws.inventory.join(owner);
+        let outside = ws.root.join(format!("outside-{owner}"));
+        fs::rename(&owned, &outside).unwrap();
+        std::os::unix::fs::symlink(&outside, &owned).unwrap();
+
+        ws.cmd(&project)
+            .args(["skill", "list", mode])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("symlink"));
+        assert!(owned.is_symlink());
+        assert!(outside.is_dir());
+    }
+}
+
 // --- H*: library ---
 
 #[test]
@@ -1500,6 +1895,34 @@ fn h1_skill_list_library_includes_archived_names() {
         .assert()
         .success()
         .stdout(predicate::str::contains("demo-skill"));
+}
+
+#[test]
+fn h10_skill_list_library_refuses_nested_symlink() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.initialize_inventory();
+    let skill = ws.library_skill("unsafe-skill");
+    write_skill(
+        &skill,
+        "unsafe-skill",
+        "valid manifest with unsafe nested content",
+    );
+    let outside = ws.root.join("outside-library.txt");
+    fs::write(&outside, "outside stays unchanged\n").unwrap();
+    let link = skill.join("escape");
+    std::os::unix::fs::symlink(&outside, &link).unwrap();
+    let before = fs::read(&outside).unwrap();
+
+    ws.cmd(&project)
+        .args(["skill", "list", "--library"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("unsafe-skill").not())
+        .stderr(predicate::str::contains("symlink"));
+
+    assert!(link.is_symlink());
+    assert_eq!(fs::read(&outside).unwrap(), before);
 }
 
 #[test]
@@ -1667,6 +2090,7 @@ fn h7_skill_harvest_divergent_skips_without_repair() {
     let ws = Workspace::new();
     let home = ws.root.join("home");
     let project = ws.project("app");
+    ws.initialize_inventory();
     write_skill(
         &home.join(".agents").join("skills").join("demo-skill"),
         "demo-skill",
@@ -1699,6 +2123,7 @@ fn h7_skill_harvest_divergent_skips_without_repair() {
 fn h8_skill_harvest_skips_tink_home_and_unsafe_trees() {
     let ws = Workspace::new();
     let home = ws.root.join("home");
+    ws.initialize_inventory();
     // Project lives under TINK_HOME but outside skills/ — must still harvest.
     let project = ws.inventory.join("workspace");
     fs::create_dir_all(&project).unwrap();
@@ -1810,6 +2235,7 @@ fn h9_completion_offers_current_library_matches_without_creating_home() {
         .success()
         .stdout(predicate::str::contains("--skill"));
 
+    ws.initialize_inventory();
     write_skill(
         ws.library_skill("demo-skill").as_path(),
         "demo-skill",
@@ -2282,6 +2708,35 @@ fn d3_destroy_refuses_agents_symlink() {
     assert!(project.join(".agents").is_symlink());
 }
 
+#[test]
+fn d4_destroy_refuses_symlinked_catalog_without_external_or_project_writes() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+    let catalog = ws.inventory.join("catalog");
+    let external = ws.root.join("external-catalog-destroy");
+    fs::rename(&catalog, &external).unwrap();
+    std::os::unix::fs::symlink(&external, &catalog).unwrap();
+    let external_meta = external.join("by-project").join("app").join("meta.json");
+    let catalog_before = fs::read(&external_meta).unwrap();
+    let project_before =
+        fs::read(Workspace::skill_path(&project, "manage-tink").join("SKILL.md")).unwrap();
+
+    ws.cmd(&project)
+        .args(["destroy", "--yes"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("symlink"));
+
+    assert!(catalog.is_symlink());
+    assert_eq!(fs::read(&external_meta).unwrap(), catalog_before);
+    assert_eq!(
+        fs::read(Workspace::skill_path(&project, "manage-tink").join("SKILL.md")).unwrap(),
+        project_before
+    );
+    assert!(project.join(".agents").is_dir());
+}
+
 // --- X*: skill remove ---
 
 #[test]
@@ -2516,6 +2971,45 @@ fn x6_remove_fails_when_catalog_meta_is_malformed() {
     assert!(ws.library_skill("demo-skill").join("SKILL.md").is_file());
 }
 
+#[test]
+fn x7_remove_refuses_symlinked_catalog_without_external_or_project_writes() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    let source = ws.root.join("demo-skill");
+    write_skill(&source, "demo-skill", "body");
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let catalog = ws.inventory.join("catalog");
+    let external = ws.root.join("external-catalog-remove");
+    fs::rename(&catalog, &external).unwrap();
+    std::os::unix::fs::symlink(&external, &catalog).unwrap();
+    let external_meta = external.join("by-project").join("app").join("meta.json");
+    let catalog_before = fs::read(&external_meta).unwrap();
+    let project_skill = Workspace::skill_path(&project, "demo-skill");
+    let project_before = fs::read(project_skill.join("SKILL.md")).unwrap();
+
+    ws.cmd(&project)
+        .args(["skill", "remove", "demo-skill"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("symlink"));
+
+    assert!(catalog.is_symlink());
+    assert_eq!(fs::read(&external_meta).unwrap(), catalog_before);
+    assert_eq!(
+        fs::read(project_skill.join("SKILL.md")).unwrap(),
+        project_before
+    );
+    assert!(ws.library_skill("demo-skill").join("SKILL.md").is_file());
+}
+
 // --- S*: safety ---
 
 #[test]
@@ -2525,6 +3019,48 @@ fn s1_init_does_not_create_git_repo() {
     assert!(!project.join(".git").exists());
     ws.cmd(&project).arg("init").assert().success();
     assert!(!project.join(".git").exists());
+}
+
+#[test]
+fn s3_remove_and_destroy_complete_when_implicit_home_cannot_resolve() {
+    let ws = Workspace::new();
+    let remove_project = ws.project("remove-app");
+    ws.cmd(&remove_project).arg("init").assert().success();
+    let remove_catalog_before = fs::read(ws.catalog_meta("remove-app")).unwrap();
+
+    Command::cargo_bin("tink")
+        .unwrap()
+        .current_dir(&remove_project)
+        .env_remove("TINK_HOME")
+        .env_remove("HOME")
+        .args(["skill", "remove", "manage-tink"])
+        .assert()
+        .success();
+    assert!(!Workspace::skill_path(&remove_project, "manage-tink").exists());
+    assert_eq!(
+        fs::read(ws.catalog_meta("remove-app")).unwrap(),
+        remove_catalog_before
+    );
+    assert!(!remove_project.join(".tink").exists());
+
+    let destroy_project = ws.project("destroy-app");
+    ws.cmd(&destroy_project).arg("init").assert().success();
+    let destroy_catalog_before = fs::read(ws.catalog_meta("destroy-app")).unwrap();
+
+    Command::cargo_bin("tink")
+        .unwrap()
+        .current_dir(&destroy_project)
+        .env_remove("TINK_HOME")
+        .env_remove("HOME")
+        .args(["destroy", "--yes"])
+        .assert()
+        .success();
+    assert!(!destroy_project.join(".agents").exists());
+    assert_eq!(
+        fs::read(ws.catalog_meta("destroy-app")).unwrap(),
+        destroy_catalog_before
+    );
+    assert!(!destroy_project.join(".tink").exists());
 }
 
 // --- U*: tink update ---

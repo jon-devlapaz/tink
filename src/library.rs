@@ -7,7 +7,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::error::Error;
-use crate::home::{BY_PROJECT, ensure_inventory_root, skills_library_path};
+use crate::home::{
+    BY_PROJECT, ensure_inventory_root, existing_inventory_root, skills_library_path,
+};
 use crate::paths::{map_io, mkdir_p, refuse_symlink};
 use crate::provenance::{self, Provenance};
 use crate::skills::{self, PreflightOutcome, Skill};
@@ -77,6 +79,7 @@ fn iter_library_skills(library: &Path) -> Result<Vec<Skill>, Error> {
             continue;
         }
         if let Ok(skill) = skills::read_skill(&path, true) {
+            skills::validate_skill_tree(&path)?;
             skills.push(skill);
         }
     }
@@ -155,14 +158,9 @@ pub fn matching(skill: &Skill, provenance: Option<&Provenance>) -> Result<Option
 ///
 /// Creates nothing; empty when home or library root is missing.
 pub fn list_names(home: Option<&Path>) -> Result<Vec<String>, Error> {
-    let home = match home {
-        Some(path) => path.to_path_buf(),
-        None => crate::home::resolve_home()?,
-    };
-    if !home.exists() {
+    let Some(home) = existing_inventory_root(home)? else {
         return Ok(Vec::new());
-    }
-    refuse_symlink(&home)?;
+    };
     let library = skills_library_path(&home);
     Ok(iter_library_skills(&library)?
         .into_iter()
@@ -368,6 +366,43 @@ mod tests {
         assert_eq!(write, CreateOnlyWrite::Created);
         assert_eq!(path, home.library_skill("demo-skill"));
         assert!(skill_md(&path).contains("fresh body"));
+    }
+
+    #[test]
+    fn list_names_requires_owned_home_but_missing_home_is_empty() {
+        let temp = TempDir::new().unwrap();
+        let missing = temp.path().join("missing");
+        assert!(list_names(Some(&missing)).unwrap().is_empty());
+
+        let unmarked = temp.path().join("unmarked");
+        fs::create_dir_all(unmarked.join("skills")).unwrap();
+        let err = list_names(Some(&unmarked)).unwrap_err();
+        assert!(err.to_string().contains("Not a Tink home"), "{err}");
+    }
+
+    #[test]
+    fn list_names_skips_malformed_root_manifest() {
+        let home = TempHome::new();
+        ensure_inventory_root(Some(&home.home)).unwrap();
+        let malformed = home.library_skill("broken-skill");
+        fs::create_dir_all(&malformed).unwrap();
+        fs::write(malformed.join("SKILL.md"), "not frontmatter\n").unwrap();
+
+        assert!(list_names(Some(&home.home)).unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn list_names_refuses_valid_manifest_with_unsafe_nested_tree() {
+        let home = TempHome::new();
+        ensure_inventory_root(Some(&home.home)).unwrap();
+        let unsafe_skill = home.library_skill("demo-skill");
+        write_skill(&unsafe_skill, "demo-skill", "valid manifest, unsafe tree");
+        std::os::unix::fs::symlink("/tmp", unsafe_skill.join("nested-link")).unwrap();
+
+        let err = list_names(Some(&home.home)).unwrap_err();
+
+        assert!(err.to_string().contains("symlink"), "{err}");
     }
 
     #[test]

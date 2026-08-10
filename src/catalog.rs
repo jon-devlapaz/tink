@@ -11,7 +11,8 @@ use serde_json::{Value, json};
 
 use crate::error::Error;
 use crate::home::{
-    BY_PROJECT, by_project_path, ensure_inventory_root, looks_like_legacy_catalog, resolve_home,
+    BY_PROJECT, by_project_path, ensure_inventory_root, existing_inventory_root,
+    looks_like_legacy_catalog, resolve_home,
 };
 use crate::paths::{map_io, mkdir_p, refuse_symlink, require_directory, require_file};
 
@@ -154,20 +155,49 @@ fn remove_catalog_dir(catalog: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-/// Soft-resolve home for withdraw/forget: missing home is success, not create.
-fn existing_home(home: Option<&Path>) -> Result<Option<PathBuf>, Error> {
+/// Find an existing project catalog only after validating the owned home and
+/// every directory boundary that a destructive operation would traverse.
+fn existing_project_catalog(
+    home: Option<&Path>,
+    project_root: &Path,
+) -> Result<Option<PathBuf>, Error> {
     let home = match home {
         Some(path) => path.to_path_buf(),
+        // Cleanup remains a soft success when the implicit home cannot be
+        // resolved (for example, HOME is unset). An explicit home is strict.
         None => match resolve_home() {
             Ok(path) => path,
             Err(_) => return Ok(None),
         },
     };
-    if !home.exists() {
+    let Some(home) = existing_inventory_root(Some(&home))? else {
+        return Ok(None);
+    };
+    let by_project = by_project_path(&home);
+    if !by_project.exists() && !by_project.is_symlink() {
         return Ok(None);
     }
-    refuse_symlink(&home)?;
-    Ok(Some(home))
+    refuse_symlink(&by_project)?;
+    if !by_project.is_dir() {
+        return Err(Error::msg(format!(
+            "Refusing non-directory catalog: {}",
+            by_project.display()
+        )));
+    }
+
+    let catalog = project_catalog_dir(&home, project_root)?;
+    if !catalog.exists() && !catalog.is_symlink() {
+        return Ok(None);
+    }
+    refuse_symlink(&catalog)?;
+    if !catalog.is_dir() {
+        return Err(Error::msg(format!(
+            "Refusing to remove non-directory catalog: {}",
+            catalog.display()
+        )));
+    }
+    require_file(&catalog.join("meta.json"))?;
+    Ok(Some(catalog))
 }
 
 /// Record that `skill_name` is installed in `project_root`.
@@ -227,10 +257,9 @@ pub(crate) fn withdraw_skill_at(
         Ok(path) => path,
         Err(_) => return Ok(()),
     };
-    let Some(home) = existing_home(home)? else {
+    let Some(catalog) = existing_project_catalog(home, &project_root)? else {
         return Ok(());
     };
-    let catalog = project_catalog_dir(&home, &project_root)?;
     let meta_path = catalog.join("meta.json");
     if !meta_path.is_file() {
         return Ok(());
@@ -267,10 +296,9 @@ pub(crate) fn forget_project_at(home: Option<&Path>, project_root: &Path) -> Res
         Ok(path) => path,
         Err(_) => return Ok(()),
     };
-    let Some(home) = existing_home(home)? else {
+    let Some(catalog) = existing_project_catalog(home, &project_root)? else {
         return Ok(());
     };
-    let catalog = project_catalog_dir(&home, &project_root)?;
     let meta_path = catalog.join("meta.json");
     if meta_path.is_file() {
         refuse_symlink(&meta_path)?;
@@ -292,14 +320,9 @@ pub struct CatalogEntry {
 
 /// Read `$TINK_HOME` / `~/.tink` by-project catalogs (read-only; creates nothing).
 pub fn list_catalog(home: Option<&Path>) -> Result<Vec<CatalogEntry>, Error> {
-    let home = match home {
-        Some(path) => path.to_path_buf(),
-        None => resolve_home()?,
-    };
-    if !home.exists() {
+    let Some(home) = existing_inventory_root(home)? else {
         return Ok(Vec::new());
-    }
-    refuse_symlink(&home)?;
+    };
     let new = by_project_path(&home);
     let legacy = home.join("skills").join(BY_PROJECT);
     let legacy_catalog = looks_like_legacy_catalog(&legacy);
@@ -384,8 +407,24 @@ mod tests {
         let home = temp.path().join("home");
         fs::create_dir_all(home.join("skills").join(BY_PROJECT).join("app")).unwrap();
         fs::create_dir_all(by_project_path(&home).join("app")).unwrap();
+        fs::write(
+            home.join(crate::home::LAYOUT_FILENAME),
+            format!("{{\"kind\":\"{}\"}}", crate::home::LAYOUT_KIND),
+        )
+        .unwrap();
         let err = list_catalog(Some(&home)).unwrap_err();
         assert!(err.to_string().contains("Catalog split"), "{err}");
+    }
+
+    #[test]
+    fn list_catalog_requires_owned_home_before_reading_catalog() {
+        let temp = TempDir::new().unwrap();
+        let home = temp.path().join("home");
+        fs::create_dir_all(by_project_path(&home)).unwrap();
+
+        let err = list_catalog(Some(&home)).unwrap_err();
+
+        assert!(err.to_string().contains("Not a Tink home"), "{err}");
     }
 
     #[test]
@@ -491,6 +530,7 @@ mod tests {
     fn skill_shaped_by_project_dir_is_not_legacy_catalog() {
         let temp = TempDir::new().unwrap();
         let root = temp.path().join("inv");
+        ensure_inventory_root(Some(&root)).unwrap();
         let skill_shaped = root.join("skills").join(BY_PROJECT);
         fs::create_dir_all(&skill_shaped).unwrap();
         fs::write(
@@ -661,5 +701,83 @@ mod tests {
             vec!["keep"]
         );
         forget_project_at(Some(&home), &temp.path().join("other-missing")).unwrap();
+    }
+
+    #[test]
+    fn destructive_operations_refuse_unowned_home_without_mutation() {
+        let temp = TempDir::new().unwrap();
+        let home = temp.path().join("home");
+        let app = temp.path().join("app");
+        fs::create_dir_all(&app).unwrap();
+        let catalog = by_project_path(&home).join("app");
+        fs::create_dir_all(&catalog).unwrap();
+        let meta = catalog.join("meta.json");
+        fs::write(&meta, "unowned catalog\n").unwrap();
+        let before = fs::read(&meta).unwrap();
+
+        for operation in [
+            withdraw_skill_at(Some(&home), &app, "alpha"),
+            forget_project_at(Some(&home), &app),
+        ] {
+            let err = operation.unwrap_err();
+            assert!(err.to_string().contains("Not a Tink home"), "{err}");
+        }
+
+        assert_eq!(fs::read(&meta).unwrap(), before);
+        assert!(catalog.is_dir());
+    }
+
+    #[test]
+    fn destructive_operations_refuse_catalog_symlinks_without_following() {
+        let temp = TempDir::new().unwrap();
+        let home = temp.path().join("home");
+        let app = temp.path().join("app");
+        fs::create_dir_all(&app).unwrap();
+        ensure_inventory_root(Some(&home)).unwrap();
+
+        let outside = temp.path().join("outside");
+        let outside_catalog = outside.join("app");
+        fs::create_dir_all(&outside_catalog).unwrap();
+        let meta = outside_catalog.join("meta.json");
+        fs::write(&meta, "external catalog\n").unwrap();
+        fs::remove_dir_all(by_project_path(&home)).unwrap();
+        std::os::unix::fs::symlink(&outside, by_project_path(&home)).unwrap();
+
+        for operation in [
+            withdraw_skill_at(Some(&home), &app, "alpha"),
+            forget_project_at(Some(&home), &app),
+        ] {
+            let err = operation.unwrap_err();
+            assert!(err.to_string().contains("symlink"), "{err}");
+        }
+
+        assert!(outside_catalog.is_dir());
+        assert_eq!(fs::read_to_string(&meta).unwrap(), "external catalog\n");
+    }
+
+    #[test]
+    fn destructive_operations_refuse_project_catalog_symlink_without_following() {
+        let temp = TempDir::new().unwrap();
+        let home = temp.path().join("home");
+        let app = temp.path().join("app");
+        fs::create_dir_all(&app).unwrap();
+        ensure_inventory_root(Some(&home)).unwrap();
+
+        let outside_catalog = temp.path().join("outside-app");
+        fs::create_dir_all(&outside_catalog).unwrap();
+        let meta = outside_catalog.join("meta.json");
+        fs::write(&meta, "external catalog\n").unwrap();
+        std::os::unix::fs::symlink(&outside_catalog, by_project_path(&home).join("app")).unwrap();
+
+        for operation in [
+            withdraw_skill_at(Some(&home), &app, "alpha"),
+            forget_project_at(Some(&home), &app),
+        ] {
+            let err = operation.unwrap_err();
+            assert!(err.to_string().contains("symlink"), "{err}");
+        }
+
+        assert!(outside_catalog.is_dir());
+        assert_eq!(fs::read_to_string(&meta).unwrap(), "external catalog\n");
     }
 }
