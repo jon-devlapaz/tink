@@ -217,3 +217,21 @@ Rebasing onto `origin/main` introduced an upstream H10 contract for rejecting ne
 library symlinks. The receipt-ownership acceptance rows and test functions are now
 H11-H13. Earlier DRSI-002 references to H10-H12 preserve the identifiers used when
 that experiment ran.
+
+## Acceptance traceability reconciliation - 2026-08-10
+
+- **Outcome / invariant:** Every executable acceptance sensor has a unique contract ID
+  represented in `ACCEPTANCE.md`; every non-manual row resolves to an executable
+  sensor. Bundled coverage and remaining manual or partial gaps are explicit.
+- **Repair:** Added the missing manifest, inspection, CLI, local-add, and remote-add
+  rows; renamed the colliding C4, M2, and R2 test IDs; retained K2/K3 as deliberately
+  bundled K1 coverage; and corrected the stale sensor-gap inventory.
+- **Guard:** Added `tests/acceptance_traceability.rs`, which rejects duplicate row or
+  test IDs, missing named sensors, and executable sensors with no row or explicit
+  reference. It does not claim to detect semantic mismatches inside prose or test
+  assertions.
+- **Remaining gaps:** C4 remains manual, S1 remains partial, and S2 remains manual.
+  Concurrency and direct release-entrypoint gaps remain unchanged.
+- **Verification:** `cargo fmt --check`, `cargo test --locked`, and `git diff --check`
+  pass. The locked suite contains 59 unit tests, 117 behavioral acceptance tests, and
+  one traceability test.
