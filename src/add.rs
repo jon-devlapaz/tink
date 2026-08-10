@@ -172,6 +172,7 @@ pub(crate) fn add_locked_skill(
     match source {
         LockedSource::LocalPath { path, .. } => {
             init::ensure_project_layout(project_root)?;
+            crate::paths::refuse_symlink(&path)?;
             if !path.exists() {
                 return Err(Error::msg(format!(
                     "Path does not exist: {}",
@@ -253,6 +254,7 @@ fn add_skill_inner(
     let destination_root = crate::home::project_skills_path(project_root);
     match sources::classify_add_input(source_value)? {
         AddSource::LocalPath(local_source) => {
+            crate::paths::refuse_symlink(&local_source)?;
             let source_root = local_source
                 .canonicalize()
                 .map_err(|e| crate::paths::map_io(&local_source, e))?;

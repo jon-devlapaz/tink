@@ -64,6 +64,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | I8 | `init` with relative `TINK_HOME` (e.g. `../home`) from project cwd | Exit 0; home is the absolutized sibling path (not nested under the project); stdout shows an absolute home path |
 | I9 | Run non-interactive `init` twice with an unchanged project | Second run exits 0, reports `Ready` / `Already present`, and leaves project/home contract files byte-identical |
 | I10 | Run `init --with-tink-skills` against an incomplete optional bundle, repair the bundle, then rerun the same command | First run fails but preserves completed setup; second run exits 0 and converges to `manage-tink` plus both bundle skills |
+| I11 | Run `init` with `TINK_HOME` pointed at the non-empty project directory | Exit ≠ 0; refuses to claim the directory and leaves the project byte-identical |
 
 ### Local add
 
@@ -78,6 +79,9 @@ Ids are stable. Tests must name or comment the id they prove.
 | A7 | `skill add` skill named `by-project` | Exit ≠ 0; reserved name; no project/library write |
 | A8 | `skill add` same GitHub tip already in library | Exit 0; installs project from library (no clone); stdout notes library |
 | A9 | `skill add` when catalog metadata is malformed, repair the catalog, then rerun the same command | First run fails after preserving valid project/library copies; second run exits 0, catalogs the skill, and leaves those copies byte-identical |
+| A10 | `skill add` from a direct symlink or a symlinked child under `skills/` | Exit ≠ 0; mentions symlink; creates no project, library, or catalog entry for that skill |
+| A11 | `skill add` when the matching project target is a symlink | Exit ≠ 0; leaves the symlink untouched; creates no library or catalog entry |
+| A12 | `skill add` with `TINK_HOME` pointed at an unrelated non-empty directory | Exit ≠ 0; refuses to claim the directory and leaves its existing files byte-identical |
 
 ### Remote add
 

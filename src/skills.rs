@@ -80,6 +80,7 @@ fn frontmatter_value(lines: &[&str], key: &str) -> Option<String> {
 }
 
 pub fn read_skill(path: &Path, require_directory_name: bool) -> Result<Skill, Error> {
+    refuse_symlink(path)?;
     let skill_file = path.join("SKILL.md");
     refuse_symlink(&skill_file)?;
     if !skill_file.is_file() {
@@ -182,6 +183,7 @@ enum Collected {
 }
 
 fn collect_tree(root: &Path) -> Result<Collected, Error> {
+    refuse_symlink(root)?;
     let mut contents = BTreeMap::new();
     fn walk(
         root: &Path,
@@ -420,6 +422,7 @@ pub fn preflight_install(
 ) -> Result<PreflightOutcome, Error> {
     let expected = expected_install_tree(skill, provenance)?;
     let target = destination_root.join(&skill.name);
+    refuse_symlink(&target)?;
     if !target.exists() && !target.is_symlink() {
         return Ok(PreflightOutcome::Ready);
     }

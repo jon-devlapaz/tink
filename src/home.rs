@@ -124,6 +124,7 @@ pub fn ensure_inventory_root(root: Option<&Path>) -> Result<(PathBuf, bool), Err
             root.display()
         )));
     }
+    preflight_inventory_root(&root)?;
     mkdir_p(&root)?;
     mkdir_p(&skills_library_path(&root))?;
     migrate_catalog_if_needed(&root)?;
@@ -131,6 +132,33 @@ pub fn ensure_inventory_root(root: Option<&Path>) -> Result<(PathBuf, bool), Err
     mkdir_p(&by_skillset_path(&root))?;
     write_layout_marker(&root)?;
     Ok((root, created))
+}
+
+/// Refuse to claim an unrelated existing directory as Tink home.
+///
+/// A valid layout marker establishes ownership. An existing empty directory is
+/// also safe to initialize; every other non-empty unmarked directory is left
+/// byte-for-byte untouched.
+fn preflight_inventory_root(root: &Path) -> Result<(), Error> {
+    if !root.exists() {
+        return Ok(());
+    }
+    let layout = root.join(LAYOUT_FILENAME);
+    require_file(&layout)?;
+    if layout.is_file() {
+        return validate_layout_marker(root, &layout);
+    }
+    let is_empty = fs::read_dir(root)
+        .map_err(|e| map_io(root, e))?
+        .next()
+        .is_none();
+    if is_empty {
+        return Ok(());
+    }
+    Err(Error::msg(format!(
+        "Refusing to initialize non-empty directory as Tink home: {}",
+        root.display()
+    )))
 }
 
 /// True when `skills/by-project` looks like the old name catalog (not a skill tree).
@@ -178,13 +206,7 @@ fn write_layout_marker(root: &Path) -> Result<(), Error> {
     let layout_path = root.join(LAYOUT_FILENAME);
     require_file(&layout_path)?;
     if layout_path.is_file() {
-        let existing = fs::read_to_string(&layout_path).map_err(|e| map_io(&layout_path, e))?;
-        if !existing.contains(LAYOUT_KIND) {
-            return Err(Error::msg(format!(
-                "Not a Tink home inventory: {}",
-                root.display()
-            )));
-        }
+        validate_layout_marker(root, &layout_path)?;
     } else {
         let body = format!("{{\n  \"kind\": \"{LAYOUT_KIND}\"\n}}\n");
         fs::write(&layout_path, body).map_err(|e| map_io(&layout_path, e))?;
@@ -200,6 +222,19 @@ fn write_layout_marker(root: &Path) -> Result<(), Error> {
     };
     if refresh_readme {
         fs::write(&readme, HOME_README).map_err(|e| map_io(&readme, e))?;
+    }
+    Ok(())
+}
+
+fn validate_layout_marker(root: &Path, layout: &Path) -> Result<(), Error> {
+    let raw = fs::read_to_string(layout).map_err(|e| map_io(layout, e))?;
+    let value: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|_| Error::msg(format!("Not a Tink home inventory: {}", root.display())))?;
+    if value.get("kind").and_then(serde_json::Value::as_str) != Some(LAYOUT_KIND) {
+        return Err(Error::msg(format!(
+            "Not a Tink home inventory: {}",
+            root.display()
+        )));
     }
     Ok(())
 }
@@ -231,6 +266,11 @@ mod tests {
         let legacy = root.join("skills").join(BY_PROJECT).join("app");
         fs::create_dir_all(&legacy).unwrap();
         fs::write(
+            root.join(LAYOUT_FILENAME),
+            format!("{{\n  \"kind\": \"{LAYOUT_KIND}\"\n}}\n"),
+        )
+        .unwrap();
+        fs::write(
             legacy.join("meta.json"),
             "{\"name\":\"app\",\"root\":\"/tmp/app\",\"skills\":[\"x\"]}\n",
         )
@@ -251,6 +291,11 @@ mod tests {
         let root = temp.path().join("inv");
         fs::create_dir_all(root.join("skills").join(BY_PROJECT).join("old")).unwrap();
         fs::create_dir_all(by_project_path(&root).join("new")).unwrap();
+        fs::write(
+            root.join(LAYOUT_FILENAME),
+            format!("{{\n  \"kind\": \"{LAYOUT_KIND}\"\n}}\n"),
+        )
+        .unwrap();
         let err = ensure_inventory_root(Some(&root)).unwrap_err();
         assert!(err.to_string().contains("Catalog split"), "{err}");
     }
@@ -261,6 +306,11 @@ mod tests {
         let root = temp.path().join("inv");
         fs::create_dir_all(root.join("skills")).unwrap();
         fs::write(root.join("skills").join(BY_PROJECT), "not a dir\n").unwrap();
+        fs::write(
+            root.join(LAYOUT_FILENAME),
+            format!("{{\n  \"kind\": \"{LAYOUT_KIND}\"\n}}\n"),
+        )
+        .unwrap();
         let err = ensure_inventory_root(Some(&root)).unwrap_err();
         assert!(
             err.to_string().contains("non-directory legacy catalog"),
@@ -287,6 +337,56 @@ mod tests {
         let readme = fs::read_to_string(root.join("README.md")).unwrap();
         assert!(readme.contains("catalog/by-project"));
         assert!(!readme.contains("skills/by-project/<project>"));
+    }
+
+    #[test]
+    fn ensure_initializes_existing_empty_root() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("inv");
+        fs::create_dir(&root).unwrap();
+
+        let (_, created) = ensure_inventory_root(Some(&root)).unwrap();
+
+        assert!(!created);
+        assert!(root.join(LAYOUT_FILENAME).is_file());
+        assert!(skills_library_path(&root).is_dir());
+        assert!(by_project_path(&root).is_dir());
+    }
+
+    #[test]
+    fn ensure_refuses_nonempty_unmarked_root_without_writes() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("project");
+        fs::create_dir(&root).unwrap();
+        let readme = root.join("README.md");
+        fs::write(&readme, "# Important project\n").unwrap();
+        let before = fs::read(&readme).unwrap();
+
+        let err = ensure_inventory_root(Some(&root)).unwrap_err();
+
+        assert!(err.to_string().contains("non-empty"), "{err}");
+        assert_eq!(fs::read(&readme).unwrap(), before);
+        assert!(!root.join(LAYOUT_FILENAME).exists());
+        assert!(!root.join("skills").exists());
+        assert!(!root.join("catalog").exists());
+    }
+
+    #[test]
+    fn ensure_refuses_malformed_marker_without_writes() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("inv");
+        fs::create_dir(&root).unwrap();
+        let layout = root.join(LAYOUT_FILENAME);
+        fs::write(&layout, "{not-json}\n").unwrap();
+        let before = fs::read(&layout).unwrap();
+
+        let err = ensure_inventory_root(Some(&root)).unwrap_err();
+
+        assert!(err.to_string().contains("Not a Tink home"), "{err}");
+        assert_eq!(fs::read(&layout).unwrap(), before);
+        assert!(!root.join("skills").exists());
+        assert!(!root.join("catalog").exists());
+        assert!(!root.join("README.md").exists());
     }
 
     #[test]

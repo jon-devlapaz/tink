@@ -491,6 +491,7 @@ mod tests {
     fn skill_shaped_by_project_dir_is_not_legacy_catalog() {
         let temp = TempDir::new().unwrap();
         let root = temp.path().join("inv");
+        ensure_inventory_root(Some(&root)).unwrap();
         let skill_shaped = root.join("skills").join(BY_PROJECT);
         fs::create_dir_all(&skill_shaped).unwrap();
         fs::write(

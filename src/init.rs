@@ -183,6 +183,7 @@ pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitRep
         require_file(&project_root.join(templates::ZEN_FILENAME))?;
         require_file(&project_root.join("AGENTS.md"))?;
     }
+    let (home, home_created) = home::ensure_inventory_root(None)?;
 
     let skills_created = !skills.is_dir();
     mkdir_p(&agents)?;
@@ -218,7 +219,6 @@ pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitRep
         }
     }
 
-    let (home, home_created) = home::ensure_inventory_root(None)?;
     Ok(InitReport {
         skills_path: skills,
         skills_created,
@@ -239,12 +239,12 @@ pub fn ensure_project_layout(project_root: &Path) -> Result<(), Error> {
     require_directory(&agents)?;
     require_directory(&skills)?;
     require_file(&readme)?;
+    let _ = home::ensure_inventory_root(None)?;
 
     mkdir_p(&agents)?;
     mkdir_p(&skills)?;
     if !readme.exists() {
         std::fs::write(&readme, SKILLS_README).map_err(|e| map_io(&readme, e))?;
     }
-    let _ = home::ensure_inventory_root(None)?;
     Ok(())
 }
