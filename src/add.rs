@@ -100,6 +100,67 @@ fn select_one_skill(
     Ok(candidates.remove(0))
 }
 
+fn repository_relative_path(repository: &Path, skill: &Skill) -> Result<String, Error> {
+    let relative = skill
+        .path
+        .strip_prefix(repository)
+        .map_err(|_| {
+            Error::msg(format!(
+                "skill path {} is outside source {}",
+                skill.path.display(),
+                repository.display()
+            ))
+        })?
+        .to_string_lossy()
+        .replace('\\', "/");
+    Ok(if relative.is_empty() {
+        ".".to_string()
+    } else {
+        relative
+    })
+}
+
+fn select_remote_skill_path(
+    source_root: &Path,
+    source_display: &str,
+    selector: &str,
+) -> Result<String, Error> {
+    let discovery = skills::discover_recursive(source_root)?;
+    let mut candidates = discovery
+        .skills
+        .into_iter()
+        .map(|skill| {
+            let path = repository_relative_path(source_root, &skill)?;
+            Ok((skill, path))
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+
+    if selector == "." || selector.contains('/') {
+        candidates.retain(|(_, path)| path == selector);
+    } else {
+        candidates.retain(|(skill, path)| {
+            skill.name == selector
+                && (path == "."
+                    || skill.path.file_name().and_then(|name| name.to_str())
+                        == Some(skill.name.as_str()))
+        });
+    }
+    if candidates.is_empty() {
+        return Err(Error::msg(format!("Skill not found: {selector}")));
+    }
+    if candidates.len() != 1 {
+        let commands = candidates
+            .iter()
+            .map(|(_, path)| format!("  tink skill add {source_display} --skill {path}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Err(Error::msg(format!(
+            "Skill selector {selector:?} matches multiple skills. Choose one by repository path:\n{commands}"
+        )));
+    }
+    Ok(candidates.remove(0).1)
+}
+
 fn install_from_checkout(
     project_root: &Path,
     source_root: &Path,
@@ -108,24 +169,24 @@ fn install_from_checkout(
     selected_name: Option<&str>,
     source_url: Option<&str>,
     revision: Option<&str>,
-    locked_path: Option<&str>,
+    source_path: Option<&str>,
 ) -> Result<AddOutcome, Error> {
     let source_root = source_root
         .canonicalize()
         .map_err(|e| crate::paths::map_io(source_root, e))?;
-    let skill = if let Some(locked_path) = locked_path {
-        if locked_path.is_empty()
-            || locked_path.contains("..")
-            || locked_path.contains('\\')
-            || locked_path.starts_with('/')
+    let skill = if let Some(source_path) = source_path {
+        if source_path.is_empty()
+            || source_path.contains("..")
+            || source_path.contains('\\')
+            || source_path.starts_with('/')
         {
             return Err(Error::msg(format!(
-                "Invalid locked skill path: {locked_path}"
+                "Invalid locked skill path: {source_path}"
             )));
         }
-        let path = source_root.join(locked_path);
-        let skill = skills::read_skill(&path, true)?;
-        if selected_name != Some(skill.name.as_str()) {
+        let path = source_root.join(source_path);
+        let skill = skills::read_skill(&path, source_path != ".")?;
+        if selected_name != Some(skill.name.as_str()) && selected_name != Some(source_path) {
             return Err(Error::msg(format!(
                 "Locked skill path does not contain {selected_name:?}"
             )));
@@ -326,12 +387,18 @@ fn add_from_remote(
     remote: &RemoteSource,
     selected_name: Option<&str>,
 ) -> Result<AddOutcome, Error> {
-    // Cheap tip check: if library already has this exact remote revision, copy it.
-    let tip = git::remote_head(remote)?;
-    if let Some(cached) = library::for_remote_tip(&remote.url, &tip, selected_name)? {
-        return place_from_library(project_root, &cached, destination_root);
+    // A selected name may be ambiguous in the repository, so discovery must run
+    // before the library can be trusted. Preserve the root-skill no-clone path.
+    if selected_name.is_none() {
+        let tip = git::remote_head(remote)?;
+        if let Some(cached) = library::for_remote_tip(&remote.url, &tip, None)? {
+            return place_from_library(project_root, &cached, destination_root);
+        }
     }
     let (_temp, source_root, revision) = git::checkout(remote)?;
+    let selected_path = selected_name
+        .map(|selector| select_remote_skill_path(&source_root, &remote.display, selector))
+        .transpose()?;
     install_from_checkout(
         project_root,
         &source_root,
@@ -340,6 +407,6 @@ fn add_from_remote(
         selected_name,
         Some(&remote.url),
         Some(&revision),
-        None,
+        selected_path.as_deref(),
     )
 }

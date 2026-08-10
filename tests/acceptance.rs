@@ -681,6 +681,62 @@ fn a8_add_uses_library_when_remote_tip_matches() {
 }
 
 #[test]
+fn a13_add_uses_library_for_non_root_skill_without_cloning() {
+    let ws = Workspace::new();
+    let first_project = ws.project("first");
+    let second_project = ws.project("second");
+    for project in [&first_project, &second_project] {
+        ws.cmd(project)
+            .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+            .assert()
+            .success();
+    }
+
+    let remote = ws.root.join("non-root-cache-repo");
+    init_repo(&remote);
+    write_skill(
+        &remote.join("skills/non-root-skill"),
+        "non-root-skill",
+        "cached non-root skill",
+    );
+    commit_all(&remote, "non-root skill");
+    let public = "https://github.com/example/non-root-cache.git";
+    let redirect = github_redirect(&remote, public);
+
+    let mut first_add = ws.cmd(&first_project);
+    first_add.args(["skill", "add", "example/non-root-cache"]);
+    first_add.envs(redirect.clone());
+    first_add.assert().success();
+
+    let tree_output = StdCommand::new("git")
+        .args(["rev-parse", "HEAD^{tree}"])
+        .current_dir(&remote)
+        .output()
+        .unwrap();
+    assert!(tree_output.status.success());
+    let tree = String::from_utf8(tree_output.stdout).unwrap();
+    let tree = tree.trim();
+    let tree_object = remote
+        .join(".git/objects")
+        .join(&tree[..2])
+        .join(&tree[2..]);
+    assert!(tree_object.is_file(), "missing loose tree object {tree}");
+    fs::remove_file(tree_object).unwrap();
+    let mut second_add = ws.cmd(&second_project);
+    second_add.args(["skill", "add", "example/non-root-cache"]);
+    second_add.envs(redirect);
+    second_add
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("from library"));
+    assert!(
+        Workspace::skill_path(&second_project, "non-root-skill")
+            .join("SKILL.md")
+            .is_file()
+    );
+}
+
+#[test]
 fn a9_add_catalog_failure_is_resumable() {
     let ws = Workspace::new();
     let project = ws.project("app");
@@ -1384,6 +1440,321 @@ fn r5_add_root_level_skill_writes_dot_path_check_and_refresh() {
             .unwrap();
     assert!(receipt.contains(&new_rev));
     assert!(receipt.contains("\"path\": \".\"") || receipt.contains("\"path\":\".\""));
+}
+
+#[test]
+fn r6_add_finds_unique_nested_remote_skill_by_name() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("nested-skills-repo");
+    init_repo(&remote);
+    write_skill(
+        &remote.join("packages/shared/skills/nested-skill"),
+        "nested-skill",
+        "selected nested skill",
+    );
+    write_skill(
+        &remote.join("packages/other/skills/unrelated-skill"),
+        "unrelated-skill",
+        "unrelated nested skill",
+    );
+    let revision = commit_all(&remote, "nested skills");
+    let public = "https://github.com/example/nested-skills.git";
+
+    let mut add = ws.cmd(&project);
+    add.args([
+        "skill",
+        "add",
+        "example/nested-skills",
+        "--skill",
+        "nested-skill",
+    ]);
+    add.envs(github_redirect(&remote, public));
+    add.assert().success();
+
+    let installed = Workspace::skill_path(&project, "nested-skill");
+    assert!(
+        fs::read_to_string(installed.join("SKILL.md"))
+            .unwrap()
+            .contains("selected nested skill")
+    );
+    let receipt: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(installed.join(".tink-source.json")).unwrap())
+            .unwrap();
+    assert_eq!(receipt["source"], public);
+    assert_eq!(receipt["revision"], revision);
+    assert_eq!(receipt["path"], "packages/shared/skills/nested-skill");
+    ws.assert_cataloged("app", "nested-skill");
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
+}
+
+#[test]
+fn r7_add_refuses_ambiguous_nested_skill_name_without_writes() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("duplicate-skills-repo");
+    init_repo(&remote);
+    write_skill(
+        &remote.join("packages/one/skills/same-skill"),
+        "same-skill",
+        "first duplicate",
+    );
+    write_skill(
+        &remote.join("packages/two/skills/same-skill"),
+        "same-skill",
+        "second duplicate",
+    );
+    commit_all(&remote, "duplicate skills");
+    let public = "https://github.com/example/duplicate-skills.git";
+
+    let mut add = ws.cmd(&project);
+    add.args([
+        "skill",
+        "add",
+        "example/duplicate-skills",
+        "--skill",
+        "same-skill",
+    ]);
+    add.envs(github_redirect(&remote, public));
+    add.assert().failure().stderr(
+        predicate::str::contains("multiple skills")
+            .and(predicate::str::contains("packages/one/skills/same-skill"))
+            .and(predicate::str::contains("packages/two/skills/same-skill")),
+    );
+
+    assert!(!Workspace::skill_path(&project, "same-skill").exists());
+    assert!(!ws.library_skill("same-skill").exists());
+    let catalog = fs::read_to_string(ws.catalog_meta("app")).unwrap_or_default();
+    assert!(!catalog.contains("same-skill"), "{catalog}");
+}
+
+#[test]
+fn r8_add_selects_nested_remote_skill_by_repository_path_and_refreshes() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("path-selected-skills-repo");
+    init_repo(&remote);
+    let selected_path = "packages/shared-skills/skills/git-master";
+    write_skill(
+        &remote.join(selected_path),
+        "git-master",
+        "shared implementation v1",
+    );
+    write_skill(
+        &remote.join("packages/generated/skills/git-master"),
+        "git-master",
+        "generated duplicate",
+    );
+    let revision = commit_all(&remote, "duplicate git-master skills");
+    let public = "https://github.com/example/path-selected-skills.git";
+    let redirect = github_redirect(&remote, public);
+
+    let mut add = ws.cmd(&project);
+    add.args([
+        "skill",
+        "add",
+        "example/path-selected-skills",
+        "--skill",
+        selected_path,
+    ]);
+    add.envs(redirect.clone());
+    add.assert().success();
+
+    let installed = Workspace::skill_path(&project, "git-master");
+    let receipt: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(installed.join(".tink-source.json")).unwrap())
+            .unwrap();
+    assert_eq!(receipt["source"], public);
+    assert_eq!(receipt["revision"], revision);
+    assert_eq!(receipt["path"], selected_path);
+    assert!(
+        fs::read_to_string(installed.join("SKILL.md"))
+            .unwrap()
+            .contains("shared implementation v1")
+    );
+
+    write_skill(
+        &remote.join(selected_path),
+        "git-master",
+        "shared implementation v2",
+    );
+    commit_all(&remote, "update selected git-master");
+    let mut refresh = ws.cmd(&project);
+    refresh.args(["skill", "refresh", "git-master"]);
+    refresh.envs(redirect);
+    refresh.assert().success();
+    assert!(
+        fs::read_to_string(installed.join("SKILL.md"))
+            .unwrap()
+            .contains("shared implementation v2")
+    );
+}
+
+#[test]
+fn r9_cached_duplicate_does_not_bypass_remote_name_ambiguity() {
+    let ws = Workspace::new();
+    let first_project = ws.project("first");
+    let second_project = ws.project("second");
+    for project in [&first_project, &second_project] {
+        ws.cmd(project)
+            .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+            .assert()
+            .success();
+    }
+
+    let remote = ws.root.join("cached-duplicate-skills-repo");
+    init_repo(&remote);
+    let selected_path = "packages/shared/skills/same-skill";
+    write_skill(
+        &remote.join(selected_path),
+        "same-skill",
+        "cached duplicate",
+    );
+    write_skill(
+        &remote.join("packages/other/skills/same-skill"),
+        "same-skill",
+        "other duplicate",
+    );
+    commit_all(&remote, "cached duplicate skills");
+    let public = "https://github.com/example/cached-duplicate-skills.git";
+    let redirect = github_redirect(&remote, public);
+
+    let mut first_add = ws.cmd(&first_project);
+    first_add.args([
+        "skill",
+        "add",
+        "example/cached-duplicate-skills",
+        "--skill",
+        selected_path,
+    ]);
+    first_add.envs(redirect.clone());
+    first_add.assert().success();
+    assert!(ws.library_skill("same-skill").join("SKILL.md").is_file());
+
+    let mut second_add = ws.cmd(&second_project);
+    second_add.args([
+        "skill",
+        "add",
+        "example/cached-duplicate-skills",
+        "--skill",
+        "same-skill",
+    ]);
+    second_add.envs(redirect);
+    second_add.assert().failure().stderr(
+        predicate::str::contains("multiple skills")
+            .and(predicate::str::contains(selected_path))
+            .and(predicate::str::contains("packages/other/skills/same-skill")),
+    );
+    assert!(!Workspace::skill_path(&second_project, "same-skill").exists());
+}
+
+#[test]
+fn r10_mismatched_directory_name_does_not_create_false_name_ambiguity() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("mismatched-name-repo");
+    init_repo(&remote);
+    write_skill(
+        &remote.join("packages/valid/skills/target-skill"),
+        "target-skill",
+        "installable target",
+    );
+    write_skill(
+        &remote.join("packages/invalid/skills/wrong-directory"),
+        "target-skill",
+        "mismatched directory",
+    );
+    commit_all(&remote, "valid and mismatched targets");
+    let public = "https://github.com/example/mismatched-name.git";
+
+    let mut add = ws.cmd(&project);
+    add.args([
+        "skill",
+        "add",
+        "example/mismatched-name",
+        "--skill",
+        "target-skill",
+    ]);
+    add.envs(github_redirect(&remote, public));
+    add.assert().success();
+    assert!(
+        fs::read_to_string(Workspace::skill_path(&project, "target-skill").join("SKILL.md"))
+            .unwrap()
+            .contains("installable target")
+    );
+}
+
+#[test]
+fn r11_dot_path_selects_root_skill_when_name_is_ambiguous() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("root-duplicate-repo");
+    init_repo(&remote);
+    write_skill(&remote, "same-skill", "root implementation");
+    let nested_path = "packages/nested/skills/same-skill";
+    write_skill(
+        &remote.join(nested_path),
+        "same-skill",
+        "nested implementation",
+    );
+    commit_all(&remote, "root and nested duplicate");
+    let public = "https://github.com/example/root-duplicate.git";
+    let redirect = github_redirect(&remote, public);
+
+    let mut ambiguous = ws.cmd(&project);
+    ambiguous.args([
+        "skill",
+        "add",
+        "example/root-duplicate",
+        "--skill",
+        "same-skill",
+    ]);
+    ambiguous.envs(redirect.clone());
+    ambiguous
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--skill .").and(predicate::str::contains(nested_path)));
+
+    let mut add_root = ws.cmd(&project);
+    add_root.args(["skill", "add", "example/root-duplicate", "--skill", "."]);
+    add_root.envs(redirect);
+    add_root.assert().success();
+
+    let installed = Workspace::skill_path(&project, "same-skill");
+    assert!(
+        fs::read_to_string(installed.join("SKILL.md"))
+            .unwrap()
+            .contains("root implementation")
+    );
+    let receipt: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(installed.join(".tink-source.json")).unwrap())
+            .unwrap();
+    assert_eq!(receipt["path"], ".");
 }
 
 #[test]

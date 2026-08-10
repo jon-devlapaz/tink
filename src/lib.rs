@@ -104,7 +104,7 @@ pub enum SkillCommand {
         /// Local path, `owner/repo`, public GitHub HTTPS URL, or library skill name
         #[arg(add = ArgValueCompleter::new(add_source_candidates))]
         source: String,
-        /// Skill name when the source contains several skills
+        /// Unique skill name or repository-relative skill path
         #[arg(long)]
         skill: Option<String>,
     },
