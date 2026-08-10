@@ -24,7 +24,7 @@ Skill verbs live only under `tink skill`. There are no top-level `add` /
 | Command | Meaning |
 |---|---|
 | `tink init` | Create `.agents/skills/`; install `manage-tink` by default; optional ZEN + tink-skills; ensure `~/.tink` |
-| `tink skill add <source> [--skill <name>]` | Install one local path, public GitHub skill, or library skill by name |
+| `tink skill add <source> [--skill <name-or-path>]` | Install one local path, public GitHub skill, or library skill by name; remote selectors may be unique names or repository-relative paths |
 | `tink skill list` | List project skills under `.agents/skills/` (read-only) |
 | `tink skill list --catalog` | List offline by-project catalog (`project`, `root`, `skill` TSV) |
 | `tink skill list --library` | List skill names in the library (`skills/<name>/` with `SKILL.md`) |
@@ -83,6 +83,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | A10 | `skill add` from a direct symlink or a symlinked child under `skills/` | Exit ≠ 0; mentions symlink; creates no project, library, or catalog entry for that skill |
 | A11 | `skill add` when the matching project target is a symlink | Exit ≠ 0; leaves the symlink untouched; creates no library or catalog entry |
 | A12 | `skill add` with `TINK_HOME` pointed at an unrelated non-empty directory | Exit ≠ 0; refuses to claim the directory and leaves its existing files byte-identical |
+| A13 | `skill add owner/repo` when one non-root remote skill at the same tip is already in the library | Exit 0 without cloning; installs from library and reports that source |
 
 ### Remote add
 
@@ -93,6 +94,12 @@ Ids are stable. Tests must name or comment the id they prove.
 | R3 | `skill add ./missing-skill` (path-like, absent) | Exit ≠ 0; "Path does not exist"; **no** GitHub network fetch |
 | R4 | `skill add /abs/missing` | Exit ≠ 0; "Path does not exist" |
 | R5 | `skill add owner/repo` when `SKILL.md` is at repo root | Receipt `path` is `"."` (non-empty); `skill check` passes; `skill refresh` updates from repo root |
+| R6 | `skill add owner/repo --skill <unique-name>` when the skill is nested below a nonstandard wrapper | Installs the unique recursive match; receipt records its exact repository-relative path; catalog, library, and `skill check` are valid |
+| R7 | `skill add owner/repo --skill <duplicate-name>` with multiple recursive matches | Exit ≠ 0 before project/library/catalog writes; lists every matching repository-relative path |
+| R8 | `skill add owner/repo --skill <repository-relative-path>` | Installs exactly that nested skill; receipt preserves the path and `skill refresh` follows it on the remote default branch |
+| R9 | A matching library copy exists for one of several same-name remote skills | Name-only add still checks the repository and refuses ambiguity; the cache cannot choose a path implicitly |
+| R10 | A canonical nested skill and a directory/name-mismatched `SKILL.md` declare the same name | Name selection ignores the malformed candidate and installs the one valid tree; inspection may still diagnose both |
+| R11 | Root and nested skills share a name, then `--skill .` selects the listed root path | Installs the root skill and records receipt path `"."` |
 
 ### Skillsets
 

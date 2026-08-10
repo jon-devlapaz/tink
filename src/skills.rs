@@ -170,6 +170,66 @@ pub fn discover(source: &Path) -> Result<Vec<Skill>, Error> {
     Ok(skills)
 }
 
+#[derive(Debug)]
+pub struct InvalidSkill {
+    pub path: PathBuf,
+    pub detail: String,
+}
+
+#[derive(Debug)]
+pub struct RecursiveDiscovery {
+    pub skills: Vec<Skill>,
+    pub invalid: Vec<InvalidSkill>,
+}
+
+/// Find every valid skill below `source` without following symlink directories.
+pub fn discover_recursive(source: &Path) -> Result<RecursiveDiscovery, Error> {
+    let source = source.canonicalize().map_err(|e| map_io(source, e))?;
+    let mut discovery = RecursiveDiscovery {
+        skills: Vec::new(),
+        invalid: Vec::new(),
+    };
+
+    fn walk(directory: &Path, discovery: &mut RecursiveDiscovery) -> Result<(), Error> {
+        let skill_file = directory.join("SKILL.md");
+        match fs::symlink_metadata(&skill_file) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {}
+            Ok(metadata) if metadata.is_file() => match read_skill(directory, false) {
+                Ok(skill) => discovery.skills.push(skill),
+                Err(error) => discovery.invalid.push(InvalidSkill {
+                    path: directory.to_path_buf(),
+                    detail: error.to_string(),
+                }),
+            },
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(map_io(&skill_file, error)),
+        }
+
+        let mut children = Vec::new();
+        for entry in fs::read_dir(directory).map_err(|error| map_io(directory, error))? {
+            let entry = entry.map_err(|error| map_io(directory, error))?;
+            let path = entry.path();
+            if path.file_name().and_then(|name| name.to_str()) == Some(".git") {
+                continue;
+            }
+            let metadata = fs::symlink_metadata(&path).map_err(|error| map_io(&path, error))?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                continue;
+            }
+            children.push(path);
+        }
+        children.sort();
+        for child in children {
+            walk(&child, discovery)?;
+        }
+        Ok(())
+    }
+
+    walk(&source, &mut discovery)?;
+    Ok(discovery)
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum EntryKind {
     Dir,

@@ -124,6 +124,7 @@ skill trees; catalog holds by-project **names** only.
 tink skill add ../my-skill
 tink skill add skill-name
 tink skill add owner/repository --skill skill-name
+tink skill add owner/repository --skill packages/group/skills/skill-name
 tink skill add jon-devlapaz/tink-skills --skill skill-eval-loop
 tink skillset add common-skillset
 tink skillset list
@@ -139,7 +140,11 @@ tink skill remove skill-name
 ```
 
 - Bare `skill-name` promotes from the library (`tink skill list --library`).
-- `--skill` when the source repo publishes several skills.
+- `--skill` recursively selects a unique skill name from a remote repository.
+  If that name occurs more than once, use the repository-relative path reported
+  by the error or by `tink inspect`.
+- GitHub tree URLs are inspection inputs, not `skill add` sources. Remote adds
+  follow the repository's default branch and record the selected skill path.
 - Refresh only clean GitHub imports; local edits are refused.
 - tink does not overwrite a project skill that differs from what it would
   install.

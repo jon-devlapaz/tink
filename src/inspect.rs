@@ -61,7 +61,36 @@ pub fn inspect(url: &str) -> Result<InspectionReport, Error> {
 
     let mut diagnostics = Vec::new();
     let mut discovered = Vec::new();
-    discover_skills(&checkout, &boundary, &mut discovered, &mut diagnostics)?;
+    let scan = skills::discover_recursive(&boundary)?;
+    for invalid in scan.invalid {
+        let relative_directory = relative_posix(&checkout, &invalid.path);
+        let skill_file = invalid.path.join("SKILL.md");
+        let relative_skill_file = format!("{relative_directory}/SKILL.md");
+        let detail = invalid
+            .detail
+            .replace(skill_file.to_string_lossy().as_ref(), &relative_skill_file);
+        diagnostics.push(format!(
+            "invalid SKILL.md at {relative_directory}: {detail}"
+        ));
+    }
+    for skill in scan.skills {
+        let path = relative_posix(&checkout, &skill.path);
+        let directory_name = skill
+            .path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("");
+        if skill.name != directory_name {
+            diagnostics.push(format!(
+                "skill name {} does not match directory {directory_name} at {path}",
+                skill.name
+            ));
+        }
+        discovered.push(DiscoveredSkill {
+            name: skill.name,
+            path,
+        });
+    }
     discovered.sort_by(|left, right| left.path.cmp(&right.path));
     diagnostics.extend(duplicate_diagnostics(&discovered));
     diagnostics.extend(overlap_diagnostics(&discovered));
@@ -204,86 +233,6 @@ fn valid_part(part: &str) -> bool {
         && part
             .chars()
             .all(|character| character.is_ascii_alphanumeric() || "_.-".contains(character))
-}
-
-fn discover_skills(
-    checkout: &Path,
-    directory: &Path,
-    discovered: &mut Vec<DiscoveredSkill>,
-    diagnostics: &mut Vec<String>,
-) -> Result<(), Error> {
-    let skill_file = directory.join("SKILL.md");
-    match fs::symlink_metadata(&skill_file) {
-        Ok(metadata) if metadata.file_type().is_symlink() => {}
-        Ok(metadata) if metadata.is_file() => match skills::read_skill(directory, false) {
-            Ok(skill) => discovered.push(DiscoveredSkill {
-                name: skill.name.clone(),
-                path: relative_posix(checkout, directory),
-            }),
-            Err(error) => {
-                let relative_directory = relative_posix(checkout, directory);
-                let relative_skill_file = format!("{relative_directory}/SKILL.md");
-                let detail = error
-                    .to_string()
-                    .replace(skill_file.to_string_lossy().as_ref(), &relative_skill_file);
-                diagnostics.push(format!(
-                    "invalid SKILL.md at {relative_directory}: {detail}"
-                ));
-            }
-        },
-        _ => {}
-    }
-
-    if let Some(name) = discovered
-        .last()
-        .filter(|skill| skill.path == relative_posix(checkout, directory))
-        .map(|skill| skill.name.as_str())
-    {
-        let directory_name = directory
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or("");
-        if name != directory_name {
-            diagnostics.push(format!(
-                "skill name {name} does not match directory {directory_name} at {}",
-                relative_posix(checkout, directory)
-            ));
-        }
-    }
-
-    let mut children = Vec::new();
-    for entry in fs::read_dir(directory).map_err(|error| {
-        Error::msg(format!(
-            "Could not read inspection boundary {}: {error}",
-            directory.display()
-        ))
-    })? {
-        let entry = entry.map_err(|error| {
-            Error::msg(format!(
-                "Could not inspect source {}: {error}",
-                directory.display()
-            ))
-        })?;
-        let path = entry.path();
-        if path.file_name().and_then(|name| name.to_str()) == Some(".git") {
-            continue;
-        }
-        let metadata = fs::symlink_metadata(&path).map_err(|error| {
-            Error::msg(format!(
-                "Could not inspect source {}: {error}",
-                path.display()
-            ))
-        })?;
-        if metadata.file_type().is_symlink() || !metadata.is_dir() {
-            continue;
-        }
-        children.push(path);
-    }
-    children.sort();
-    for child in children {
-        discover_skills(checkout, &child, discovered, diagnostics)?;
-    }
-    Ok(())
 }
 
 fn relative_posix(root: &Path, path: &Path) -> String {
