@@ -3111,6 +3111,61 @@ fn p6_refresh_identical_tree_new_revision_bumps_receipts() {
     assert!(archive_receipt.contains(&new_rev));
 }
 
+#[test]
+fn p8_refresh_all_preflights_before_updating_any_skill() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+
+    let remote = ws.root.join("remote-repo");
+    init_repo(&remote);
+    write_skill(&remote.join("skills/aaa-clean"), "aaa-clean", "v1");
+    write_skill(&remote.join("skills/zzz-dirty"), "zzz-dirty", "v1");
+    commit_all(&remote, "v1");
+    let public = "https://github.com/example/skills.git";
+    let redirect = github_redirect(&remote, public);
+
+    for name in ["aaa-clean", "zzz-dirty"] {
+        let mut add = ws.cmd(&project);
+        add.args(["skill", "add", "example/skills", "--skill", name]);
+        for (k, v) in &redirect {
+            add.env(k, v);
+        }
+        add.assert().success();
+    }
+
+    write_skill(&remote.join("skills/aaa-clean"), "aaa-clean", "v2");
+    write_skill(&remote.join("skills/zzz-dirty"), "zzz-dirty", "v2");
+    commit_all(&remote, "v2");
+
+    let dirty = Workspace::skill_path(&project, "zzz-dirty").join("SKILL.md");
+    let mut body = fs::read_to_string(&dirty).unwrap();
+    body.push_str("\nlocal edit\n");
+    fs::write(&dirty, body).unwrap();
+
+    let mut refresh = ws.cmd(&project);
+    refresh.args(["skill", "refresh"]);
+    for (k, v) in &redirect {
+        refresh.env(k, v);
+    }
+    refresh
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("local modifications"));
+
+    let clean =
+        fs::read_to_string(Workspace::skill_path(&project, "aaa-clean").join("SKILL.md")).unwrap();
+    assert!(clean.contains("v1"), "earlier skill must remain at v1");
+    assert!(
+        !clean.contains("v2"),
+        "refresh-all must not partially apply"
+    );
+    assert!(
+        fs::read_to_string(dirty).unwrap().contains("local edit"),
+        "dirty skill must remain untouched"
+    );
+}
+
 // --- D*: destroy ---
 
 #[test]
