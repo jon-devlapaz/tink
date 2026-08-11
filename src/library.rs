@@ -100,7 +100,16 @@ pub fn deposit(
     skill: &Skill,
     provenance: Option<&Provenance>,
 ) -> Result<(PathBuf, LibraryWrite), Error> {
-    let library = library_root(None)?;
+    deposit_at(None, skill, provenance)
+}
+
+pub(crate) fn deposit_at(
+    home: Option<&Path>,
+    skill: &Skill,
+    provenance: Option<&Provenance>,
+) -> Result<(PathBuf, LibraryWrite), Error> {
+    crate::skillsets::ensure_standalone_source(&skill.path, &skill.name)?;
+    let library = library_root(home)?;
     let target = library.join(&skill.name);
     if crate::skillsets::has_receipt_entry(&target) {
         return Err(Error::msg(format!(
@@ -126,13 +135,56 @@ pub fn deposit(
     }
 }
 
+/// Validate every existing library boundary a later [`deposit`] will touch.
+/// Divergent ordinary standalone entries are acceptable because deposit repairs
+/// them; symlinks, unsafe trees, and skillset ownership collisions are not.
+pub(crate) fn preflight_deposit(
+    skill: &Skill,
+    provenance: Option<&Provenance>,
+) -> Result<(), Error> {
+    preflight_deposit_at(None, skill, provenance)
+}
+
+pub(crate) fn preflight_deposit_at(
+    home: Option<&Path>,
+    skill: &Skill,
+    provenance: Option<&Provenance>,
+) -> Result<(), Error> {
+    crate::skillsets::ensure_standalone_source(&skill.path, &skill.name)?;
+    let library = library_root(home)?;
+    let target = library.join(&skill.name);
+    if crate::skillsets::has_receipt_entry(&target) {
+        return Err(Error::msg(format!(
+            "Library entry is a skillset; refusing standalone skill collision: {}",
+            skill.name
+        )));
+    }
+    let _ = skills::preflight_install(skill, &library, provenance)?;
+    Ok(())
+}
+
 /// Copy skill tree into the library only when missing or identical.
 ///
 /// Divergent trees are skipped (no repair). Unreadable/unsafe trees surface as
 /// [`CreateOnlyWrite::Skipped`] with the error detail — same create-only
 /// contract harvest used before this lived in `library`.
 pub fn deposit_create_only(skill: &Skill) -> Result<(PathBuf, CreateOnlyWrite), Error> {
-    let library = library_root(None)?;
+    deposit_create_only_at(None, skill)
+}
+
+fn deposit_create_only_at(
+    home: Option<&Path>,
+    skill: &Skill,
+) -> Result<(PathBuf, CreateOnlyWrite), Error> {
+    if let Err(error) = crate::skillsets::ensure_standalone_source(&skill.path, &skill.name) {
+        let home = match home {
+            Some(home) => home.to_path_buf(),
+            None => crate::home::resolve_home()?,
+        };
+        let target = skills_library_path(&home).join(&skill.name);
+        return Ok((target, CreateOnlyWrite::Skipped(Some(error.to_string()))));
+    }
+    let library = library_root(home)?;
     let target = library.join(&skill.name);
     match skills::preflight_install(skill, &library, None) {
         Err(err) => Ok((target, CreateOnlyWrite::Skipped(Some(err.to_string())))),
@@ -154,6 +206,7 @@ pub fn deposit_create_only(skill: &Skill) -> Result<(PathBuf, CreateOnlyWrite), 
 /// When the library already holds the exact standalone tree we would install, return it.
 /// Receipt-backed roots remain owned by the skillset lifecycle and are never cache hits.
 pub fn matching(skill: &Skill, provenance: Option<&Provenance>) -> Result<Option<Skill>, Error> {
+    crate::skillsets::ensure_standalone_source(&skill.path, &skill.name)?;
     let library = library_root(None)?;
     let target = library.join(&skill.name);
     if !target.is_dir() || crate::skillsets::has_receipt_entry(&target) {
@@ -218,10 +271,10 @@ pub fn for_remote_tip(
 
     let mut hits = Vec::new();
     for skill in iter_library_skills(&library)? {
-        if let Some(want) = selected_name {
-            if skill.name != want {
-                continue;
-            }
+        if let Some(want) = selected_name
+            && skill.name != want
+        {
+            continue;
         }
         let Ok(Some(provenance)) = provenance::read(&skill) else {
             continue;
@@ -263,6 +316,7 @@ pub fn preflight_refresh(
     new_skill: &Skill,
     new_provenance: &Provenance,
 ) -> Result<(), Error> {
+    crate::skillsets::ensure_standalone_source(&new_skill.path, &new_skill.name)?;
     let library = library_root(None)?;
     match skills::preflight_install(new_skill, &library, Some(new_provenance))? {
         PreflightOutcome::Ready
@@ -296,56 +350,28 @@ pub fn deposit_refresh(new_skill: &Skill, new_provenance: &Provenance) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::home::TINK_HOME_ENV;
-    use std::sync::{Mutex, MutexGuard, OnceLock};
     use tempfile::TempDir;
 
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
-
-    /// Isolates `TINK_HOME` for in-process library writes (serialized).
     struct TempHome {
         home: PathBuf,
         root: PathBuf,
         _temp: TempDir,
-        prev: Option<std::ffi::OsString>,
-        _guard: MutexGuard<'static, ()>,
     }
 
     impl TempHome {
         fn new() -> Self {
-            let guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
             let temp = TempDir::new().unwrap();
             let root = temp.path().to_path_buf();
             let home = root.join("tink-home");
-            let prev = std::env::var_os(TINK_HOME_ENV);
-            // SAFETY: exclusive via env_lock for all tests in this module.
-            unsafe { std::env::set_var(TINK_HOME_ENV, &home) };
             Self {
                 home,
                 root,
                 _temp: temp,
-                prev,
-                _guard: guard,
             }
         }
 
         fn library_skill(&self, name: &str) -> PathBuf {
             skills_library_path(&self.home).join(name)
-        }
-    }
-
-    impl Drop for TempHome {
-        fn drop(&mut self) {
-            // SAFETY: still holding env_lock via `_guard`.
-            unsafe {
-                match &self.prev {
-                    Some(value) => std::env::set_var(TINK_HOME_ENV, value),
-                    None => std::env::remove_var(TINK_HOME_ENV),
-                }
-            }
         }
     }
 
@@ -382,7 +408,7 @@ mod tests {
         let src = home.root.join("src").join("demo-skill");
         let skill = write_skill(&src, "demo-skill", "fresh body");
 
-        let (path, write) = deposit_create_only(&skill).unwrap();
+        let (path, write) = deposit_create_only_at(Some(&home.home), &skill).unwrap();
         assert_eq!(write, CreateOnlyWrite::Created);
         assert_eq!(path, home.library_skill("demo-skill"));
         assert!(skill_md(&path).contains("fresh body"));
@@ -432,12 +458,12 @@ mod tests {
         let skill = write_skill(&src, "demo-skill", "same body");
 
         assert_eq!(
-            deposit_create_only(&skill).unwrap().1,
+            deposit_create_only_at(Some(&home.home), &skill).unwrap().1,
             CreateOnlyWrite::Created
         );
         let before = skill_md(&home.library_skill("demo-skill"));
 
-        let (path, write) = deposit_create_only(&skill).unwrap();
+        let (path, write) = deposit_create_only_at(Some(&home.home), &skill).unwrap();
         assert_eq!(write, CreateOnlyWrite::Unchanged);
         assert_eq!(skill_md(&path), before);
     }
@@ -451,12 +477,14 @@ mod tests {
         let incoming = write_skill(&second, "demo-skill", "incoming body");
 
         assert_eq!(
-            deposit_create_only(&original).unwrap().1,
+            deposit_create_only_at(Some(&home.home), &original)
+                .unwrap()
+                .1,
             CreateOnlyWrite::Created
         );
         let before = skill_md(&home.library_skill("demo-skill"));
 
-        let (path, write) = deposit_create_only(&incoming).unwrap();
+        let (path, write) = deposit_create_only_at(Some(&home.home), &incoming).unwrap();
         assert!(
             matches!(write, CreateOnlyWrite::Skipped(Some(ref detail)) if detail.contains("create-only")),
             "{write:?}"
@@ -473,9 +501,12 @@ mod tests {
         let original = write_skill(&first, "demo-skill", "original body");
         let incoming = write_skill(&second, "demo-skill", "incoming body");
 
-        assert_eq!(deposit(&original, None).unwrap().1, LibraryWrite::Created);
+        assert_eq!(
+            deposit_at(Some(&home.home), &original, None).unwrap().1,
+            LibraryWrite::Created
+        );
 
-        let (path, write) = deposit(&incoming, None).unwrap();
+        let (path, write) = deposit_at(Some(&home.home), &incoming, None).unwrap();
         assert_eq!(write, LibraryWrite::Repaired);
         assert!(skill_md(&path).contains("incoming body"));
         assert!(!skill_md(&path).contains("original body"));
@@ -489,7 +520,9 @@ mod tests {
         let provenance = sample_provenance();
 
         assert_eq!(
-            deposit(&skill, Some(&provenance)).unwrap().1,
+            deposit_at(Some(&home.home), &skill, Some(&provenance))
+                .unwrap()
+                .1,
             LibraryWrite::Created
         );
         let library = home.library_skill("demo-skill");
@@ -497,7 +530,7 @@ mod tests {
         let before = skill_md(&library);
 
         // Incoming tree matches body but has no receipt — create-only must not rewrite.
-        let (path, write) = deposit_create_only(&skill).unwrap();
+        let (path, write) = deposit_create_only_at(Some(&home.home), &skill).unwrap();
         assert_eq!(write, CreateOnlyWrite::Unchanged);
         assert_eq!(skill_md(&path), before);
         assert!(path.join(".tink-source.json").is_file());

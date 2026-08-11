@@ -15,17 +15,19 @@ use crate::sources;
 use tempfile::TempDir;
 
 fn skill_at(repository: &Path, source_path: &str) -> Result<PathBuf, Error> {
-    let mut path = repository.to_path_buf();
+    let mut relative = PathBuf::from(".");
     if source_path != "." {
+        relative.clear();
         for part in source_path.split('/') {
             if part.is_empty() || part == "." || part == ".." {
                 return Err(Error::msg(format!(
                     "Upstream skill path is missing: {source_path}"
                 )));
             }
-            path.push(part);
+            relative.push(part);
         }
     }
+    let path = crate::paths::canonicalize_beneath(repository, &relative)?;
     if !path.is_dir() {
         return Err(Error::msg(format!(
             "Upstream skill path is missing: {source_path}"
@@ -212,4 +214,27 @@ pub fn refresh_all(root: &Path) -> Result<Vec<String>, Error> {
         }
     }
     Ok(refreshed)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn skill_at_refuses_symlinked_ancestor() {
+        let temp = tempfile::tempdir().unwrap();
+        let repository = temp.path().join("repository");
+        let outside = temp.path().join("outside");
+        fs::create_dir_all(&repository).unwrap();
+        fs::create_dir_all(outside.join("skills/alpha")).unwrap();
+        std::os::unix::fs::symlink(&outside, repository.join("jump")).unwrap();
+
+        let error = skill_at(&repository, "jump/skills/alpha")
+            .expect_err("ancestor symlink must be refused");
+
+        assert!(error.to_string().contains("symlink"), "{error}");
+    }
 }

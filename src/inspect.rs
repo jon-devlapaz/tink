@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::Error;
 use crate::git;
+use crate::output;
 use crate::skills;
 use crate::sources::RemoteSource;
 
@@ -40,24 +41,34 @@ pub struct InspectionReport {
     pub diagnostics: Vec<String>,
 }
 
+fn inspection_boundary(checkout: &Path, relative: &Path) -> Result<PathBuf, Error> {
+    let boundary = if relative.as_os_str().is_empty() {
+        checkout
+            .canonicalize()
+            .map_err(|error| crate::paths::map_io(checkout, error))?
+    } else {
+        crate::paths::canonicalize_beneath(checkout, relative).map_err(|error| {
+            Error::msg(format!(
+                "Inspection boundary {} is invalid: {error}",
+                output::display_path(relative)
+            ))
+        })?
+    };
+    if !boundary.is_dir() {
+        return Err(Error::msg(format!(
+            "Inspection boundary is not a directory: {}",
+            output::display_path(relative)
+        )));
+    }
+    Ok(boundary)
+}
+
 pub fn inspect(url: &str) -> Result<InspectionReport, Error> {
     let parsed = parse_url(url)?;
     reject_ambiguous_ref(&parsed)?;
     let (_temp, checkout, revision) =
         git::checkout_ref(&parsed.remote, parsed.requested_ref.as_deref())?;
-    let boundary = checkout.join(&parsed.boundary);
-    let metadata = fs::symlink_metadata(&boundary).map_err(|_| {
-        Error::msg(format!(
-            "Inspection boundary does not exist: {}",
-            parsed.boundary_display
-        ))
-    })?;
-    if !metadata.is_dir() {
-        return Err(Error::msg(format!(
-            "Inspection boundary is not a directory: {}",
-            parsed.boundary_display
-        )));
-    }
+    let boundary = inspection_boundary(&checkout, &parsed.boundary)?;
 
     let mut diagnostics = Vec::new();
     let mut discovered = Vec::new();
@@ -81,6 +92,7 @@ pub fn inspect(url: &str) -> Result<InspectionReport, Error> {
             .and_then(|value| value.to_str())
             .unwrap_or("");
         if skill.name != directory_name {
+            let directory_name = output::escape_untrusted(directory_name);
             diagnostics.push(format!(
                 "skill name {} does not match directory {directory_name} at {path}",
                 skill.name
@@ -94,13 +106,7 @@ pub fn inspect(url: &str) -> Result<InspectionReport, Error> {
     discovered.sort_by(|left, right| left.path.cmp(&right.path));
     diagnostics.extend(duplicate_diagnostics(&discovered));
     diagnostics.extend(overlap_diagnostics(&discovered));
-    let skillsets = infer_skillsets(
-        &checkout,
-        &parsed.boundary,
-        &boundary,
-        &discovered,
-        &mut diagnostics,
-    )?;
+    let skillsets = infer_skillsets(&checkout, &boundary, &discovered, &mut diagnostics)?;
     for skillset in &skillsets {
         if skillset.name.is_none() && skillset.path != "." {
             diagnostics.push(format!(
@@ -236,10 +242,12 @@ fn valid_part(part: &str) -> bool {
 }
 
 fn relative_posix(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
+    let relative = path.strip_prefix(root).unwrap_or(path).to_string_lossy();
+    #[cfg(windows)]
+    let relative = relative.replace('\\', "/");
+    #[cfg(not(windows))]
+    let relative = relative.into_owned();
+    output::escape_untrusted(&relative)
 }
 
 fn duplicate_diagnostics(skills: &[DiscoveredSkill]) -> Vec<String> {
@@ -271,12 +279,11 @@ fn overlap_diagnostics(skills: &[DiscoveredSkill]) -> Vec<String> {
 
 fn infer_skillsets(
     checkout: &Path,
-    boundary_path: &Path,
     boundary: &Path,
     skills: &[DiscoveredSkill],
     diagnostics: &mut Vec<String>,
 ) -> Result<Vec<InferredSkillset>, Error> {
-    let boundary_prefix = relative_posix(checkout, &checkout.join(boundary_path));
+    let boundary_prefix = relative_posix(checkout, boundary);
     if skills.iter().any(|skill| skill.path == boundary_prefix) {
         return Ok(Vec::new());
     }
@@ -338,7 +345,7 @@ fn infer_skillsets(
             .iter()
             .next()
             .expect("descendants length checked");
-        return infer_skillsets(checkout, child, child, skills, diagnostics);
+        return infer_skillsets(checkout, child, skills, diagnostics);
     }
     diagnostics.push("skillsets could not be inferred from this boundary".to_string());
     Ok(Vec::new())
@@ -406,6 +413,27 @@ fn regular_children(directory: &Path) -> Result<Vec<PathBuf>, Error> {
         }
     }
     Ok(children)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn inspection_boundary_refuses_symlinked_ancestor() {
+        let temp = tempfile::tempdir().unwrap();
+        let checkout = temp.path().join("checkout");
+        let outside = temp.path().join("outside");
+        fs::create_dir_all(&checkout).unwrap();
+        fs::create_dir_all(outside.join("skills")).unwrap();
+        std::os::unix::fs::symlink(&outside, checkout.join("jump")).unwrap();
+
+        let error = inspection_boundary(&checkout, Path::new("jump/skills"))
+            .expect_err("ancestor symlink must be refused");
+
+        assert!(error.to_string().contains("symlink"), "{error}");
+    }
 }
 
 mod url_lite {

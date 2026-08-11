@@ -45,9 +45,12 @@ pub fn load_project_skills(root: &Path) -> Result<Vec<Skill>, Error> {
 
     let mut entries: Vec<_> = fs::read_dir(&skills_root)
         .map_err(|e| map_io(&skills_root, e))?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .collect();
+        .map(|entry| {
+            entry
+                .map(|entry| entry.path())
+                .map_err(|e| map_io(&skills_root, e))
+        })
+        .collect::<Result<_, _>>()?;
     entries.sort();
 
     let mut skills = Vec::new();

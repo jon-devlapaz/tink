@@ -75,14 +75,20 @@ by hand.
 After adding or changing project skills, check for `.tink/skills.toml` and
 `.tink/skills.lock`. If absent, ask whether the user wants a reproducible
 manifest. Only after approval, run `tink skill lock`, supplying
-`--source NAME=PATH` for each local skill. If both files already exist, use
-`tink skill sync` only when the user requested restoration.
+`--source NAME=PATH` for each local skill. If `skill verify` reports a legacy
+version-1 lock digest, ask before rerunning `skill lock`; that explicit relock
+rewrites version 2 and includes raw Unix path bytes and portable executable modes. If
+both files already exist, use `tink skill sync` only when the user requested
+restoration.
 
 **Expected:** Manifest files are created or synchronized only with explicit
 approval; divergent content remains untouched.
 
 **On failure:** Report missing local source mappings or divergence and stop.
-Do not guess a source or overwrite a project tree.
+Do not guess a source or overwrite a project tree. If an unexpected operational
+error interrupted sequential sync publication, report the potentially partial
+state and explain that rerunning the same idempotent `tink skill sync` is the
+recovery path; ask before retrying.
 
 ### Step 5: Configure Shell Completion When Requested
 
@@ -118,8 +124,9 @@ was removed. Do not conceal a partially completed replacement.
 - After `skillset remove`, run `tink skillset list`; its definition and library
   copy should remain.
 - After `skill lock`, run `tink skill verify`.
-- After `destroy`, confirm `.agents/`, `ZEN.md`, and `AGENTS.md` are gone and
-  the project has no catalog rows; do not run `skill check`.
+- After `destroy`, confirm `.agents/skills/` is gone, `.agents/` is gone only if
+  it became empty, `ZEN.md` and `AGENTS.md` are preserved, unrelated `.agents/`
+  siblings remain, and the project has no catalog rows; do not run `skill check`.
 
 **Expected:** The proof matching the mutation is reported to the user.
 
@@ -138,6 +145,8 @@ from the mutation command alone.
 
 - Treating the home library as an agent discovery root.
 - Treating a receipt-backed library skillset as a standalone skill.
+- Treating a source with a regular or dangling `.tink-skillset.json` entry as a
+  standalone skill; use `tink skillset add NAME-skillset` instead.
 - Inferring a skillset suffix or definition from inspection output.
 - Combining a binary update with project-skill replacement without approval.
 - Hand-editing receipts, catalog metadata, or divergent managed trees.
@@ -165,7 +174,7 @@ from the mutation command alone.
 | Re-embed manage-tink | `tink skill remove manage-tink`, then `tink init --no-zen --no-tink-skills` |
 | Remove one project skill | `tink skill remove NAME` |
 | Update the Tink binary | `tink update` only; re-embedding requires separate authority |
-| Remove scaffolding / destroy Tink setup | `tink destroy` (TTY) or `tink destroy --yes` (scripts) |
+| Remove managed project skills / destroy Tink setup | `tink destroy` (TTY) or `tink destroy --yes` (scripts); guidance and unrelated `.agents/` siblings are preserved |
 
 "Set up Tink" does **not** authorize ZEN, tink-skills, re-embedding, or destroy.
 
@@ -180,8 +189,9 @@ from the mutation command alone.
     from the by-project catalog
   - `tink skillset remove NAME-skillset` → only the receipt-backed project
     skillset tree; preserves its catalog definition and library copy
-  - `tink destroy` → `.agents/`, `ZEN.md`, and `AGENTS.md`, and drops this
-    project's by-project catalog entry
+  - `tink destroy` → `.agents/skills/`, then `.agents/` only if empty, and
+    drops this project's by-project catalog entry; preserves `ZEN.md`,
+    `AGENTS.md`, and unrelated `.agents/` siblings
 - Treat local skills as non-refreshable unless they carry a valid receipt.
 - Never execute code from a skill while Tink manages it.
 - Library (`~/.tink/skills/`) is **not** an agent discovery root; use
@@ -190,3 +200,5 @@ from the mutation command alone.
   `.agents/skills/NAME-skillset/<member>/SKILL.md`; each member remains a valid
   named skill. Never flatten, merge, or manually copy members.
 - Do not prune the library by hand. Project removals preserve library trees.
+- Do not run concurrent Tink mutations against one project or shared Tink home;
+  Tink has no inter-process lock.

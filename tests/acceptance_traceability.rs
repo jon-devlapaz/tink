@@ -20,7 +20,7 @@ fn contract_id(value: &str) -> Option<String> {
 fn sensor_override(expectation: &str) -> Option<Option<String>> {
     let (_, suffix) = expectation.split_once("Sensor: ")?;
     let value = suffix
-        .split(|ch: char| ch == '.' || ch == ' ' || ch == ')')
+        .split(['.', ' ', ')'])
         .next()
         .expect("sensor marker has a value");
     if value.eq_ignore_ascii_case("manual") {

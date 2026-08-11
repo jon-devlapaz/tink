@@ -15,7 +15,9 @@ mod inspect;
 mod library;
 mod manage_tink;
 mod manifest;
+mod output;
 mod paths;
+mod process;
 mod provenance;
 mod refresh;
 mod remove;
@@ -39,6 +41,23 @@ use std::process::ExitCode;
 use crate::error::Error;
 use crate::init::InitOptions;
 use crate::style::CliStyle;
+
+// This dispatch module is intentionally output-heavy. Shadow the infallible
+// standard macros here so every write is propagated through the CLI error path.
+macro_rules! println {
+    () => {
+        crate::output::stdout_line(format_args!(""))?
+    };
+    ($($arg:tt)*) => {
+        crate::output::stdout_line(format_args!($($arg)*))?
+    };
+}
+
+macro_rules! eprintln {
+    ($($arg:tt)*) => {
+        crate::output::warning_line(format_args!($($arg)*))
+    };
+}
 
 #[derive(Debug, Parser)]
 #[command(
@@ -87,13 +106,13 @@ pub enum Command {
     },
     /// Inspect skills and source-defined skillsets in a public GitHub URL
     Inspect { url: String },
-    /// Remove `.agents/`, `ZEN.md`, `AGENTS.md`, and this project's catalog entry (not library)
+    /// Remove `.agents/skills/`, an empty `.agents/`, and this project's catalog entry (not guidance or library)
     Destroy {
         /// Skip the confirmation prompt
         #[arg(long)]
         yes: bool,
     },
-    /// Replace this binary with the latest GitHub Release
+    /// Replace this binary with a newer verified GitHub Release
     Update,
 }
 
@@ -188,10 +207,15 @@ fn flag_tri(yes: bool, no: bool) -> Option<bool> {
 pub fn run(cli: Cli, cwd: PathBuf) -> ExitCode {
     match dispatch(cli, cwd) {
         Ok(()) => ExitCode::SUCCESS,
+        Err(err) if err.is_stdout_broken_pipe() => ExitCode::SUCCESS,
         Err(err) => {
             let style = CliStyle::auto_stderr();
-            eprintln!("{}", style.error(&err));
-            ExitCode::from(1)
+            match output::stderr_line(format_args!("{}", style.error(&err))) {
+                Ok(()) => ExitCode::from(1),
+                // Downstream closure is expected for CLI pipelines. Never convert
+                // it into Rust's default printing panic / exit status 101.
+                Err(_) => ExitCode::from(1),
+            }
         }
     }
 }
@@ -232,7 +256,7 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
         }
         Command::Update => {
             let report = update::update_binary()?;
-            update::print_report(&report);
+            update::print_report(&report)?;
             Ok(())
         }
     }
@@ -470,10 +494,10 @@ fn dispatch_init(
         );
     }
     if let Some(skill) = &report.manage_tink_added {
-        print_init_skill(&style, skill);
+        print_init_skill(&style, skill)?;
     }
     for skill in &report.tink_skills_added {
-        print_init_skill(&style, skill);
+        print_init_skill(&style, skill)?;
     }
     if report.inventory_created {
         println!(
@@ -491,7 +515,7 @@ fn dispatch_init(
     Ok(())
 }
 
-fn print_init_skill(style: &CliStyle, skill: &init::InstalledSkill) {
+fn print_init_skill(style: &CliStyle, skill: &init::InstalledSkill) -> Result<(), Error> {
     if skill.created {
         println!("{} {}", style.success("Added"), style.skill(&skill.name));
     } else {
@@ -501,6 +525,7 @@ fn print_init_skill(style: &CliStyle, skill: &init::InstalledSkill) {
             style.skill(&skill.name)
         );
     }
+    Ok(())
 }
 
 fn dispatch_skill_add(cwd: &Path, source: &str, skill: Option<&str>) -> Result<(), Error> {
@@ -590,26 +615,26 @@ fn dispatch_skill_list(cwd: &Path) -> Result<(), Error> {
 fn dispatch_skill_list_catalog() -> Result<(), Error> {
     let style = CliStyle::auto_stdout();
     let entries = catalog::list_catalog(None)?;
-    if entries.is_empty() {
-        println!("{}", style.muted("(no catalog entries)"));
-    } else {
-        // Header + TSV rows: plain when piped; lightly role-colored on a TTY.
+    // Header + TSV rows: plain when piped; lightly role-colored on a TTY.
+    println!(
+        "{}\t{}\t{}",
+        style.muted("project"),
+        style.muted("root"),
+        style.muted("skill")
+    );
+    for entry in &entries {
         println!(
             "{}\t{}\t{}",
-            style.muted("project"),
-            style.muted("root"),
-            style.muted("skill")
+            style.muted(tsv_field(&entry.project)),
+            style.muted(tsv_field(&entry.root)),
+            style.skill(tsv_field(&entry.skill))
         );
-        for entry in &entries {
-            println!(
-                "{}\t{}\t{}",
-                style.muted(&entry.project),
-                style.muted(&entry.root),
-                style.skill(&entry.skill)
-            );
-        }
     }
     Ok(())
+}
+
+fn tsv_field(value: &str) -> String {
+    output::escape_untrusted(value)
 }
 
 fn dispatch_skill_list_library() -> Result<(), Error> {

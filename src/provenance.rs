@@ -5,6 +5,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::error::Error;
+use crate::output;
 use crate::paths::{map_io, refuse_symlink};
 use crate::skills::Skill;
 use crate::sources;
@@ -49,7 +50,7 @@ pub fn read(skill: &Skill) -> Result<Option<Provenance>, Error> {
     if !sidecar.is_file() {
         return Err(Error::msg(format!(
             "Provenance must be a regular file: {}",
-            sidecar.display()
+            output::display_path(&sidecar)
         )));
     }
     let text = fs::read_to_string(&sidecar).map_err(|e| map_io(&sidecar, e))?;
@@ -71,13 +72,13 @@ pub fn read(skill: &Skill) -> Result<Option<Provenance>, Error> {
         let Some(serde_json::Value::String(s)) = obj.get(key) else {
             return Err(Error::msg(format!(
                 "Provenance fields must be non-empty strings: {}",
-                sidecar.display()
+                output::display_path(&sidecar)
             )));
         };
         if s.is_empty() {
             return Err(Error::msg(format!(
                 "Provenance fields must be non-empty strings: {}",
-                sidecar.display()
+                output::display_path(&sidecar)
             )));
         }
         provenance.insert(key.into(), s.clone());
@@ -86,7 +87,7 @@ pub fn read(skill: &Skill) -> Result<Option<Provenance>, Error> {
     if source.url != provenance["source"] {
         return Err(Error::msg(format!(
             "Provenance source must be a canonical GitHub HTTPS URL: {}",
-            sidecar.display()
+            output::display_path(&sidecar)
         )));
     }
     let revision = &provenance["revision"];
@@ -95,14 +96,14 @@ pub fn read(skill: &Skill) -> Result<Option<Provenance>, Error> {
     {
         return Err(Error::msg(format!(
             "Provenance revision must be a full Git object ID: {}",
-            sidecar.display()
+            output::display_path(&sidecar)
         )));
     }
     let path = &provenance["path"];
     if path.starts_with('/') || path.contains("..") || path.contains('\\') {
         return Err(Error::msg(format!(
             "Provenance path must be normalized and relative: {}",
-            sidecar.display()
+            output::display_path(&sidecar)
         )));
     }
     Ok(Some(provenance))

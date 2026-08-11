@@ -5,16 +5,15 @@ use std::path::Path;
 use crate::add;
 use crate::error::Error;
 use crate::paths::map_io;
+use crate::skills::{self, Skill};
 
 const SKILL_MD: &str = include_str!("../skills/manage-tink/SKILL.md");
 const OPENAI_YAML: &str = include_str!("../skills/manage-tink/agents/openai.yaml");
 const COMMANDS_MD: &str = include_str!("../skills/manage-tink/references/commands.md");
 
-/// Stage the embedded skill and install it into the project via `add`.
-///
-/// Uses the quiet add path so init can own the closing narrative.
-/// Returns the install outcome (name + whether the project tree was created).
-pub fn install_manage_tink(project_root: &Path) -> Result<add::AddOutcome, Error> {
+/// Materialize the embedded tree for read-only validation or later publication.
+/// The returned guard owns the bytes referenced by `Skill`.
+pub(crate) fn prepare_manage_tink() -> Result<(tempfile::TempDir, Skill), Error> {
     let staging = tempfile::Builder::new()
         .prefix(".tink-manage-tink-")
         .tempdir()
@@ -30,9 +29,20 @@ pub fn install_manage_tink(project_root: &Path) -> Result<add::AddOutcome, Error
         .map_err(|e| map_io(&agents.join("openai.yaml"), e))?;
     std::fs::write(references.join("commands.md"), COMMANDS_MD)
         .map_err(|e| map_io(&references.join("commands.md"), e))?;
+    let skill = skills::read_skill(&skill_root, true)?;
+    Ok((staging, skill))
+}
+
+/// Stage the embedded skill and install it into the project via `add`.
+///
+/// Uses the quiet add path so init can own the closing narrative.
+/// Returns the install outcome (name + whether the project tree was created).
+pub fn install_manage_tink(project_root: &Path) -> Result<add::AddOutcome, Error> {
+    let (_staging, skill) = prepare_manage_tink()?;
     add::add_skill_quiet(
         project_root,
-        skill_root
+        skill
+            .path
             .to_str()
             .ok_or_else(|| Error::msg("manage-tink path is not UTF-8"))?,
         None,

@@ -1,12 +1,13 @@
 //! Minimal project skill home: `.agents/skills/` (+ optional ZEN / tink-skills / manage-tink).
 
-use std::io::{self, BufRead, IsTerminal, Write};
+use std::io::{self, BufRead, IsTerminal};
 use std::path::{Path, PathBuf};
 
 use crate::add;
 use crate::error::Error;
 use crate::home;
 use crate::manage_tink;
+use crate::output;
 use crate::paths::{map_io, mkdir_p, require_directory, require_file};
 use crate::style::CliStyle;
 use crate::templates::{
@@ -60,12 +61,10 @@ pub fn opt_in(explicit: Option<bool>, question: &str, hint: Option<&str>) -> Res
     }
     let style = CliStyle::auto_stdout();
     if let Some(hint) = hint {
-        println!("{}", style.muted(hint));
+        output::stdout_line(format_args!("{}", style.muted(hint)))?;
     }
-    print!("{} {}", question, style.accent("[y/N] "));
-    io::stdout()
-        .flush()
-        .map_err(|e| Error::msg(format!("prompt: {e}")))?;
+    output::stdout(format_args!("{} {}", question, style.accent("[y/N] ")))?;
+    output::flush_stdout()?;
     let mut line = String::new();
     io::stdin()
         .lock()
@@ -94,11 +93,9 @@ fn opt_in_zen(explicit: Option<bool>) -> Result<bool, Error> {
     let hint = format!("{r} = print {zen} without adding it");
     let choices = format!("[{}/{}/{}] ", style.accent("y"), style.accent("N"), r);
     loop {
-        println!("{hint}");
-        print!("{question} {choices}");
-        io::stdout()
-            .flush()
-            .map_err(|e| Error::msg(format!("prompt: {e}")))?;
+        output::stdout_line(format_args!("{hint}"))?;
+        output::stdout(format_args!("{question} {choices}"))?;
+        output::flush_stdout()?;
         let mut line = String::new();
         io::stdin()
             .lock()
@@ -108,9 +105,9 @@ fn opt_in_zen(explicit: Option<bool>) -> Result<bool, Error> {
         match answer.as_str() {
             "y" | "yes" => return Ok(true),
             "r" | "read" => {
-                println!();
-                println!("{}", style.muted(ZEN.trim_end()));
-                println!();
+                output::stdout_line(format_args!(""))?;
+                output::stdout_line(format_args!("{}", style.muted(ZEN.trim_end())))?;
+                output::stdout_line(format_args!(""))?;
             }
             _ => return Ok(false),
         }

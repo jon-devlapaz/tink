@@ -17,7 +17,7 @@ pub enum AddSource {
 pub enum LockedSource {
     LocalPath {
         declared: String,
-        path: PathBuf,
+        project_root: PathBuf,
     },
     Github {
         remote: RemoteSource,
@@ -126,7 +126,7 @@ pub fn classify_locked(
     normalize_project_path(Path::new(source), name)?;
     Ok(LockedSource::LocalPath {
         declared: source.to_string(),
-        path: project_root.join(source),
+        project_root: project_root.to_path_buf(),
     })
 }
 
@@ -230,20 +230,19 @@ fn github_part_ok(part: &str) -> bool {
 
 /// Parse `owner/repo` or `https://github.com/owner/repo[.git]`.
 pub fn parse_remote(value: &str) -> Result<RemoteSource, Error> {
-    if let Some((owner, repo)) = value.split_once('/') {
-        if !value.contains("://")
-            && !value.contains('@')
-            && github_part_ok(owner)
-            && github_part_ok(repo.trim_end_matches(".git"))
-            && !owner.is_empty()
-            && value.matches('/').count() == 1
-        {
-            let repo = repo.trim_end_matches(".git");
-            return Ok(RemoteSource {
-                display: value.to_string(),
-                url: format!("https://github.com/{owner}/{repo}.git"),
-            });
-        }
+    if let Some((owner, repo)) = value.split_once('/')
+        && !value.contains("://")
+        && !value.contains('@')
+        && github_part_ok(owner)
+        && github_part_ok(repo.trim_end_matches(".git"))
+        && !owner.is_empty()
+        && value.matches('/').count() == 1
+    {
+        let repo = repo.trim_end_matches(".git");
+        return Ok(RemoteSource {
+            display: value.to_string(),
+            url: format!("https://github.com/{owner}/{repo}.git"),
+        });
     }
 
     let err = || Error::msg("Remote sources must be public GitHub HTTPS URLs or owner/repository");
@@ -373,7 +372,7 @@ mod tests {
         let root = Path::new("/project");
         assert!(matches!(
             classify_locked(root, "local-skill", "owner/repo-shape", None, None).unwrap(),
-            LockedSource::LocalPath { path, .. } if path == root.join("owner/repo-shape")
+            LockedSource::LocalPath { project_root, .. } if project_root == root
         ));
     }
 }
