@@ -216,6 +216,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | P5 | `skill refresh` when library body diverges from project | Exit ≠ 0; "library diverges"; project unchanged |
 | P6 | `skill refresh` when upstream revision moves but skill tree bytes match | Exit 0; bumps project + library receipts |
 | P7 | `skill refresh` when project already at HEAD but library is stale | Exit 0; repairs library from project |
+| P8 | `skill refresh` for all when a later imported skill has local modifications | Exit ≠ 0; no project skill is updated |
 
 ### Remove
 

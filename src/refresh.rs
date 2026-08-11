@@ -46,11 +46,35 @@ fn checkout_reference_skill(
     Ok((checkout, Some(temp)))
 }
 
-/// Returns whether the installed skill tree changed (receipt-only bumps are false).
-fn refresh_one(installed: &Skill) -> Result<Option<bool>, Error> {
+enum RefreshPlan {
+    Local {
+        name: String,
+    },
+    Unchanged {
+        installed: Skill,
+    },
+    Update {
+        installed: Skill,
+        new_skill: Skill,
+        next: Provenance,
+        tree_changed: bool,
+        _clone_temp: TempDir,
+    },
+}
+
+impl RefreshPlan {
+    fn name(&self) -> &str {
+        match self {
+            Self::Local { name } => name,
+            Self::Unchanged { installed } | Self::Update { installed, .. } => &installed.name,
+        }
+    }
+}
+
+fn prepare_refresh(installed: Skill) -> Result<RefreshPlan, Error> {
     let name = installed.name.clone();
-    let Some(provenance) = provenance::read(installed)? else {
-        return Ok(None);
+    let Some(provenance) = provenance::read(&installed)? else {
+        return Ok(RefreshPlan::Local { name });
     };
     let remote = sources::parse_remote(&provenance["source"])?;
     let destination_root = installed
@@ -60,7 +84,7 @@ fn refresh_one(installed: &Skill) -> Result<Option<bool>, Error> {
         .to_path_buf();
 
     // Keep clone (and optional worktree) alive for the whole update.
-    let (_clone_temp, current_repository, current_revision) = git::checkout(&remote)?;
+    let (clone_temp, current_repository, current_revision) = git::checkout(&remote)?;
     let current_repository = current_repository
         .canonicalize()
         .map_err(|e| Error::msg(format!("repository: {e}")))?;
@@ -93,9 +117,7 @@ fn refresh_one(installed: &Skill) -> Result<Option<bool>, Error> {
     }
 
     if current_revision == provenance["revision"] {
-        // No upstream move — still keep the library honest.
-        library::sync_from_installed(installed)?;
-        return Ok(Some(false));
+        return Ok(RefreshPlan::Unchanged { installed });
     }
 
     let new_skill = skills::read_skill(
@@ -114,9 +136,40 @@ fn refresh_one(installed: &Skill) -> Result<Option<bool>, Error> {
 
     let tree_changed = !skills::skill_contents_equal(&old_skill.path, &new_skill.path)?;
     library::preflight_refresh(&installed.path, &new_skill, &next)?;
-    let _installed = skills::replace_verified(&new_skill, &destination_root, &next)?;
-    library::deposit_refresh(&new_skill, &next)?;
-    Ok(Some(tree_changed))
+    Ok(RefreshPlan::Update {
+        installed,
+        new_skill,
+        next,
+        tree_changed,
+        _clone_temp: clone_temp,
+    })
+}
+
+/// Returns whether the installed skill tree changed (receipt-only bumps are false).
+fn apply_refresh(plan: RefreshPlan) -> Result<Option<bool>, Error> {
+    match plan {
+        RefreshPlan::Local { .. } => Ok(None),
+        RefreshPlan::Unchanged { installed } => {
+            // No upstream move — still keep the library honest.
+            library::sync_from_installed(&installed)?;
+            Ok(Some(false))
+        }
+        RefreshPlan::Update {
+            installed,
+            new_skill,
+            next,
+            tree_changed,
+            ..
+        } => {
+            let destination_root = installed
+                .path
+                .parent()
+                .ok_or_else(|| Error::msg("skill has no parent"))?;
+            let _installed = skills::replace_verified(&new_skill, destination_root, &next)?;
+            library::deposit_refresh(&new_skill, &next)?;
+            Ok(Some(tree_changed))
+        }
+    }
 }
 
 pub fn refresh_skill(root: &Path, name: &str) -> Result<bool, Error> {
@@ -127,7 +180,7 @@ pub fn refresh_skill(root: &Path, name: &str) -> Result<bool, Error> {
     let installed = skills
         .get(name)
         .ok_or_else(|| Error::msg(format!("Installed skill not found: {name}")))?;
-    match refresh_one(installed)? {
+    match apply_refresh(prepare_refresh(installed.clone())?)? {
         None => Err(Error::msg(format!(
             "Local skill has no remote source: {name}"
         ))),
@@ -140,15 +193,20 @@ pub fn refresh_skill(root: &Path, name: &str) -> Result<bool, Error> {
 
 pub fn refresh_all(root: &Path) -> Result<Vec<String>, Error> {
     let installed = check::check_project(root)?;
+    let plans = installed
+        .into_iter()
+        .map(prepare_refresh)
+        .collect::<Result<Vec<_>, _>>()?;
     let mut refreshed = Vec::new();
-    for skill in &installed {
-        match refresh_one(skill)? {
+    for plan in plans {
+        let name = plan.name().to_string();
+        match apply_refresh(plan)? {
             Some(true) => {
-                catalog::deposit_skill(root, &skill.name)?;
-                refreshed.push(skill.name.clone());
+                catalog::deposit_skill(root, &name)?;
+                refreshed.push(name);
             }
             Some(false) => {
-                catalog::deposit_skill(root, &skill.name)?;
+                catalog::deposit_skill(root, &name)?;
             }
             None => {}
         }
