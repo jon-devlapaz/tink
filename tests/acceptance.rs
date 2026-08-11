@@ -4776,6 +4776,99 @@ fn u15_update_interrupt_kills_candidate_group_and_preserves_binary() {
 
 #[cfg(unix)]
 #[test]
+fn u16_update_output_escapes_terminal_controls_in_binary_path() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let ws = Workspace::new();
+    let fixture = ws.root.join("escaped-update-output-fixture");
+    fs::create_dir_all(&fixture).unwrap();
+    let version = package_version();
+    let bin = assert_cmd::cargo::cargo_bin!("tink");
+    let metadata = write_release_fixture(&fixture, &version, bin);
+    let install_dir = ws.root.join("install\u{1b}[31m\nrow");
+    fs::create_dir_all(&install_dir).unwrap();
+    let installed = install_dir.join("tink");
+    fs::copy(bin, &installed).unwrap();
+    fs::set_permissions(&installed, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let output = StdCommand::new(&installed)
+        .arg("update")
+        .env("NO_COLOR", "1")
+        .env("TINK_HOME", &ws.inventory)
+        .env(
+            "TINK_RELEASES_API",
+            format!("file://{}", metadata.display()),
+        )
+        .output()
+        .expect("run updater from control-bearing path");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "update failed: {stdout:?}");
+    assert!(
+        !output.stdout.contains(&0x1b),
+        "raw ESC in stdout: {stdout:?}"
+    );
+    assert_eq!(
+        output.stdout.iter().filter(|byte| **byte == b'\n').count(),
+        1
+    );
+    assert!(stdout.contains("install\\x1b[31m\\nrow"), "{stdout:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn u17_install_script_rejects_probe_output_over_capture_limit() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+
+    let ws = Workspace::new();
+    let fixture = ws.root.join("overflowing-probe-release-fixture");
+    fs::create_dir_all(&fixture).unwrap();
+    let candidate = fixture.join("overflowing-tink");
+    fs::write(
+        &candidate,
+        b"#!/bin/sh\nprintf started > \"$TINK_PROBE_STARTED\"\npython3 - <<'PY'\nimport sys\nsys.stdout.buffer.write(b'x' * (17 * 1024 * 1024))\nsys.stdout.flush()\nPY\nexec sleep 120\n",
+    )
+    .unwrap();
+    fs::set_permissions(&candidate, fs::Permissions::from_mode(0o755)).unwrap();
+    let metadata = write_release_fixture(&fixture, "99.0.0", &candidate);
+    let install_dir = ws.root.join("install");
+    fs::create_dir_all(&install_dir).unwrap();
+    let installed = install_dir.join("tink");
+    let known_good = b"#!/bin/sh\nprintf 'tink 0.3.14\\n'\n";
+    fs::write(&installed, known_good).unwrap();
+    fs::set_permissions(&installed, fs::Permissions::from_mode(0o755)).unwrap();
+    let candidate_started = ws.root.join("overflowing-candidate-started");
+
+    let mut command = StdCommand::new("sh");
+    command
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("install.sh"))
+        .env("TINK_INSTALL_DIR", &install_dir)
+        .env("TINK_PROBE_STARTED", &candidate_started)
+        .env(
+            "TINK_RELEASES_API",
+            format!("file://{}", metadata.display()),
+        )
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0);
+    let mut child = command
+        .spawn()
+        .expect("spawn overflowing installer fixture");
+    wait_for_marker(&candidate_started, &mut child);
+    let output = wait_for_output_bounded(
+        child,
+        std::time::Duration::from_secs(4),
+        "installer probe output limit",
+    );
+
+    assert!(!output.status.success());
+    assert_eq!(fs::read(&installed).unwrap(), known_good);
+}
+
+#[cfg(unix)]
+#[test]
 fn v6_install_script_keeps_verified_install_successful_when_stdout_is_closed() {
     use std::os::fd::OwnedFd;
     use std::os::unix::fs::PermissionsExt;

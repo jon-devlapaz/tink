@@ -686,7 +686,7 @@ pub fn print_report(report: &UpdateReport) -> Result<(), Error> {
                 "{} {} ({})",
                 style.muted("Up to date"),
                 style.accent(format!("v{version}")),
-                style.muted(path.display())
+                style.muted(output::display_path(path))
             ))?;
         }
         UpdateReport::Updated { from, to, path } => {
@@ -698,7 +698,7 @@ pub fn print_report(report: &UpdateReport) -> Result<(), Error> {
             ))?;
             output::stdout_line(format_args!(
                 "{}",
-                style.muted(format!("Installed to {}", path.display()))
+                style.muted(format!("Installed to {}", output::display_path(path)))
             ))?;
         }
     }

@@ -287,6 +287,8 @@ Ids are stable. Tests must name or comment the id they prove.
 | U13 | `install.sh` candidate passes staging probes but fails only at the published path | Exit ≠ 0; restore the prior binary bytes and executable mode; print no install success |
 | U14 | Interrupt `install.sh` while its release candidate is running | Exit ≠ 0 without a Python traceback; terminate the candidate process group; preserve the prior binary |
 | U15 | Interrupt `tink update` while its release candidate is running | Exit ≠ 0; terminate the candidate process group; preserve the running binary |
+| U16 | `tink update` runs from a path containing terminal control characters | Exit 0 for an up-to-date binary; stdout renders controls as visible escapes with one stable output row |
+| U17 | `install.sh` receives a candidate whose probe output exceeds the capture limit | Reject before publication within the bounded probe budget; retain at most 16 MiB per stream; preserve the existing binary |
 
 ### Safety (cross-cutting)
 

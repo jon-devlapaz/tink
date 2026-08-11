@@ -123,7 +123,8 @@ are unsupported and untested. Networked Git operations have low-speed and five-m
 overall bounds. Git, curl, tar, and release-candidate subprocesses run in supervised
 process groups: timeout or HUP/INT/TERM directed only at Tink terminates and reaps the
 active group, while the default signal action remains in force outside supervision.
-Each subprocess stream is captured independently up to 16 MiB. Readers continue
-draining after that point so the child cannot block on a full pipe, then the command
-fails explicitly instead of retaining unbounded output in memory.
+The Rust subprocess supervisor and installer candidate probe retain each captured
+stream independently up to 16 MiB. Readers continue draining after that point so the
+child cannot block on a full pipe, then the command fails explicitly instead of
+retaining unbounded output in memory.
 No transaction spans separate filesystem owners.

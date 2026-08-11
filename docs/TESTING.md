@@ -140,10 +140,11 @@ The most important ownership sensors are:
 - A14 plus `skills.rs` unit tests cover portable executable-mode propagation, umask
   normalization, and distinct non-UTF-8 Unix names. Digest tests pin unambiguous
   framing and executable-mode sensitivity.
-- V4-V6 pin closed stdout/stderr exit semantics for the CLI and installer. U4-U15
+- V4-V6 pin closed stdout/stderr exit semantics for the CLI and installer. U4-U17
   cover invalid payloads, downgrade refusal, strict semantic versions, URL
-  redaction/policy, bounded candidate probes, exact published version probes, and
-  preservation or rollback of an existing binary.
+  redaction/policy, bounded candidate probes and output capture, exact published
+  version probes, terminal-safe update output, and preservation or rollback of an
+  existing binary.
 - G9-G10 pin Git process-group cleanup on parent-only termination and visible escaping
   of terminal controls in untrusted repository paths.
 - L10-L13 and `catalog.rs` unit tests cover hashed catalog identity, bounded

@@ -106,7 +106,9 @@ probe_exact() {
   probe_path="$1"
   probe_version="$2"
   python3 - "${probe_path}" "${probe_version}" <<'PY'
-import os, signal, subprocess, sys
+import os, signal, subprocess, sys, threading, time
+
+CAPTURE_LIMIT = 16 * 1024 * 1024
 
 def terminate_group(process):
     try:
@@ -136,6 +138,34 @@ def close_pipes(process):
     except OSError:
         pass
 
+def drain_capped(name, pipe, results, overflow):
+    retained = bytearray()
+    exceeded = False
+    try:
+        while True:
+            chunk = pipe.read(64 * 1024)
+            if not chunk:
+                break
+            remaining = max(0, CAPTURE_LIMIT - len(retained))
+            retained.extend(chunk[:remaining])
+            if len(chunk) > remaining:
+                exceeded = True
+                overflow.set()
+    except (OSError, ValueError):
+        exceeded = True
+        overflow.set()
+    finally:
+        results[name] = (bytes(retained), exceeded)
+
+def join_drains(process, threads):
+    for thread in threads:
+        thread.join(timeout=1)
+    if any(thread.is_alive() for thread in threads):
+        close_pipes(process)
+        for thread in threads:
+            thread.join(timeout=1)
+    return not any(thread.is_alive() for thread in threads)
+
 try:
     process = subprocess.Popen(
         [sys.argv[1], "--version"],
@@ -149,21 +179,60 @@ def interrupt(_signum, _frame):
     raise KeyboardInterrupt
 for watched in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
     signal.signal(watched, interrupt)
+results = {}
+overflow = threading.Event()
+threads = [
+    threading.Thread(
+        target=drain_capped,
+        args=("stdout", process.stdout, results, overflow),
+        daemon=True,
+    ),
+    threading.Thread(
+        target=drain_capped,
+        args=("stderr", process.stderr, results, overflow),
+        daemon=True,
+    ),
+]
+for thread in threads:
+    thread.start()
+timed_out = False
 try:
-    stdout, _ = process.communicate(timeout=5)
-except (OSError, subprocess.TimeoutExpired):
+    deadline = time.monotonic() + 5
+    while process.poll() is None and not overflow.is_set():
+        if time.monotonic() >= deadline:
+            timed_out = True
+            break
+        time.sleep(0.01)
+except OSError:
     terminate_group(process)
-    close_pipes(process)
     reap_after_kill(process)
+    close_pipes(process)
+    join_drains(process, threads)
     sys.exit(1)
 except BaseException:
     terminate_group(process)
-    close_pipes(process)
     reap_after_kill(process)
+    close_pipes(process)
+    join_drains(process, threads)
     sys.exit(130)
 terminate_group(process)
+if process.returncode is None:
+    reap_after_kill(process)
+drains_finished = join_drains(process, threads)
+stdout, stdout_exceeded = results.get("stdout", (b"", True))
+_, stderr_exceeded = results.get("stderr", (b"", True))
 expected = f"tink {sys.argv[2]}\n".encode()
-sys.exit(0 if process.returncode == 0 and stdout == expected else 1)
+sys.exit(
+    0
+    if not timed_out
+    and not overflow.is_set()
+    and drains_finished
+    and not stdout_exceeded
+    and not stderr_exceeded
+    and process.returncode == 0
+    and stdout == expected
+    else 1
+)
 PY
 }
 
