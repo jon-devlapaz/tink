@@ -532,15 +532,17 @@ fn replace_binary(current: &Path, new_bin: &Path, expected_version: &str) -> Res
         fs::set_permissions(staging.path(), fs::Permissions::from_mode(0o755))
             .map_err(|e| Error::msg(format!("chmod {}: {e}", staging.path().display())))?;
     }
-    probe_candidate(staging.path(), expected_version)?;
-    let published = staging.persist(current).map_err(|error| {
+    // Linux refuses to execute a file while a writable handle remains open.
+    // TempPath retains cleanup/persist ownership after closing that handle.
+    let staging = staging.into_temp_path();
+    probe_candidate(&staging, expected_version)?;
+    staging.persist(current).map_err(|error| {
         Error::msg(format!(
             "cannot replace {} ({}). Re-run install.sh or fix permissions.",
             current.display(),
             error.error
         ))
     })?;
-    drop(published);
     if let Err(probe_error) = probe_candidate(current, expected_version) {
         return match backup.persist(current) {
             Ok(restored) => {

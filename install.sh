@@ -309,8 +309,9 @@ run_bounded 30 tar -C "${tmp}/extract" -xzf "${tmp}/tink.tgz" \
   >"${tmp}/tar-extract-output.txt" 2>"${tmp}/tar-extract-error.txt" \
   || die "failed to extract release archive"
 candidate="${tmp}/extract/tink"
-[ -f "${candidate}" ] && [ ! -L "${candidate}" ] \
-  || die "archive did not contain a regular tink binary"
+if [ ! -f "${candidate}" ] || [ -L "${candidate}" ]; then
+  die "archive did not contain a regular tink binary"
+fi
 [ -x "${candidate}" ] || die "release candidate is not executable"
 probe_exact "${candidate}" "${version}" \
   || die "release candidate failed version probe"
