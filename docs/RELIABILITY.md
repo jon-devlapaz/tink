@@ -22,9 +22,10 @@ publishing its release commit and tag. Tag releases and manual dispatches from a
 matching `v*` tag repeat the quality gate before building those four artifacts. They
 upload an exact asset set to a draft and publish only after GitHub reports every asset
 as uploaded with a SHA-256 digest matching the local archive, so a failed or
-unverifiable upload remains hidden and retryable. A branch-based or
-version-mismatched manual dispatch fails before build or publication. Windows is not
-a claimed platform.
+unverifiable upload remains hidden and retryable. Publication is serialized across
+tags and refuses to make an older version the latest release. A branch-based,
+version-mismatched, or version-regressing manual dispatch fails before publication.
+Windows is not a claimed platform.
 
 ## Process output and exits
 

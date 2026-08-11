@@ -289,6 +289,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | U15 | Interrupt `tink update` while its release candidate is running | Exit ≠ 0; terminate the candidate process group; preserve the running binary |
 | U16 | `tink update` runs from a path containing terminal control characters | Exit 0 for an up-to-date binary; stdout renders controls as visible escapes with one stable output row |
 | U17 | `install.sh` receives a candidate whose probe output exceeds the capture limit | Reject before publication within the bounded probe budget; retain at most 16 MiB per stream; preserve the existing binary |
+| U18 | The installer candidate signals the supervisor while the candidate process is still being spawned | Exit nonzero without traceback; terminate and reap the candidate process group; preserve the existing binary |
 
 ### Safety (cross-cutting)
 

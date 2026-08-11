@@ -58,7 +58,7 @@ run_bounded() {
   process_timeout="$1"
   shift
   python3 - "${process_timeout}" "$@" <<'PY'
-import os, signal, subprocess, sys
+import os, signal, subprocess, sys, threading, time
 
 def terminate_group(process):
     try:
@@ -79,26 +79,37 @@ def reap_after_kill(process):
         except subprocess.TimeoutExpired:
             pass
 
-try:
-    process = subprocess.Popen(sys.argv[2:], start_new_session=True)
-except OSError:
-    sys.exit(126)
+interrupted = threading.Event()
 def interrupt(_signum, _frame):
-    raise KeyboardInterrupt
+    interrupted.set()
 for watched in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
     signal.signal(watched, interrupt)
 try:
-    returncode = process.wait(timeout=float(sys.argv[1]))
-except subprocess.TimeoutExpired:
-    terminate_group(process)
-    reap_after_kill(process)
-    sys.exit(124)
+    process = subprocess.Popen(sys.argv[2:], start_new_session=True)
+except OSError:
+    sys.exit(130 if interrupted.is_set() else 126)
+timed_out = False
+try:
+    deadline = time.monotonic() + float(sys.argv[1])
+    while process.poll() is None and not interrupted.is_set():
+        if time.monotonic() >= deadline:
+            timed_out = True
+            break
+        time.sleep(0.01)
 except BaseException:
     terminate_group(process)
     reap_after_kill(process)
     sys.exit(130)
+if interrupted.is_set():
+    terminate_group(process)
+    reap_after_kill(process)
+    sys.exit(130)
+if timed_out:
+    terminate_group(process)
+    reap_after_kill(process)
+    sys.exit(124)
 terminate_group(process)
-sys.exit(returncode)
+sys.exit(process.returncode)
 PY
 }
 
@@ -166,6 +177,11 @@ def join_drains(process, threads):
             thread.join(timeout=1)
     return not any(thread.is_alive() for thread in threads)
 
+interrupted = threading.Event()
+def interrupt(_signum, _frame):
+    interrupted.set()
+for watched in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+    signal.signal(watched, interrupt)
 try:
     process = subprocess.Popen(
         [sys.argv[1], "--version"],
@@ -174,11 +190,7 @@ try:
         start_new_session=True,
     )
 except OSError:
-    sys.exit(1)
-def interrupt(_signum, _frame):
-    raise KeyboardInterrupt
-for watched in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
-    signal.signal(watched, interrupt)
+    sys.exit(130 if interrupted.is_set() else 1)
 results = {}
 overflow = threading.Event()
 threads = [
@@ -198,7 +210,11 @@ for thread in threads:
 timed_out = False
 try:
     deadline = time.monotonic() + 5
-    while process.poll() is None and not overflow.is_set():
+    while (
+        process.poll() is None
+        and not overflow.is_set()
+        and not interrupted.is_set()
+    ):
         if time.monotonic() >= deadline:
             timed_out = True
             break
@@ -222,6 +238,8 @@ drains_finished = join_drains(process, threads)
 stdout, stdout_exceeded = results.get("stdout", (b"", True))
 _, stderr_exceeded = results.get("stderr", (b"", True))
 expected = f"tink {sys.argv[2]}\n".encode()
+if interrupted.is_set():
+    sys.exit(130)
 sys.exit(
     0
     if not timed_out

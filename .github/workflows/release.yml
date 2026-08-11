@@ -124,6 +124,9 @@ jobs:
     name: publish release
     needs: build
     runs-on: ubuntu-22.04
+    concurrency:
+      group: tink-release-publication
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
@@ -187,6 +190,28 @@ jobs:
             fi
           done
 
+          latest_tag="$(gh release view --json tagName --jq '.tagName' 2>/dev/null || true)"
+          if [ -n "${latest_tag}" ] && [ "${latest_tag}" != "${tag}" ]; then
+            if ! python3 - "${VERSION}" "${latest_tag}" <<'PY'
+          import re
+          import sys
+
+          target, latest_tag = sys.argv[1:]
+          pattern = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
+          if not latest_tag.startswith("v") or pattern.fullmatch(latest_tag[1:]) is None:
+              raise SystemExit(1)
+          if pattern.fullmatch(target) is None:
+              raise SystemExit(1)
+          target_version = tuple(int(part) for part in target.split("."))
+          latest_version = tuple(int(part) for part in latest_tag[1:].split("."))
+          raise SystemExit(0 if target_version > latest_version else 1)
+          PY
+            then
+              echo "Refusing to publish older release ${tag} over latest ${latest_tag}" >&2
+              exit 1
+            fi
+          fi
+
           release_draft="$(gh release view "${tag}" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
           if [ "${release_draft}" = "false" ]; then
             published_assets=()
@@ -200,10 +225,7 @@ jobs:
               exit 1
             fi
             for index in "${!expected_names[@]}"; do
-              IFS=$'\t' read -r name state digest <<<"${published_assets[$index]}"
-              if [ "${name}" != "${expected_names[$index]}" ] || \
-                [ "${state}" != "uploaded" ] || \
-                [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              if [ "${published_assets[$index]}" != "${expected_uploads[$index]}" ]; then
                 echo "Published release ${tag} has unexpected or unverifiable assets" >&2
                 exit 1
               fi

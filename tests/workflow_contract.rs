@@ -76,7 +76,25 @@ fn release_uploads_an_exact_asset_set_to_a_draft_before_publication() {
     assert!(remote_digest < validation && validation < publish);
     assert!(RELEASE.contains("expected_assets=("));
     assert!(RELEASE.contains("actual_assets=("));
-    assert!(RELEASE.contains("^sha256:[0-9a-f]{64}$"));
+}
+
+#[test]
+fn release_retries_require_exact_published_digests_and_never_regress_latest() {
+    let published = between(
+        RELEASE,
+        "if [ \"${release_draft}\" = \"false\" ]; then",
+        "if [ -z \"${release_draft}\" ]; then",
+    );
+    assert!(
+        published.contains("${published_assets[$index]}\" != \"${expected_uploads[$index]}"),
+        "published retries must compare GitHub digests with the local artifacts"
+    );
+
+    let latest_lookup = position(RELEASE, "latest_tag=\"");
+    let monotonic_refusal = position(RELEASE, "Refusing to publish older release");
+    let create = position(RELEASE, "gh release create \"${tag}\"");
+    assert!(latest_lookup < monotonic_refusal && monotonic_refusal < create);
+    assert!(RELEASE.contains("group: tink-release-publication"));
 }
 
 #[test]

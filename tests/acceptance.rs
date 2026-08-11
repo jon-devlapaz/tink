@@ -4719,6 +4719,72 @@ fn u14_install_interrupt_kills_candidate_group_without_traceback() {
 
 #[cfg(unix)]
 #[test]
+fn u18_install_handles_interrupt_raised_during_candidate_spawn() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let installer = include_str!("../install.sh");
+    let (run_bounded, probe_exact) = installer
+        .split_once("probe_exact()")
+        .expect("installer probe_exact function");
+    for (name, supervisor) in [("run_bounded", run_bounded), ("probe_exact", probe_exact)] {
+        let handler = supervisor
+            .find("signal.signal(watched, interrupt)")
+            .unwrap_or_else(|| panic!("{name} is missing interrupt handlers"));
+        let spawn = supervisor
+            .find("subprocess.Popen(")
+            .unwrap_or_else(|| panic!("{name} is missing supervised spawn"));
+        assert!(
+            handler < spawn,
+            "{name} must arm interrupt handlers before spawning its child"
+        );
+    }
+
+    let ws = Workspace::new();
+    let fixture = ws.root.join("install-spawn-cancel-release-fixture");
+    fs::create_dir_all(&fixture).unwrap();
+    let candidate = fixture.join("spawn-cancel-tink");
+    let survived = ws.root.join("spawn-cancel-candidate-survived");
+    fs::write(
+        &candidate,
+        b"#!/bin/sh\nkill -TERM \"$PPID\"\nsleep 2\nprintf survived > \"$TINK_CANCEL_SURVIVED\"\nprintf 'tink 99.0.0\\n'\n",
+    )
+    .unwrap();
+    fs::set_permissions(&candidate, fs::Permissions::from_mode(0o755)).unwrap();
+    let metadata = write_release_fixture(&fixture, "99.0.0", &candidate);
+    let install_dir = ws.root.join("install");
+    fs::create_dir_all(&install_dir).unwrap();
+    let installed = install_dir.join("tink");
+    let known_good = b"#!/bin/sh\nprintf 'tink 0.3.14\\n'\n";
+    fs::write(&installed, known_good).unwrap();
+    fs::set_permissions(&installed, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let output = StdCommand::new("sh")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("install.sh"))
+        .env("TINK_INSTALL_DIR", &install_dir)
+        .env("TINK_CANCEL_SURVIVED", &survived)
+        .env(
+            "TINK_RELEASES_API",
+            format!("file://{}", metadata.display()),
+        )
+        .output()
+        .expect("run spawn-interrupted installer");
+
+    assert!(!output.status.success());
+    assert!(
+        !String::from_utf8_lossy(&output.stderr).contains("Traceback"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    std::thread::sleep(std::time::Duration::from_millis(2300));
+    assert!(
+        !survived.exists(),
+        "spawn-time interruption left candidate running"
+    );
+    assert_eq!(fs::read(&installed).unwrap(), known_good);
+}
+
+#[cfg(unix)]
+#[test]
 fn u15_update_interrupt_kills_candidate_group_and_preserves_binary() {
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::process::CommandExt;

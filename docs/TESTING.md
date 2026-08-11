@@ -47,7 +47,9 @@ including manual dispatch from the matching `v*` tag, repeat quality and audit f
 then test and build all four artifacts. Publication uploads the exact asset set to an
 invisible draft and makes it public only after GitHub reports every asset as uploaded
 with a SHA-256 digest matching the local archive; reruns converge an incomplete draft.
-Branch-based or version-mismatched manual dispatches fail before build or publication.
+Publication is serialized across tags and refuses to replace GitHub's latest release
+with an older version. Branch-based, version-mismatched, or version-regressing manual
+dispatches fail before publication.
 
 The bump workflow intentionally skips its own `chore: release v*` commit to avoid a
 release loop. That commit was created only after the preceding bump job passed; direct
@@ -140,7 +142,7 @@ The most important ownership sensors are:
 - A14 plus `skills.rs` unit tests cover portable executable-mode propagation, umask
   normalization, and distinct non-UTF-8 Unix names. Digest tests pin unambiguous
   framing and executable-mode sensitivity.
-- V4-V6 pin closed stdout/stderr exit semantics for the CLI and installer. U4-U17
+- V4-V6 pin closed stdout/stderr exit semantics for the CLI and installer. U4-U18
   cover invalid payloads, downgrade refusal, strict semantic versions, URL
   redaction/policy, bounded candidate probes and output capture, exact published
   version probes, terminal-safe update output, and preservation or rollback of an
