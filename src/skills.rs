@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use crate::error::Error;
+use crate::output;
 use crate::paths::{map_io, refuse_symlink};
 use crate::provenance::{self, Provenance};
 
@@ -86,7 +87,7 @@ pub fn read_skill(path: &Path, require_directory_name: bool) -> Result<Skill, Er
     if !skill_file.is_file() {
         return Err(Error::msg(format!(
             "Missing regular SKILL.md: {}",
-            skill_file.display()
+            output::display_path(&skill_file)
         )));
     }
     let text = fs::read_to_string(&skill_file).map_err(|e| map_io(&skill_file, e))?;
@@ -94,7 +95,7 @@ pub fn read_skill(path: &Path, require_directory_name: bool) -> Result<Skill, Er
     if lines.first().copied() != Some("---") {
         return Err(Error::msg(format!(
             "SKILL.md must start with YAML frontmatter: {}",
-            skill_file.display()
+            output::display_path(&skill_file)
         )));
     }
     let closing = lines
@@ -105,7 +106,7 @@ pub fn read_skill(path: &Path, require_directory_name: bool) -> Result<Skill, Er
         .ok_or_else(|| {
             Error::msg(format!(
                 "SKILL.md frontmatter is not closed: {}",
-                skill_file.display()
+                output::display_path(&skill_file)
             ))
         })?;
     let frontmatter = &lines[1..closing];
@@ -114,7 +115,7 @@ pub fn read_skill(path: &Path, require_directory_name: bool) -> Result<Skill, Er
     if !valid_skill_name(&name) {
         return Err(Error::msg(format!(
             "Invalid skill name in {}",
-            skill_file.display()
+            output::display_path(&skill_file)
         )));
     }
     if require_directory_name {
@@ -128,7 +129,7 @@ pub fn read_skill(path: &Path, require_directory_name: bool) -> Result<Skill, Er
     if description.is_empty() || description.len() > 1024 {
         return Err(Error::msg(format!(
             "Invalid skill description in {}",
-            skill_file.display()
+            output::display_path(&skill_file)
         )));
     }
     Ok(Skill {
@@ -147,15 +148,18 @@ pub fn discover(source: &Path) -> Result<Vec<Skill>, Error> {
     if !skills_root.is_dir() {
         return Err(Error::msg(format!(
             "No skill found at {}",
-            source.display()
+            output::display_path(&source)
         )));
     }
     let mut entries: Vec<_> = fs::read_dir(&skills_root)
         .map_err(|e| map_io(&skills_root, e))?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| p.join("SKILL.md").exists())
-        .collect();
+        .map(|entry| {
+            entry
+                .map(|entry| entry.path())
+                .map_err(|e| map_io(&skills_root, e))
+        })
+        .collect::<Result<_, _>>()?;
+    entries.retain(|path| path.join("SKILL.md").exists());
     entries.sort();
     let mut skills = Vec::new();
     for path in entries {
@@ -164,7 +168,7 @@ pub fn discover(source: &Path) -> Result<Vec<Skill>, Error> {
     if skills.is_empty() {
         return Err(Error::msg(format!(
             "No skill found at {}",
-            source.display()
+            output::display_path(&source)
         )));
     }
     Ok(skills)
@@ -233,13 +237,72 @@ pub fn discover_recursive(source: &Path) -> Result<RecursiveDiscovery, Error> {
 #[derive(Debug, PartialEq, Eq)]
 enum EntryKind {
     Dir,
-    File(Vec<u8>),
+    File { bytes: Vec<u8>, mode: u32 },
 }
 
 /// One skill-tree walk: skip `.git`, refuse symlinks/specials, optionally load bytes.
 enum Collected {
-    Tree(BTreeMap<String, EntryKind>),
+    Tree(BTreeMap<PathBuf, EntryKind>),
     Unsupported { path: PathBuf, what: &'static str },
+}
+
+#[cfg(unix)]
+fn regular_file_mode(metadata: &fs::Metadata) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+
+    if metadata.permissions().mode() & 0o111 == 0 {
+        0o644
+    } else {
+        0o755
+    }
+}
+
+#[cfg(not(unix))]
+fn regular_file_mode(_metadata: &fs::Metadata) -> u32 {
+    0
+}
+
+#[cfg(unix)]
+fn default_file_mode() -> u32 {
+    0o644
+}
+
+#[cfg(not(unix))]
+fn default_file_mode() -> u32 {
+    0
+}
+
+/// Encode version-2 paths without collapsing legal Unix filename bytes.
+/// Windows is not a claimed platform, but normalizing its separator keeps the
+/// encoding well-defined for callers that compile there.
+pub(crate) fn digest_path_bytes(relative: &Path) -> Vec<u8> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+
+        relative.as_os_str().as_bytes().to_vec()
+    }
+    #[cfg(not(unix))]
+    {
+        relative.to_string_lossy().replace('\\', "/").into_bytes()
+    }
+}
+
+/// Preserve the pre-version-2 encoding exactly for receipt migration.
+fn legacy_digest_path_bytes(relative: &Path) -> Vec<u8> {
+    if let Some(relative) = relative.to_str() {
+        return relative.replace('\\', "/").into_bytes();
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+
+        relative.as_os_str().as_bytes().to_vec()
+    }
+    #[cfg(not(unix))]
+    {
+        relative.to_string_lossy().replace('\\', "/").into_bytes()
+    }
 }
 
 fn collect_tree(root: &Path) -> Result<Collected, Error> {
@@ -248,17 +311,16 @@ fn collect_tree(root: &Path) -> Result<Collected, Error> {
     fn walk(
         root: &Path,
         dir: &Path,
-        contents: &mut BTreeMap<String, EntryKind>,
+        contents: &mut BTreeMap<PathBuf, EntryKind>,
     ) -> Result<Option<(PathBuf, &'static str)>, Error> {
         for entry in fs::read_dir(dir).map_err(|e| map_io(dir, e))? {
             let entry = entry.map_err(|e| map_io(dir, e))?;
             let path = entry.path();
             let relative = path
                 .strip_prefix(root)
-                .map_err(|_| Error::msg(format!("path escape: {}", path.display())))?
-                .to_string_lossy()
-                .replace('\\', "/");
-            if relative == ".git" || relative.starts_with(".git/") {
+                .map_err(|_| Error::msg(format!("path escape: {}", output::display_path(&path))))?
+                .to_path_buf();
+            if relative == Path::new(".git") || relative.starts_with(Path::new(".git")) {
                 continue;
             }
             if path.is_symlink() {
@@ -272,7 +334,14 @@ fn collect_tree(root: &Path) -> Result<Collected, Error> {
                 }
             } else if ft.is_file() {
                 let bytes = fs::read(&path).map_err(|e| map_io(&path, e))?;
-                contents.insert(relative, EntryKind::File(bytes));
+                let metadata = entry.metadata().map_err(|e| map_io(&path, e))?;
+                contents.insert(
+                    relative,
+                    EntryKind::File {
+                        bytes,
+                        mode: regular_file_mode(&metadata),
+                    },
+                );
             } else {
                 return Ok(Some((path, "special file")));
             }
@@ -285,12 +354,12 @@ fn collect_tree(root: &Path) -> Result<Collected, Error> {
     }
 }
 
-fn require_safe_tree(root: &Path) -> Result<BTreeMap<String, EntryKind>, Error> {
+fn require_safe_tree(root: &Path) -> Result<BTreeMap<PathBuf, EntryKind>, Error> {
     match collect_tree(root)? {
         Collected::Tree(tree) => Ok(tree),
         Collected::Unsupported { path, what } => Err(Error::msg(format!(
             "Refusing to copy {what}: {}",
-            path.display()
+            output::display_path(&path)
         ))),
     }
 }
@@ -303,7 +372,7 @@ fn validate_tree_structure(root: &Path) -> Result<Option<(PathBuf, &'static str)
             let path = entry.path();
             let relative = path
                 .strip_prefix(root)
-                .map_err(|_| Error::msg(format!("path escape: {}", path.display())))?;
+                .map_err(|_| Error::msg(format!("path escape: {}", output::display_path(&path))))?;
             if relative == Path::new(".git") || relative.starts_with(".git") {
                 continue;
             }
@@ -330,19 +399,19 @@ pub fn validate_skill_tree(root: &Path) -> Result<(), Error> {
         None => Ok(()),
         Some((path, what)) => Err(Error::msg(format!(
             "Refusing to copy {what}: {}",
-            path.display()
+            output::display_path(&path)
         ))),
     }
 }
 
-fn tree_contents(root: &Path) -> Result<Option<BTreeMap<String, EntryKind>>, Error> {
+fn tree_contents(root: &Path) -> Result<Option<BTreeMap<PathBuf, EntryKind>>, Error> {
     match collect_tree(root)? {
         Collected::Tree(tree) => Ok(Some(tree)),
         Collected::Unsupported { .. } => Ok(None),
     }
 }
 
-fn materialize_tree(tree: &BTreeMap<String, EntryKind>, destination: &Path) -> Result<(), Error> {
+fn materialize_tree(tree: &BTreeMap<PathBuf, EntryKind>, destination: &Path) -> Result<(), Error> {
     fs::create_dir_all(destination).map_err(|e| map_io(destination, e))?;
     for (relative, kind) in tree {
         let to = destination.join(relative);
@@ -350,11 +419,18 @@ fn materialize_tree(tree: &BTreeMap<String, EntryKind>, destination: &Path) -> R
             EntryKind::Dir => {
                 fs::create_dir_all(&to).map_err(|e| map_io(&to, e))?;
             }
-            EntryKind::File(bytes) => {
+            EntryKind::File { bytes, mode } => {
                 if let Some(parent) = to.parent() {
                     fs::create_dir_all(parent).map_err(|e| map_io(parent, e))?;
                 }
                 fs::write(&to, bytes).map_err(|e| map_io(&to, e))?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+
+                    fs::set_permissions(&to, fs::Permissions::from_mode(*mode & 0o777))
+                        .map_err(|e| map_io(&to, e))?;
+                }
             }
         }
     }
@@ -382,8 +458,8 @@ pub fn skill_contents_equal_except(
         return Ok(false);
     };
     for key in ignore {
-        a.remove(*key);
-        b.remove(*key);
+        a.remove(Path::new(key));
+        b.remove(Path::new(key));
     }
     Ok(a == b)
 }
@@ -395,37 +471,57 @@ pub fn copy_skill_tree(
 ) -> Result<(), Error> {
     let mut tree = require_safe_tree(source)?;
     for name in root_ignore {
-        tree.remove(*name);
-        let prefix = format!("{name}/");
-        tree.retain(|key, _| !key.starts_with(&prefix));
+        let ignored = Path::new(name);
+        tree.retain(|key, _| key != ignored && !key.starts_with(ignored));
     }
     materialize_tree(&tree, destination)
 }
 
-/// Compute the canonical digest used by opaque managed skillset trees.
-pub fn tree_digest(root: &Path, root_ignore: &[&str]) -> Result<String, Error> {
+fn digest_tree(root: &Path, root_ignore: &[&str], include_mode: bool) -> Result<String, Error> {
     let mut tree = require_safe_tree(root)?;
     for name in root_ignore {
-        tree.remove(*name);
-        let prefix = format!("{name}/");
-        tree.retain(|key, _| !key.starts_with(&prefix));
+        let ignored = Path::new(name);
+        tree.retain(|key, _| key != ignored && !key.starts_with(ignored));
     }
 
     let mut hasher = Sha256::new();
+    if include_mode {
+        hasher.update(b"tink-tree-digest-v2\0");
+    }
     for (relative, kind) in tree {
-        let path = relative.as_bytes();
+        let path = if include_mode {
+            digest_path_bytes(&relative)
+        } else {
+            legacy_digest_path_bytes(&relative)
+        };
         hasher.update((path.len() as u64).to_be_bytes());
-        hasher.update(path);
+        hasher.update(&path);
         match kind {
             EntryKind::Dir => hasher.update([b'd']),
-            EntryKind::File(bytes) => {
+            EntryKind::File { bytes, mode } => {
                 hasher.update([b'f']);
+                if include_mode {
+                    hasher.update(mode.to_be_bytes());
+                }
                 hasher.update((bytes.len() as u64).to_be_bytes());
                 hasher.update(bytes);
             }
         }
     }
     Ok(format!("{:x}", hasher.finalize()))
+}
+
+/// Version-2 digest for opaque managed trees. Fields are unambiguously framed,
+/// and each regular file's canonical executable/non-executable mode is part of
+/// the integrity contract.
+pub fn tree_digest(root: &Path, root_ignore: &[&str]) -> Result<String, Error> {
+    digest_tree(root, root_ignore, true)
+}
+
+/// Pre-version-2 digest retained only to validate and migrate old receipts.
+/// New persisted state must use [`tree_digest`].
+pub(crate) fn tree_digest_legacy(root: &Path, root_ignore: &[&str]) -> Result<String, Error> {
+    digest_tree(root, root_ignore, false)
 }
 
 /// Result of comparing a candidate skill tree to an install target.
@@ -451,7 +547,7 @@ impl PreflightOutcome {
         match self {
             Self::Divergent => Err(Error::msg(format!(
                 "Refusing to overwrite existing skill: {}",
-                destination_root.join(skill_name).display()
+                output::display_path(&destination_root.join(skill_name))
             ))),
             other => Ok(other),
         }
@@ -461,47 +557,57 @@ impl PreflightOutcome {
 fn expected_install_tree(
     skill: &Skill,
     provenance: Option<&Provenance>,
-) -> Result<BTreeMap<String, EntryKind>, Error> {
+) -> Result<BTreeMap<PathBuf, EntryKind>, Error> {
     let mut expected = require_safe_tree(&skill.path)?;
     if let Some(provenance) = provenance {
-        if expected.contains_key(provenance::SIDECAR_FILE) {
+        if expected.contains_key(Path::new(provenance::SIDECAR_FILE)) {
             return Err(Error::msg(format!(
                 "Remote skill already contains reserved .tink-source.json: {}",
-                skill.path.display()
+                output::display_path(&skill.path)
             )));
         }
         expected.insert(
-            provenance::SIDECAR_FILE.into(),
-            EntryKind::File(provenance::to_bytes(provenance)?),
+            PathBuf::from(provenance::SIDECAR_FILE),
+            EntryKind::File {
+                bytes: provenance::to_bytes(provenance)?,
+                mode: default_file_mode(),
+            },
         );
     }
     Ok(expected)
 }
 
 fn equal_except_receipt(
-    left: &BTreeMap<String, EntryKind>,
-    right: &BTreeMap<String, EntryKind>,
+    left: &BTreeMap<PathBuf, EntryKind>,
+    right: &BTreeMap<PathBuf, EntryKind>,
 ) -> bool {
     left.iter()
-        .filter(|(key, _)| key.as_str() != provenance::SIDECAR_FILE)
+        .filter(|(key, _)| key.as_path() != Path::new(provenance::SIDECAR_FILE))
         .eq(right
             .iter()
-            .filter(|(key, _)| key.as_str() != provenance::SIDECAR_FILE))
+            .filter(|(key, _)| key.as_path() != Path::new(provenance::SIDECAR_FILE)))
 }
 
 /// Align destination receipt to `expected` without rewriting skill body files.
-fn repair_receipt(target: &Path, expected: &BTreeMap<String, EntryKind>) -> Result<(), Error> {
+fn repair_receipt(target: &Path, expected: &BTreeMap<PathBuf, EntryKind>) -> Result<(), Error> {
     refuse_symlink(target)?;
     let sidecar = target.join(provenance::SIDECAR_FILE);
-    match expected.get(provenance::SIDECAR_FILE) {
-        Some(EntryKind::File(bytes)) => {
+    match expected.get(Path::new(provenance::SIDECAR_FILE)) {
+        Some(EntryKind::File { bytes, mode }) => {
             refuse_symlink(&sidecar)?;
             fs::write(&sidecar, bytes).map_err(|e| map_io(&sidecar, e))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+
+                fs::set_permissions(&sidecar, fs::Permissions::from_mode(*mode & 0o777))
+                    .map_err(|e| map_io(&sidecar, e))?;
+            }
         }
         Some(EntryKind::Dir) => {
             return Err(Error::msg(format!(
                 "Invalid receipt entry (directory): {}",
-                sidecar.display()
+                output::display_path(&sidecar)
             )));
         }
         None => {
@@ -526,14 +632,14 @@ pub fn preflight_install(
     if !target.exists() && !target.is_symlink() {
         return Ok(PreflightOutcome::Ready);
     }
-    if target.is_dir() {
-        if let Some(existing) = tree_contents(&target)? {
-            if existing == expected {
-                return Ok(PreflightOutcome::Identical);
-            }
-            if equal_except_receipt(&existing, &expected) {
-                return Ok(PreflightOutcome::ReceiptMismatch);
-            }
+    if target.is_dir()
+        && let Some(existing) = tree_contents(&target)?
+    {
+        if existing == expected {
+            return Ok(PreflightOutcome::Identical);
+        }
+        if equal_except_receipt(&existing, &expected) {
+            return Ok(PreflightOutcome::ReceiptMismatch);
         }
     }
     Ok(PreflightOutcome::Divergent)
@@ -572,6 +678,45 @@ pub fn install_local(
     }
 }
 
+fn rollback_or_retain_backup(
+    staging: tempfile::TempDir,
+    backup: &Path,
+    target: &Path,
+    publish_error: std::io::Error,
+) -> Error {
+    match fs::rename(backup, target) {
+        Ok(()) => map_io(target, publish_error),
+        Err(rollback_error) => {
+            let recovery_root = staging.keep();
+            let recovery = recovery_root.join(
+                backup
+                    .file_name()
+                    .unwrap_or_else(|| std::ffi::OsStr::new("old")),
+            );
+            Error::msg(format!(
+                "could not publish {} ({publish_error}); rollback failed ({rollback_error}); recovery backup: {}",
+                output::display_path(target),
+                output::display_path(&recovery)
+            ))
+        }
+    }
+}
+
+/// Rename a fully staged replacement over an existing tree. If publication and
+/// rollback both fail, retain the only original at an explicit recovery path.
+pub(crate) fn publish_staged_tree(
+    staging: tempfile::TempDir,
+    staged: PathBuf,
+    target: &Path,
+) -> Result<PathBuf, Error> {
+    let backup = staging.path().join("old");
+    fs::rename(target, &backup).map_err(|e| map_io(target, e))?;
+    if let Err(error) = fs::rename(&staged, target) {
+        return Err(rollback_or_retain_backup(staging, &backup, target, error));
+    }
+    Ok(target.to_path_buf())
+}
+
 /// Replace an existing imported skill after dirty-tree preflight elsewhere.
 pub fn replace_verified(
     skill: &Skill,
@@ -584,7 +729,7 @@ pub fn replace_verified(
     if !target.is_dir() {
         return Err(Error::msg(format!(
             "Refusing to replace missing or unsafe skill: {}",
-            target.display()
+            output::display_path(&target)
         )));
     }
     let staging = tempfile::Builder::new()
@@ -592,28 +737,223 @@ pub fn replace_verified(
         .tempdir_in(destination_root)
         .map_err(|e| Error::msg(format!("update staging: {e}")))?;
     let staged = staging.path().join("new");
-    let backup = staging.path().join("old");
     copy_skill_tree(&skill.path, &staged, &[".git"])?;
     if staged.join(provenance::SIDECAR_FILE).exists() {
         return Err(Error::msg(format!(
             "Remote skill contains reserved .tink-source.json: {}",
-            skill.path.display()
+            output::display_path(&skill.path)
         )));
     }
     provenance::write_file(&staged.join(provenance::SIDECAR_FILE), provenance)?;
-    fs::rename(&target, &backup).map_err(|e| map_io(&target, e))?;
-    if let Err(err) = fs::rename(&staged, &target) {
-        let _ = fs::rename(&backup, &target);
-        return Err(map_io(&target, err));
-    }
-    let _ = fs::remove_dir_all(&backup);
-    Ok(target)
+    publish_staged_tree(staging, staged, &target)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[cfg(unix)]
+    #[test]
+    fn skill_errors_escape_terminal_controls_in_paths() {
+        let temp = TempDir::new().unwrap();
+        let skill = temp.path().join("unsafe\u{1b}[31m");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "missing frontmatter\n").unwrap();
+
+        let error = read_skill(&skill, false).unwrap_err().to_string();
+
+        assert!(
+            !error.contains('\u{1b}'),
+            "raw escape reached diagnostic: {error:?}"
+        );
+        assert!(error.contains("unsafe\\x1b[31m"), "{error:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_skill_tree_canonicalizes_executable_mode_and_strips_special_bits() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new().unwrap();
+        let source = temp.path().join("source");
+        let destination = temp.path().join("destination");
+        fs::create_dir_all(&source).unwrap();
+        let script = source.join("run.sh");
+        fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o6741)).unwrap();
+
+        copy_skill_tree(&source, &destination, &[]).unwrap();
+
+        let copied_mode = fs::metadata(destination.join("run.sh"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(copied_mode, 0o755);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tree_identity_is_stable_across_non_executable_umask_modes() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new().unwrap();
+        let source = temp.path().join("source");
+        let destination = temp.path().join("destination");
+        fs::create_dir_all(&source).unwrap();
+        let file = source.join("notes.txt");
+        fs::write(&file, "same bytes").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+        let restrictive_digest = tree_digest(&source, &[]).unwrap();
+
+        copy_skill_tree(&source, &destination, &[]).unwrap();
+        assert_eq!(
+            fs::metadata(destination.join("notes.txt"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o644
+        );
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert_eq!(tree_digest(&source, &[]).unwrap(), restrictive_digest);
+        assert!(skill_contents_equal(&source, &destination).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_skill_tree_preserves_distinct_non_utf8_names() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let temp = TempDir::new().unwrap();
+        let source = temp.path().join("source");
+        let destination = temp.path().join("destination");
+        fs::create_dir_all(&source).unwrap();
+        let first = source.join(OsString::from_vec(vec![0x80]));
+        let second = source.join(OsString::from_vec(vec![0x81]));
+        for (path, body) in [
+            (&first, b"first".as_slice()),
+            (&second, b"second".as_slice()),
+        ] {
+            if let Err(error) = fs::write(path, body) {
+                assert_eq!(
+                    error.raw_os_error(),
+                    Some(92),
+                    "unexpected fixture error: {error}"
+                );
+                assert!(
+                    !destination.exists(),
+                    "OS rejection must happen before destination writes"
+                );
+                return;
+            }
+        }
+
+        copy_skill_tree(&source, &destination, &[]).unwrap();
+
+        assert_eq!(
+            fs::read(destination.join(OsString::from_vec(vec![0x80]))).unwrap(),
+            b"first"
+        );
+        assert_eq!(
+            fs::read(destination.join(OsString::from_vec(vec![0x81]))).unwrap(),
+            b"second"
+        );
+    }
+
+    #[test]
+    fn tree_digest_v2_is_domain_separated_from_legacy_encoding() {
+        let temp = TempDir::new().unwrap();
+        let tree = temp.path().join("skill");
+        fs::create_dir_all(tree.join("resources")).unwrap();
+        fs::write(tree.join("SKILL.md"), b"body").unwrap();
+        fs::write(tree.join("resources/run.sh"), b"run").unwrap();
+
+        assert_ne!(
+            tree_digest(&tree, &[]).unwrap(),
+            tree_digest_legacy(&tree, &[]).unwrap()
+        );
+        assert_eq!(
+            tree_digest_legacy(&tree, &[]).unwrap(),
+            "f612169400ea83a502473a69fac44e95b4dff9aa49319aebc0a073b61dd57a03"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tree_digest_v2_includes_regular_file_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new().unwrap();
+        let tree = temp.path().join("skill");
+        fs::create_dir_all(&tree).unwrap();
+        let script = tree.join("run.sh");
+        fs::write(&script, b"#!/bin/sh\n").unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+        let executable = tree_digest(&tree, &[]).unwrap();
+        let legacy_executable = tree_digest_legacy(&tree, &[]).unwrap();
+
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert_ne!(tree_digest(&tree, &[]).unwrap(), executable);
+        assert_eq!(tree_digest_legacy(&tree, &[]).unwrap(), legacy_executable);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tree_digest_v2_distinguishes_literal_backslash_from_path_separator() {
+        let temp = tempfile::tempdir().unwrap();
+        let flat = temp.path().join("flat");
+        let nested = temp.path().join("nested");
+        fs::create_dir_all(flat.join("a")).unwrap();
+        fs::create_dir_all(nested.join("a")).unwrap();
+        fs::write(flat.join("SKILL.md"), "same").unwrap();
+        fs::write(nested.join("SKILL.md"), "same").unwrap();
+        fs::write(flat.join("a\\b"), "payload").unwrap();
+        fs::write(nested.join("a").join("b"), "payload").unwrap();
+
+        assert_eq!(
+            tree_digest_legacy(&flat, &[]).unwrap(),
+            tree_digest_legacy(&nested, &[]).unwrap(),
+            "fixture must reproduce the historical normalization collision"
+        );
+        assert_ne!(
+            tree_digest(&flat, &[]).unwrap(),
+            tree_digest(&nested, &[]).unwrap()
+        );
+    }
+
+    #[test]
+    fn rollback_failure_retains_recovery_backup() {
+        let temp = TempDir::new().unwrap();
+        let staging = tempfile::Builder::new()
+            .prefix(".rollback-fixture-")
+            .tempdir_in(temp.path())
+            .unwrap();
+        let staging_path = staging.path().to_path_buf();
+        let backup = staging.path().join("old");
+        fs::create_dir_all(&backup).unwrap();
+        fs::write(backup.join("original"), "preserve me").unwrap();
+        let target = temp.path().join("target");
+        fs::write(&target, "rollback blocker").unwrap();
+
+        let error = rollback_or_retain_backup(
+            staging,
+            &backup,
+            &target,
+            std::io::Error::other("publish fixture"),
+        );
+
+        assert!(error.to_string().contains("recovery backup"), "{error}");
+        assert!(error.to_string().contains(&backup.display().to_string()));
+        assert_eq!(
+            fs::read(staging_path.join("old/original")).unwrap(),
+            b"preserve me"
+        );
+    }
 
     #[cfg(unix)]
     #[test]

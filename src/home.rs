@@ -43,7 +43,7 @@ skills only from a project's `.agents/skills/`.
 Successful installs:
 - copy skill and validated project skillset trees into the library under `skills/<name>/`
 - skillsets use canonical `<name>-skillset` roots; their project tree is primary
-- record skill **names** under `catalog/by-project/<project>/meta.json`
+- record skill **names** under `catalog/by-project/<bounded-name>-<identity>/meta.json`
 - read pinned skillset definitions from `catalog/by-skillset/<name>/meta.json`
 
 `skill remove` and `destroy` update that name catalog; they do not delete
@@ -82,10 +82,10 @@ fn normalize_lexically(path: &Path) -> PathBuf {
 
 /// Resolve the offline inventory root.
 pub fn resolve_home() -> Result<PathBuf, Error> {
-    if let Ok(custom) = env::var(TINK_HOME_ENV) {
-        if !custom.is_empty() {
-            return absolutize(PathBuf::from(custom));
-        }
+    if let Ok(custom) = env::var(TINK_HOME_ENV)
+        && !custom.is_empty()
+    {
+        return absolutize(PathBuf::from(custom));
     }
     let home = env::var_os("HOME").ok_or_else(|| Error::msg("HOME is not set"))?;
     absolutize(PathBuf::from(home).join(TINK_HOME_NAME))

@@ -5,9 +5,11 @@
 
 use std::collections::BTreeSet;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use crate::error::Error;
 use crate::home::{
@@ -17,11 +19,7 @@ use crate::home::{
 use crate::paths::{map_io, mkdir_p, refuse_symlink, require_directory, require_file};
 
 fn safe_project_dirname(name: &str) -> String {
-    let cleaned = name
-        .trim()
-        .replace('/', "-")
-        .replace('\\', "-")
-        .replace('\0', "");
+    let cleaned = name.trim().replace(['/', '\\'], "-").replace('\0', "");
     let cleaned = cleaned.trim_end_matches(['.', ' ']);
     if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
         "project".into()
@@ -31,13 +29,40 @@ fn safe_project_dirname(name: &str) -> String {
 }
 
 fn project_catalog_dir(home: &Path, project_root: &Path) -> Result<PathBuf, Error> {
-    Ok(by_project_path(home).join(safe_project_root_name(project_root)))
+    // Leave ample room below the portable 255-byte component limit for the
+    // separator and fixed-width identity, without splitting a UTF-8 scalar.
+    let mut basename = safe_project_root_name(project_root);
+    while basename.len() > 120 {
+        basename.pop();
+    }
+    if basename.is_empty() {
+        basename.push_str("project");
+    }
+    let identity = project_identity(project_root);
+    Ok(by_project_path(home).join(format!("{basename}-{identity}")))
+}
+
+fn project_identity(project_root: &Path) -> String {
+    #[cfg(unix)]
+    let root_bytes = {
+        use std::os::unix::ffi::OsStrExt;
+
+        project_root.as_os_str().as_bytes().to_vec()
+    };
+    #[cfg(not(unix))]
+    let root_bytes = project_root.to_string_lossy().into_owned().into_bytes();
+    format!("{:x}", Sha256::digest(root_bytes))
+}
+
+fn legacy_project_catalog_dir(home: &Path, project_root: &Path) -> PathBuf {
+    by_project_path(home).join(safe_project_root_name(project_root))
 }
 
 #[derive(Debug, Clone)]
 struct CatalogMeta {
     name: String,
     root: String,
+    identity: Option<String>,
     skills: BTreeSet<String>,
 }
 
@@ -46,6 +71,7 @@ impl CatalogMeta {
         Self {
             name: safe_project_root_name(project_root),
             root: project_root.to_string_lossy().into_owned(),
+            identity: Some(project_identity(project_root)),
             skills: BTreeSet::new(),
         }
     }
@@ -62,6 +88,10 @@ impl CatalogMeta {
                 .and_then(|v| v.as_str())
                 .map(str::to_string)
                 .unwrap_or_default(),
+            identity: value
+                .get("identity")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
             skills: value
                 .get("skills")
                 .and_then(|v| v.as_array())
@@ -88,37 +118,44 @@ impl CatalogMeta {
         let body = json!({
             "name": self.name,
             "root": self.root,
+            "identity": self.identity,
             "skills": self.skills.iter().cloned().collect::<Vec<_>>()
         });
         let text = format!(
             "{}\n",
             serde_json::to_string_pretty(&body).map_err(|e| Error::msg(e.to_string()))?
         );
-        fs::write(meta_path, text).map_err(|e| map_io(meta_path, e))?;
+        let parent = meta_path
+            .parent()
+            .ok_or_else(|| Error::msg("Catalog metadata path has no parent"))?;
+        let mut staged = tempfile::Builder::new()
+            .prefix(".meta-")
+            .tempfile_in(parent)
+            .map_err(|e| map_io(parent, e))?;
+        staged
+            .write_all(text.as_bytes())
+            .map_err(|e| map_io(staged.path(), e))?;
+        staged.flush().map_err(|e| map_io(staged.path(), e))?;
+        staged
+            .persist(meta_path)
+            .map_err(|e| map_io(meta_path, e.error))?;
         Ok(())
     }
 
     /// Whether withdraw/forget may mutate this entry for `project_root`.
     ///
-    /// Non-empty `meta.root` must canonicalize to `project_root` (already
-    /// canonical). Missing/empty `root` keeps basename-keyed behavior for
-    /// legacy metas. Unresolvable stored roots soft-refuse so a sibling basename
-    /// cannot wipe another project's catalog.
+    /// `meta.root` must canonicalize to `project_root` (already canonical).
+    /// Missing, empty, or unresolvable roots are not ownership proof.
     fn catalog_owned_by(&self, project_root: &Path) -> bool {
+        if let Some(identity) = &self.identity {
+            return identity == &project_identity(project_root);
+        }
         if self.root.is_empty() {
-            return true;
+            return false;
         }
         match Path::new(&self.root).canonicalize() {
             Ok(canon) => canon == project_root,
             Err(_) => false,
-        }
-    }
-
-    /// Seal empty/missing root to the withdrawing project when siblings remain,
-    /// matching pre-`CatalogMeta` write behavior (`root` defaulted to project).
-    fn seal_root_if_empty(&mut self, project_root: &Path) {
-        if self.root.is_empty() {
-            self.root = project_root.to_string_lossy().into_owned();
         }
     }
 
@@ -155,6 +192,55 @@ fn remove_catalog_dir(catalog: &Path) -> Result<(), Error> {
     Ok(())
 }
 
+fn validate_catalog_dir(catalog: &Path) -> Result<Option<PathBuf>, Error> {
+    if !catalog.exists() && !catalog.is_symlink() {
+        return Ok(None);
+    }
+    refuse_symlink(catalog)?;
+    if !catalog.is_dir() {
+        return Err(Error::msg(format!(
+            "Refusing non-directory catalog: {}",
+            catalog.display()
+        )));
+    }
+    let meta = catalog.join("meta.json");
+    require_file(&meta)?;
+    if !meta.is_file() {
+        return Ok(None);
+    }
+    Ok(Some(catalog.to_path_buf()))
+}
+
+/// Move a basename-keyed entry only when its stored canonical root proves it
+/// belongs to this project. Ambiguous and foreign entries remain untouched.
+fn migrate_owned_legacy_catalog(
+    home: &Path,
+    project_root: &Path,
+    destination: &Path,
+) -> Result<(), Error> {
+    if destination.exists() || destination.is_symlink() {
+        return Ok(());
+    }
+    let legacy = legacy_project_catalog_dir(home, project_root);
+    let Some(legacy) = validate_catalog_dir(&legacy)? else {
+        return Ok(());
+    };
+    let meta_path = legacy.join("meta.json");
+    let meta = CatalogMeta::read(&meta_path, project_root)?;
+    if !meta.catalog_owned_by(project_root) {
+        if meta.identity.is_none()
+            && (meta.root.is_empty() || Path::new(&meta.root).canonicalize().is_err())
+        {
+            return Err(Error::msg(format!(
+                "Cannot migrate ambiguous legacy catalog {}; restore its canonical root field or remove the stale entry",
+                legacy.display()
+            )));
+        }
+        return Ok(());
+    }
+    fs::rename(&legacy, destination).map_err(|e| map_io(destination, e))
+}
+
 /// Find an existing project catalog only after validating the owned home and
 /// every directory boundary that a destructive operation would traverse.
 fn existing_project_catalog(
@@ -186,26 +272,67 @@ fn existing_project_catalog(
     }
 
     let catalog = project_catalog_dir(&home, project_root)?;
-    if !catalog.exists() && !catalog.is_symlink() {
+    if let Some(catalog) = validate_catalog_dir(&catalog)? {
+        return Ok(Some(catalog));
+    }
+
+    let legacy = legacy_project_catalog_dir(&home, project_root);
+    let Some(legacy) = validate_catalog_dir(&legacy)? else {
         return Ok(None);
-    }
-    refuse_symlink(&catalog)?;
-    if !catalog.is_dir() {
-        return Err(Error::msg(format!(
-            "Refusing to remove non-directory catalog: {}",
-            catalog.display()
-        )));
-    }
-    require_file(&catalog.join("meta.json"))?;
-    Ok(Some(catalog))
+    };
+    let meta = CatalogMeta::read(&legacy.join("meta.json"), project_root)?;
+    Ok(meta.catalog_owned_by(project_root).then_some(legacy))
 }
 
 /// Record that `skill_name` is installed in `project_root`.
 ///
-/// Last writer wins on `meta.json` `root` when two projects share a basename.
 /// Failure fails the caller.
 pub fn deposit_skill(project_root: &Path, skill_name: &str) -> Result<PathBuf, Error> {
     deposit_skill_at(None, project_root, skill_name)
+}
+
+/// Validate every catalog boundary that a later deposit will traverse.
+/// Inventory creation may occur, but no project entry or skill name is written.
+pub(crate) fn preflight_deposit_skill(project_root: &Path) -> Result<(), Error> {
+    preflight_deposit_skill_at(None, project_root)
+}
+
+pub(crate) fn preflight_deposit_skill_at(
+    home: Option<&Path>,
+    project_root: &Path,
+) -> Result<(), Error> {
+    let project_root = project_root
+        .canonicalize()
+        .map_err(|e| map_io(project_root, e))?;
+    let (home, _) = ensure_inventory_root(home)?;
+    let catalog = project_catalog_dir(&home, &project_root)?;
+    require_directory(&catalog)?;
+    if let Some(existing) = validate_catalog_dir(&catalog)? {
+        let meta = CatalogMeta::read(&existing.join("meta.json"), &project_root)?;
+        if !meta.catalog_owned_by(&project_root) {
+            return Err(Error::msg(format!(
+                "Catalog identity belongs to another project: {}",
+                catalog.display()
+            )));
+        }
+        return Ok(());
+    }
+
+    let legacy = legacy_project_catalog_dir(&home, &project_root);
+    let Some(legacy) = validate_catalog_dir(&legacy)? else {
+        return Ok(());
+    };
+    let meta = CatalogMeta::read(&legacy.join("meta.json"), &project_root)?;
+    if !meta.catalog_owned_by(&project_root)
+        && meta.identity.is_none()
+        && (meta.root.is_empty() || Path::new(&meta.root).canonicalize().is_err())
+    {
+        return Err(Error::msg(format!(
+            "Cannot migrate ambiguous legacy catalog {}; restore its canonical root field or remove the stale entry",
+            legacy.display()
+        )));
+    }
+    Ok(())
 }
 
 /// Like [`deposit_skill`], with an optional home root (tests).
@@ -219,6 +346,7 @@ pub(crate) fn deposit_skill_at(
         .map_err(|e| map_io(project_root, e))?;
     let (home, _) = ensure_inventory_root(home)?;
     let catalog = project_catalog_dir(&home, &project_root)?;
+    migrate_owned_legacy_catalog(&home, &project_root, &catalog)?;
     require_directory(&catalog)?;
     mkdir_p(&catalog)?;
 
@@ -226,12 +354,20 @@ pub(crate) fn deposit_skill_at(
     require_file(&meta_path)?;
 
     let mut meta = if meta_path.is_file() {
-        CatalogMeta::read(&meta_path, &project_root)?
+        let meta = CatalogMeta::read(&meta_path, &project_root)?;
+        if !meta.catalog_owned_by(&project_root) {
+            return Err(Error::msg(format!(
+                "Catalog identity belongs to another project: {}",
+                catalog.display()
+            )));
+        }
+        meta
     } else {
         CatalogMeta::by_project(&project_root)
     };
     meta.name = safe_project_root_name(&project_root);
     meta.root = project_root.to_string_lossy().into_owned();
+    meta.identity = Some(project_identity(&project_root));
     meta.add_skill(skill_name);
     meta.write(&meta_path)?;
     Ok(catalog)
@@ -240,9 +376,9 @@ pub(crate) fn deposit_skill_at(
 /// Drop `skill_name` from the by-project catalog for `project_root`.
 ///
 /// Soft success when home, project entry, or name is already absent, or when
-/// `meta.root` belongs to a different project sharing this basename. Never
-/// creates inventory. Preserves existing meta `name`/`root` when siblings
-/// remain. Removes the project catalog directory when no names remain.
+/// stored ownership cannot be proven. Never creates inventory. Preserves
+/// existing meta `name`/`root` when siblings remain. Removes the project
+/// catalog directory when no names remain.
 pub fn withdraw_skill(project_root: &Path, skill_name: &str) -> Result<(), Error> {
     withdraw_skill_at(None, project_root, skill_name)
 }
@@ -276,9 +412,6 @@ pub(crate) fn withdraw_skill_at(
     if meta.skills.is_empty() {
         return remove_catalog_dir(&catalog);
     }
-    // Legacy metas omit `root`; after partial withdraw, seal ownership so a
-    // foreign basename checkout cannot soft-own remaining skill names.
-    meta.seal_root_if_empty(&project_root);
     meta.write(&meta_path)
 }
 
@@ -288,6 +421,30 @@ pub(crate) fn withdraw_skill_at(
 /// project sharing this basename. Does not create inventory or touch library.
 pub fn forget_project(project_root: &Path) -> Result<(), Error> {
     forget_project_at(None, project_root)
+}
+
+/// Validate catalog cleanup before destructive project filesystem changes.
+pub(crate) fn preflight_forget_project(project_root: &Path) -> Result<(), Error> {
+    preflight_forget_project_at(None, project_root)
+}
+
+pub(crate) fn preflight_forget_project_at(
+    home: Option<&Path>,
+    project_root: &Path,
+) -> Result<(), Error> {
+    let project_root = match project_root.canonicalize() {
+        Ok(path) => path,
+        Err(_) => return Ok(()),
+    };
+    let Some(catalog) = existing_project_catalog(home, &project_root)? else {
+        return Ok(());
+    };
+    let meta_path = catalog.join("meta.json");
+    if meta_path.is_file() {
+        refuse_symlink(&meta_path)?;
+        let _ = CatalogMeta::read(&meta_path, &project_root)?;
+    }
+    Ok(())
 }
 
 /// Like [`forget_project`], with an optional home root (tests).
@@ -356,9 +513,12 @@ pub fn list_catalog(home: Option<&Path>) -> Result<Vec<CatalogEntry>, Error> {
     let mut entries = Vec::new();
     let mut dirs: Vec<_> = fs::read_dir(&by_project)
         .map_err(|e| map_io(&by_project, e))?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .collect();
+        .map(|entry| {
+            entry
+                .map(|entry| entry.path())
+                .map_err(|e| map_io(&by_project, e))
+        })
+        .collect::<Result<_, _>>()?;
     dirs.sort();
 
     for dir in dirs {
@@ -367,7 +527,7 @@ pub fn list_catalog(home: Option<&Path>) -> Result<Vec<CatalogEntry>, Error> {
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_string();
-        if name.is_empty() || name.starts_with('.') {
+        if name.is_empty() {
             continue;
         }
         if dir.is_symlink() || !dir.is_dir() {
@@ -447,9 +607,10 @@ mod tests {
         assert_eq!(meta.skills.iter().collect::<Vec<_>>().len(), 1);
         assert!(!meta.withdraw_skill("missing"));
 
-        // Empty root: legacy basename soft-own.
+        // Empty root is ambiguous and never proves ownership.
+        meta.identity = None;
         meta.root.clear();
-        assert!(meta.catalog_owned_by(&project));
+        assert!(!meta.catalog_owned_by(&project));
         // Unresolvable path: soft-refuse.
         meta.root = project
             .join("does-not-exist-ownership-probe")
@@ -472,58 +633,30 @@ mod tests {
     }
 
     #[test]
-    fn withdraw_seals_empty_root_and_blocks_foreign_forget() {
+    fn destructive_operations_do_not_claim_empty_root_metadata() {
         let temp = TempDir::new().unwrap();
         let home = temp.path().join("home");
-        let clone_a = temp.path().join("clone-a").join("app");
-        let clone_b = temp.path().join("clone-b").join("app");
-        fs::create_dir_all(&clone_a).unwrap();
-        fs::create_dir_all(&clone_b).unwrap();
-        let catalog = deposit_skill_at(Some(&home), &clone_a, "alpha").unwrap();
-        deposit_skill_at(Some(&home), &clone_a, "beta").unwrap();
+        let project = temp.path().join("app");
+        fs::create_dir_all(&project).unwrap();
+        let catalog = deposit_skill_at(Some(&home), &project, "alpha").unwrap();
+        deposit_skill_at(Some(&home), &project, "beta").unwrap();
 
-        // Legacy: missing/empty root still soft-owns for the first withdraws.
         let meta_path = catalog.join("meta.json");
         let mut value: Value =
             serde_json::from_str(&fs::read_to_string(&meta_path).unwrap()).unwrap();
         value["root"] = json!("");
+        value.as_object_mut().unwrap().remove("identity");
         fs::write(
             &meta_path,
             format!("{}\n", serde_json::to_string_pretty(&value).unwrap()),
         )
         .unwrap();
+        let before = fs::read(&meta_path).unwrap();
 
-        withdraw_skill_at(Some(&home), &clone_a, "alpha").unwrap();
-        let after: Value = serde_json::from_str(&fs::read_to_string(&meta_path).unwrap()).unwrap();
-        let sealed = after["root"].as_str().unwrap_or("");
-        assert!(
-            !sealed.is_empty(),
-            "empty root should seal after partial withdraw"
-        );
-        assert_eq!(
-            Path::new(sealed).canonicalize().unwrap(),
-            clone_a.canonicalize().unwrap()
-        );
-        assert_eq!(
-            after["skills"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter_map(|s| s.as_str())
-                .collect::<Vec<_>>(),
-            vec!["beta"]
-        );
+        withdraw_skill_at(Some(&home), &project, "alpha").unwrap();
+        forget_project_at(Some(&home), &project).unwrap();
 
-        // Foreign basename must not forget remaining names after seal.
-        forget_project_at(Some(&home), &clone_b).unwrap();
-        assert_eq!(
-            list_catalog(Some(&home))
-                .unwrap()
-                .iter()
-                .map(|e| e.skill.as_str())
-                .collect::<Vec<_>>(),
-            vec!["beta"]
-        );
+        assert_eq!(fs::read(&meta_path).unwrap(), before);
     }
 
     #[test]
@@ -562,6 +695,198 @@ mod tests {
                 .any(|s| s == "grill-me")
         );
         assert!(!catalog.join("grill-me").exists());
+    }
+
+    #[test]
+    fn projects_with_the_same_basename_have_distinct_catalog_identities() {
+        let temp = TempDir::new().unwrap();
+        let home = temp.path().join("home");
+        let first = temp.path().join("first").join("app");
+        let second = temp.path().join("second").join("app");
+        fs::create_dir_all(&first).unwrap();
+        fs::create_dir_all(&second).unwrap();
+
+        let first_catalog = deposit_skill_at(Some(&home), &first, "alpha").unwrap();
+        let second_catalog = deposit_skill_at(Some(&home), &second, "beta").unwrap();
+
+        assert_ne!(first_catalog, second_catalog);
+        let rows = list_catalog(Some(&home)).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().any(|row| {
+            row.root == first.canonicalize().unwrap().to_string_lossy() && row.skill == "alpha"
+        }));
+        assert!(rows.iter().any(|row| {
+            row.root == second.canonicalize().unwrap().to_string_lossy() && row.skill == "beta"
+        }));
+    }
+
+    #[test]
+    fn long_project_basename_stays_within_component_limit() {
+        let temp = TempDir::new().unwrap();
+        let home = temp.path().join("home");
+        let project = temp.path().join("p".repeat(200));
+        fs::create_dir_all(&project).unwrap();
+
+        let catalog = deposit_skill_at(Some(&home), &project, "alpha").unwrap();
+
+        assert!(
+            catalog.file_name().unwrap().to_string_lossy().len() <= 255,
+            "catalog component exceeded common filesystem NAME_MAX: {}",
+            catalog.display()
+        );
+        deposit_skill_at(Some(&home), &project, "beta").unwrap();
+        assert_eq!(list_catalog(Some(&home)).unwrap().len(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_project_root_keeps_catalog_ownership() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let temp = TempDir::new().unwrap();
+        let home = temp.path().join("home");
+        let project = temp
+            .path()
+            .join(OsString::from_vec(b"project-\x80".to_vec()));
+        if let Err(error) = fs::create_dir_all(&project) {
+            assert_eq!(
+                error.raw_os_error(),
+                Some(92),
+                "unexpected fixture error: {error}"
+            );
+            return;
+        }
+
+        deposit_skill_at(Some(&home), &project, "alpha").unwrap();
+        deposit_skill_at(Some(&home), &project, "beta").unwrap();
+        withdraw_skill_at(Some(&home), &project, "alpha").unwrap();
+        assert_eq!(
+            list_catalog(Some(&home))
+                .unwrap()
+                .iter()
+                .map(|entry| entry.skill.as_str())
+                .collect::<Vec<_>>(),
+            vec!["beta"]
+        );
+        forget_project_at(Some(&home), &project).unwrap();
+        assert!(list_catalog(Some(&home)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn deposit_refuses_ambiguous_legacy_catalog() {
+        let temp = TempDir::new().unwrap();
+        let home = temp.path().join("home");
+        let project = temp.path().join("app");
+        fs::create_dir_all(&project).unwrap();
+        let project = project.canonicalize().unwrap();
+        ensure_inventory_root(Some(&home)).unwrap();
+        let legacy = legacy_project_catalog_dir(&home, &project);
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(
+            legacy.join("meta.json"),
+            "{\"name\":\"app\",\"skills\":[\"legacy\"]}\n",
+        )
+        .unwrap();
+
+        let error = deposit_skill_at(Some(&home), &project, "alpha").unwrap_err();
+
+        assert!(
+            error.to_string().contains("ambiguous legacy catalog"),
+            "{error}"
+        );
+        assert!(legacy.join("meta.json").is_file());
+        assert!(!project_catalog_dir(&home, &project).unwrap().exists());
+    }
+
+    #[test]
+    fn deposit_surfaces_malformed_legacy_catalog() {
+        let temp = TempDir::new().unwrap();
+        let home = temp.path().join("home");
+        let project = temp.path().join("app");
+        fs::create_dir_all(&project).unwrap();
+        let project = project.canonicalize().unwrap();
+        ensure_inventory_root(Some(&home)).unwrap();
+        let legacy = legacy_project_catalog_dir(&home, &project);
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("meta.json"), "{not-json}\n").unwrap();
+
+        let error = deposit_skill_at(Some(&home), &project, "alpha").unwrap_err();
+
+        assert!(
+            error.to_string().contains("Invalid catalog meta"),
+            "{error}"
+        );
+        assert!(!project_catalog_dir(&home, &project).unwrap().exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn catalog_identity_does_not_normalize_backslash_into_separator() {
+        let temp = TempDir::new().unwrap();
+        let home = temp.path().join("home");
+        let backslash = temp.path().join("a\\b").join("app");
+        let separator = temp.path().join("a").join("b").join("app");
+        fs::create_dir_all(&backslash).unwrap();
+        fs::create_dir_all(&separator).unwrap();
+
+        let first = deposit_skill_at(Some(&home), &backslash, "alpha").unwrap();
+        let second = deposit_skill_at(Some(&home), &separator, "beta").unwrap();
+
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn deposit_migrates_legacy_catalog_with_matching_root() {
+        let temp = TempDir::new().unwrap();
+        let home = temp.path().join("home");
+        let project = temp.path().join("app");
+        fs::create_dir_all(&project).unwrap();
+        let project = project.canonicalize().unwrap();
+        ensure_inventory_root(Some(&home)).unwrap();
+        let legacy = legacy_project_catalog_dir(&home, &project);
+        fs::create_dir_all(&legacy).unwrap();
+        let mut meta = CatalogMeta::by_project(&project);
+        meta.add_skill("alpha");
+        meta.write(&legacy.join("meta.json")).unwrap();
+
+        let catalog = deposit_skill_at(Some(&home), &project, "beta").unwrap();
+
+        assert_ne!(catalog, legacy);
+        assert!(!legacy.exists());
+        assert_eq!(
+            list_catalog(Some(&home))
+                .unwrap()
+                .iter()
+                .map(|entry| entry.skill.as_str())
+                .collect::<Vec<_>>(),
+            vec!["alpha", "beta"]
+        );
+    }
+
+    #[test]
+    fn deposit_leaves_foreign_legacy_catalog_untouched() {
+        let temp = TempDir::new().unwrap();
+        let home = temp.path().join("home");
+        let first = temp.path().join("first").join("app");
+        let second = temp.path().join("second").join("app");
+        fs::create_dir_all(&first).unwrap();
+        fs::create_dir_all(&second).unwrap();
+        let first = first.canonicalize().unwrap();
+        ensure_inventory_root(Some(&home)).unwrap();
+        let legacy = legacy_project_catalog_dir(&home, &first);
+        fs::create_dir_all(&legacy).unwrap();
+        let mut meta = CatalogMeta::by_project(&first);
+        meta.add_skill("alpha");
+        let meta_path = legacy.join("meta.json");
+        meta.write(&meta_path).unwrap();
+        let before = fs::read(&meta_path).unwrap();
+
+        let second_catalog = deposit_skill_at(Some(&home), &second, "beta").unwrap();
+
+        assert_ne!(second_catalog, legacy);
+        assert_eq!(fs::read(&meta_path).unwrap(), before);
+        assert_eq!(list_catalog(Some(&home)).unwrap().len(), 2);
     }
 
     #[test]

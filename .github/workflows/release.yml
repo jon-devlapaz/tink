@@ -6,45 +6,103 @@ on:
       - "v*"
   workflow_dispatch:
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  quality:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Validate release ref
+        env:
+          RELEASE_REF_NAME: ${{ github.ref_name }}
+          RELEASE_REF_TYPE: ${{ github.ref_type }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+
+          ref_name = os.environ["RELEASE_REF_NAME"]
+          if os.environ["RELEASE_REF_TYPE"] != "tag" or not ref_name.startswith("v"):
+              raise SystemExit("release workflow must run from a v-prefixed tag")
+          with open("Cargo.toml", encoding="utf-8") as source:
+              manifest = source.read()
+          package = re.search(r"(?ms)^\[package\]\s*$.*?^version\s*=\s*\"([^\"]+)\"\s*$", manifest)
+          if package is None:
+              raise SystemExit("could not read [package] version from Cargo.toml")
+          package_version = package.group(1)
+          if ref_name[1:] != package_version:
+              raise SystemExit(
+                  f"release tag {ref_name} does not match Cargo.toml version {package_version}"
+              )
+          PY
+
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.95.0
+          components: rustfmt, clippy
+
+      - name: Verify
+        run: |
+          cargo fmt --all -- --check
+          cargo check --workspace --all-targets --locked
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo test --workspace --all-targets --locked
+          cargo test --workspace --locked --doc
+          sh -n install.sh
+          shellcheck -x install.sh
+
+  audit:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Dependency audit
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   build:
     name: ${{ matrix.target }}
+    needs: [quality, audit]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: aarch64-apple-darwin
-            os: macos-14
+            os: macos-15
           - target: x86_64-apple-darwin
-            os: macos-14
+            os: macos-15-intel
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-22.04
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-22.04
-            cross: true
+            os: ubuntu-22.04-arm
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
         with:
+          toolchain: 1.95.0
           targets: ${{ matrix.target }}
 
-      - name: Install aarch64 Linux linker
-        if: matrix.cross
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Test
+        run: cargo test --workspace --all-targets --locked --target ${{ matrix.target }}
 
       - name: Build
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        run: cargo build --workspace --release --locked --target ${{ matrix.target }}
 
       - name: Package
         run: |
@@ -57,7 +115,7 @@ jobs:
           echo "ASSET=dist/${ASSET}" >> "$GITHUB_ENV"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: tink-${{ matrix.target }}
           path: ${{ env.ASSET }}
@@ -66,11 +124,13 @@ jobs:
     name: publish release
     needs: build
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
           merge-multiple: true
@@ -79,6 +139,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
           VERSION="${GITHUB_REF_NAME#v}"
           NOTES="tink ${VERSION}
 
@@ -92,7 +154,92 @@ jobs:
           tink update
           \`\`\`
           "
-          gh release create "$GITHUB_REF_NAME" \
-            artifacts/*.tar.gz \
+
+          expected_assets=(
+            "artifacts/tink-${VERSION}-aarch64-apple-darwin.tar.gz"
+            "artifacts/tink-${VERSION}-aarch64-unknown-linux-gnu.tar.gz"
+            "artifacts/tink-${VERSION}-x86_64-apple-darwin.tar.gz"
+            "artifacts/tink-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          )
+          expected_names=()
+          expected_uploads=()
+          for asset in "${expected_assets[@]}"; do
+            if [ ! -f "${asset}" ] || [ -L "${asset}" ]; then
+              echo "Missing regular release artifact: ${asset}" >&2
+              exit 1
+            fi
+            name="${asset##*/}"
+            digest="sha256:$(sha256sum "${asset}" | awk '{print $1}')"
+            expected_names+=("${name}")
+            expected_uploads+=("${name}"$'\t'"uploaded"$'\t'"${digest}")
+          done
+
+          actual_assets=()
+          mapfile -t actual_assets < <(find artifacts -maxdepth 1 -type f -printf '%f\n' | sort)
+          if [ "${#actual_assets[@]}" -ne "${#expected_names[@]}" ]; then
+            echo "Downloaded artifact inventory does not contain exactly four assets" >&2
+            exit 1
+          fi
+          for index in "${!expected_names[@]}"; do
+            if [ "${actual_assets[$index]}" != "${expected_names[$index]}" ]; then
+              echo "Unexpected downloaded release artifact: ${actual_assets[$index]}" >&2
+              exit 1
+            fi
+          done
+
+          release_draft="$(gh release view "${tag}" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+          if [ "${release_draft}" = "false" ]; then
+            published_assets=()
+            mapfile -t published_assets < <(
+              gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" \
+                --jq '.assets[] | [.name, .state, (.digest // "")] | @tsv' |
+                sort
+            )
+            if [ "${#published_assets[@]}" -ne "${#expected_names[@]}" ]; then
+              echo "Published release ${tag} has an incomplete asset inventory" >&2
+              exit 1
+            fi
+            for index in "${!expected_names[@]}"; do
+              IFS=$'\t' read -r name state digest <<<"${published_assets[$index]}"
+              if [ "${name}" != "${expected_names[$index]}" ] || \
+                [ "${state}" != "uploaded" ] || \
+                [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+                echo "Published release ${tag} has unexpected or unverifiable assets" >&2
+                exit 1
+              fi
+            done
+            echo "Release ${tag} is already complete."
+            exit 0
+          fi
+
+          if [ -z "${release_draft}" ]; then
+            gh release create "${tag}" \
+              --verify-tag --draft \
+              --title "tink ${VERSION}" \
+              --notes "$NOTES"
+          elif [ "${release_draft}" != "true" ]; then
+            echo "Could not determine release state for ${tag}" >&2
+            exit 1
+          fi
+
+          gh release upload "${tag}" "${expected_assets[@]}" --clobber
+          uploaded_assets=()
+          mapfile -t uploaded_assets < <(
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" \
+              --jq '.assets[] | [.name, .state, (.digest // "")] | @tsv' |
+              sort
+          )
+          if [ "${#uploaded_assets[@]}" -ne "${#expected_uploads[@]}" ]; then
+            echo "Release asset state or digest does not match the local artifact" >&2
+            exit 1
+          fi
+          for index in "${!expected_uploads[@]}"; do
+            if [ "${uploaded_assets[$index]}" != "${expected_uploads[$index]}" ]; then
+              echo "Release asset state or digest does not match the local artifact" >&2
+              exit 1
+            fi
+          done
+
+          gh release edit "${tag}" --draft=false --latest \
             --title "tink ${VERSION}" \
             --notes "$NOTES"

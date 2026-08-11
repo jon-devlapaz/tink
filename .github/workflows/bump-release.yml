@@ -1,7 +1,8 @@
 name: bump-release
 
-# Every push to main ships a patch release: bump Cargo version, tag, then
-# dispatch the existing tag/ref-based release workflow.
+# Every push to main ships a patch release after the quality and native-platform
+# gates: bump Cargo version, atomically publish main plus its tag, then dispatch
+# the tag/ref-based release workflow.
 # GITHUB_TOKEN pushes do not re-trigger workflows; we still skip our own
 # release commits and dispatch release.yml explicitly.
 
@@ -14,28 +15,87 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
-  actions: write
+  contents: read
 
 jobs:
-  bump:
+  verify:
     if: "${{ !startsWith(github.event.head_commit.message, 'chore: release v') }}"
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Install Rust
+      - name: Install Rust 1.95.0
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
-          toolchain: stable
-          components: rustfmt
+          toolchain: 1.95.0
+          components: rustfmt, clippy
 
       - name: Verify
         run: |
-          cargo fmt --check
-          cargo test --locked
+          cargo fmt --all -- --check
+          cargo check --workspace --all-targets --locked
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo test --workspace --all-targets --locked
+          cargo test --workspace --locked --doc
+          cargo build --workspace --release --locked
+          sh -n install.sh
+          shellcheck -x install.sh
+
+  audit:
+    if: "${{ !startsWith(github.event.head_commit.message, 'chore: release v') }}"
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Dependency audit
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  platform:
+    if: "${{ !startsWith(github.event.head_commit.message, 'chore: release v') }}"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-15
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.95.0
+          targets: ${{ matrix.target }}
+
+      - name: Test
+        run: cargo test --workspace --all-targets --locked --target ${{ matrix.target }}
+
+      - name: Build release
+        run: cargo build --workspace --release --locked --target ${{ matrix.target }}
+
+  bump:
+    needs: [verify, audit, platform]
+    if: "${{ !startsWith(github.event.head_commit.message, 'chore: release v') }}"
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
 
       - name: Bump patch, tag, and dispatch release
         env:
@@ -44,6 +104,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main --tags
 
           current="$(sed -n 's/^version = "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)"/\1/p' Cargo.toml | head -n1)"
           if [ -z "${current}" ]; then
@@ -51,13 +112,54 @@ jobs:
             exit 1
           fi
 
+          current_tag="v${current}"
+          if git rev-parse --verify --quiet "refs/tags/${current_tag}" >/dev/null; then
+            current_tagged_version="$(git show "${current_tag}:Cargo.toml" | sed -n 's/^version = "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)"/\1/p' | head -n1)"
+            if [ "${current_tagged_version}" != "${current}" ]; then
+              echo "Existing tag ${current_tag} does not contain Cargo version ${current}" >&2
+              exit 1
+            fi
+            current_tag_commit="$(git rev-parse "${current_tag}^{commit}")"
+            if ! git merge-base --is-ancestor "${current_tag_commit}" origin/main; then
+              echo "Existing tag ${current_tag} is not contained in origin/main" >&2
+              exit 1
+            fi
+            current_release_draft="$(gh release view "${current_tag}" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+            if [ "${current_release_draft}" != "false" ]; then
+              gh workflow run release.yml --ref "${current_tag}"
+              echo "Re-dispatched incomplete release ${current_tag}; rerun this bump after it publishes." >&2
+              exit 1
+            fi
+          fi
+
           IFS=. read -r major minor patch <<< "${current}"
           new="${major}.${minor}.$((patch + 1))"
           tag="v${new}"
 
           if git rev-parse --verify --quiet "refs/tags/${tag}" >/dev/null; then
-            echo "Tag ${tag} already exists; skipping."
+            tagged_version="$(git show "${tag}:Cargo.toml" | sed -n 's/^version = "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)"/\1/p' | head -n1)"
+            if [ "${tagged_version}" != "${new}" ]; then
+              echo "Existing tag ${tag} does not contain Cargo version ${new}" >&2
+              exit 1
+            fi
+            tag_commit="$(git rev-parse "${tag}^{commit}")"
+            if ! git merge-base --is-ancestor "${tag_commit}" origin/main; then
+              echo "Existing tag ${tag} is not contained in origin/main" >&2
+              exit 1
+            fi
+            release_draft="$(gh release view "${tag}" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+            if [ "${release_draft}" = "false" ]; then
+              echo "Release ${tag} is already published."
+              exit 0
+            fi
+            gh workflow run release.yml --ref "${tag}"
+            echo "Re-dispatched incomplete release ${tag}."
             exit 0
+          fi
+
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+            echo "origin/main advanced after this workflow started; a newer run owns the next bump" >&2
+            exit 1
           fi
 
           sed -i "s/^version = \"${current}\"/version = \"${new}\"/" Cargo.toml
@@ -79,8 +181,7 @@ jobs:
           git add Cargo.toml Cargo.lock
           git commit -m "chore: release v${new}"
           git tag "${tag}"
-          git push origin HEAD:main
-          git push origin "${tag}"
+          git push --atomic origin HEAD:main "refs/tags/${tag}:refs/tags/${tag}"
 
           # Token pushes do not cascade to on.push.tags; dispatch explicitly.
           gh workflow run release.yml --ref "${tag}"

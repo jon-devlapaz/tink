@@ -7,6 +7,7 @@ use crate::error::Error;
 use crate::git;
 use crate::init;
 use crate::library::{self, LibraryWrite};
+use crate::output;
 use crate::provenance::Provenance;
 use crate::skills::{self, Skill};
 use crate::sources::{self, AddSource, LockedSource, RemoteSource};
@@ -28,27 +29,85 @@ pub(crate) struct AddOutcome {
     origin: AddOrigin,
 }
 
+/// A locked source resolved exactly once. Checkout/staging guards keep the
+/// selected bytes alive through cross-skill validation and quiet publication.
+pub(crate) struct PreparedLockedSkill {
+    _guards: Vec<tempfile::TempDir>,
+    skill: Skill,
+    provenance: Option<Provenance>,
+}
+
+impl PreparedLockedSkill {
+    pub(crate) fn skill(&self) -> &Skill {
+        &self.skill
+    }
+
+    pub(crate) fn provenance(&self) -> Option<&Provenance> {
+        self.provenance.as_ref()
+    }
+
+    pub(crate) fn publish(self, project_root: &Path) -> Result<AddOutcome, Error> {
+        self.publish_at(project_root, None)
+    }
+
+    pub(crate) fn publish_at(
+        self,
+        project_root: &Path,
+        home: Option<&Path>,
+    ) -> Result<AddOutcome, Error> {
+        let destination_root = crate::home::project_skills_path(project_root);
+        place_skill_inner(
+            project_root,
+            home,
+            &self.skill,
+            &destination_root,
+            self.provenance.as_ref(),
+            false,
+        )
+    }
+}
+
 fn place_skill(
     project_root: &Path,
     skill: &Skill,
     destination_root: &Path,
     provenance: Option<&Provenance>,
 ) -> Result<AddOutcome, Error> {
+    place_skill_inner(
+        project_root,
+        None,
+        skill,
+        destination_root,
+        provenance,
+        true,
+    )
+}
+
+fn place_skill_inner(
+    project_root: &Path,
+    home: Option<&Path>,
+    skill: &Skill,
+    destination_root: &Path,
+    provenance: Option<&Provenance>,
+    report_library_repair: bool,
+) -> Result<AddOutcome, Error> {
+    crate::skillsets::ensure_standalone_source(&skill.path, &skill.name)?;
+    init::ensure_project_layout(project_root)?;
     // Protect the project tree first. Library is a rebuildable collection: repair on
     // diverge, then install project (re-add recovers if that fails).
     skills::preflight_install(skill, destination_root, provenance)?
         .require_compatible(&skill.name, destination_root)?;
-    let (_, write) = library::deposit(skill, provenance)?;
-    if write == LibraryWrite::Repaired {
-        let err = CliStyle::auto_stderr();
-        eprintln!(
-            "{}",
-            err.warn(format!("Updated home copy of {}", skill.name))
-        );
-    }
+    let (_, write) = library::deposit_at(home, skill, provenance)?;
     let (installed, created) = skills::install_local(skill, destination_root, provenance)?;
     // Catalog even on identical noop so the name index can catch up.
-    catalog::deposit_skill(project_root, &skill.name)?;
+    catalog::deposit_skill_at(home, project_root, &skill.name)?;
+    if write == LibraryWrite::Repaired && report_library_repair {
+        let err = CliStyle::auto_stderr();
+        output::warning_line(format_args!(
+            "{}",
+            err.warn(format!("Updated home copy of {}", skill.name))
+        ));
+    }
     Ok(AddOutcome {
         name: skill.name.clone(),
         created,
@@ -57,12 +116,110 @@ fn place_skill(
     })
 }
 
+fn select_locked_skill(
+    source_root: &Path,
+    name: &str,
+    source_path: Option<&str>,
+) -> Result<Skill, Error> {
+    let skill = if let Some(source_path) = source_path {
+        if source_path.is_empty()
+            || source_path.contains("..")
+            || source_path.contains('\\')
+            || source_path.starts_with('/')
+        {
+            return Err(Error::msg(format!(
+                "Invalid locked skill path: {source_path}"
+            )));
+        }
+        let path = crate::paths::canonicalize_beneath(source_root, Path::new(source_path))?;
+        let skill = skills::read_skill(&path, source_path != ".")?;
+        if skill.name != name {
+            return Err(Error::msg(format!(
+                "Locked skill path does not contain {name:?}"
+            )));
+        }
+        skill
+    } else {
+        select_one_skill(source_root, &output::display_path(source_root), Some(name))?
+    };
+    crate::skillsets::ensure_standalone_source(&skill.path, &skill.name)?;
+    Ok(skill)
+}
+
+pub(crate) fn prepare_locked_skill(
+    name: &str,
+    source: LockedSource,
+) -> Result<PreparedLockedSkill, Error> {
+    match source {
+        LockedSource::LocalPath {
+            declared,
+            project_root,
+        } => {
+            let source_root =
+                crate::paths::canonicalize_beneath(&project_root, Path::new(&declared))?;
+            let selected = select_locked_skill(&source_root, name, None)?;
+            let guard = tempfile::Builder::new()
+                .prefix(".tink-locked-local-")
+                .tempdir()
+                .map_err(|e| Error::msg(format!("local skill snapshot: {e}")))?;
+            let snapshot = guard.path().join(name);
+            skills::copy_skill_tree(&selected.path, &snapshot, &[".git"])?;
+            let skill = skills::read_skill(&snapshot, true)?;
+            Ok(PreparedLockedSkill {
+                _guards: vec![guard],
+                skill,
+                provenance: None,
+            })
+        }
+        LockedSource::Github {
+            remote,
+            revision,
+            path,
+        } => {
+            let (clone_guard, repository, tip) = git::checkout(&remote)?;
+            let mut guards = vec![clone_guard];
+            let source_root = if tip == revision {
+                repository
+            } else {
+                let (worktree_guard, worktree) = git::checkout_revision(&repository, &revision)?;
+                guards.push(worktree_guard);
+                worktree
+            };
+            let skill = select_locked_skill(&source_root, name, Some(&path))?;
+            let mut provenance = Provenance::new();
+            provenance.insert("source".into(), remote.url);
+            provenance.insert("revision".into(), revision);
+            provenance.insert("path".into(), path);
+            Ok(PreparedLockedSkill {
+                _guards: guards,
+                skill,
+                provenance: Some(provenance),
+            })
+        }
+        LockedSource::EmbeddedManageTink => {
+            let (guard, skill) = crate::manage_tink::prepare_manage_tink()?;
+            if skill.name != name {
+                return Err(Error::msg(format!(
+                    "Embedded source does not provide skill: {name}"
+                )));
+            }
+            Ok(PreparedLockedSkill {
+                _guards: vec![guard],
+                skill,
+                provenance: None,
+            })
+        }
+    }
+}
+
 /// Install into the project from an already-complete library tree (receipt included).
 fn place_from_library(
     project_root: &Path,
     skill: &Skill,
     destination_root: &Path,
 ) -> Result<AddOutcome, Error> {
+    crate::skillsets::ensure_standalone_source(&skill.path, &skill.name)?;
+    init::ensure_project_layout(project_root)?;
     skills::preflight_install(skill, destination_root, None)?
         .require_compatible(&skill.name, destination_root)?;
     let (installed, created) = skills::install_local(skill, destination_root, None)?;
@@ -107,8 +264,8 @@ fn repository_relative_path(repository: &Path, skill: &Skill) -> Result<String, 
         .map_err(|_| {
             Error::msg(format!(
                 "skill path {} is outside source {}",
-                skill.path.display(),
-                repository.display()
+                output::display_path(&skill.path),
+                output::display_path(repository)
             ))
         })?
         .to_string_lossy()
@@ -161,20 +318,24 @@ fn select_remote_skill_path(
     Ok(candidates.remove(0).1)
 }
 
+struct CheckoutInstallOptions<'a> {
+    source_display: &'a str,
+    selected_name: Option<&'a str>,
+    source_url: Option<&'a str>,
+    revision: Option<&'a str>,
+    source_path: Option<&'a str>,
+}
+
 fn install_from_checkout(
     project_root: &Path,
     source_root: &Path,
-    source_display: &str,
     destination_root: &Path,
-    selected_name: Option<&str>,
-    source_url: Option<&str>,
-    revision: Option<&str>,
-    source_path: Option<&str>,
+    options: CheckoutInstallOptions<'_>,
 ) -> Result<AddOutcome, Error> {
     let source_root = source_root
         .canonicalize()
         .map_err(|e| crate::paths::map_io(source_root, e))?;
-    let skill = if let Some(source_path) = source_path {
+    let skill = if let Some(source_path) = options.source_path {
         if source_path.is_empty()
             || source_path.contains("..")
             || source_path.contains('\\')
@@ -184,18 +345,22 @@ fn install_from_checkout(
                 "Invalid locked skill path: {source_path}"
             )));
         }
-        let path = source_root.join(source_path);
+        let path = crate::paths::canonicalize_beneath(&source_root, Path::new(source_path))?;
         let skill = skills::read_skill(&path, source_path != ".")?;
-        if selected_name != Some(skill.name.as_str()) && selected_name != Some(source_path) {
+        if options.selected_name != Some(skill.name.as_str())
+            && options.selected_name != Some(source_path)
+        {
             return Err(Error::msg(format!(
-                "Locked skill path does not contain {selected_name:?}"
+                "Locked skill path does not contain {:?}",
+                options.selected_name
             )));
         }
         skill
     } else {
-        select_one_skill(&source_root, source_display, selected_name)?
+        select_one_skill(&source_root, options.source_display, options.selected_name)?
     };
-    let provenance = match (source_url, revision) {
+    crate::skillsets::ensure_standalone_source(&skill.path, &skill.name)?;
+    let provenance = match (options.source_url, options.revision) {
         (Some(url), Some(rev)) => {
             let rel = skill
                 .path
@@ -203,8 +368,8 @@ fn install_from_checkout(
                 .map_err(|_| {
                     Error::msg(format!(
                         "skill path {} is outside source {}",
-                        skill.path.display(),
-                        source_root.display()
+                        output::display_path(&skill.path),
+                        output::display_path(&source_root)
                     ))
                 })?
                 .to_string_lossy()
@@ -223,69 +388,6 @@ fn install_from_checkout(
         return place_from_library(project_root, &cached, destination_root);
     }
     place_skill(project_root, &skill, destination_root, provenance.as_ref())
-}
-
-pub(crate) fn add_locked_skill(
-    project_root: &Path,
-    name: &str,
-    source: LockedSource,
-) -> Result<AddOutcome, Error> {
-    match source {
-        LockedSource::LocalPath { path, .. } => {
-            init::ensure_project_layout(project_root)?;
-            crate::paths::refuse_symlink(&path)?;
-            if !path.exists() {
-                return Err(Error::msg(format!(
-                    "Path does not exist: {}",
-                    path.display()
-                )));
-            }
-            let source_root = path
-                .canonicalize()
-                .map_err(|e| crate::paths::map_io(&path, e))?;
-            let outcome = install_from_checkout(
-                project_root,
-                &source_root,
-                &source_root.display().to_string(),
-                &crate::home::project_skills_path(project_root),
-                Some(name),
-                None,
-                None,
-                None,
-            )?;
-            report_add(&outcome);
-            Ok(outcome)
-        }
-        LockedSource::Github {
-            remote,
-            revision,
-            path,
-        } => {
-            let (_clone, repository, tip) = git::checkout(&remote)?;
-            let (_old_checkout, source_root) = if tip == revision {
-                (None, repository)
-            } else {
-                let (temp, checkout) = git::checkout_revision(&repository, &revision)?;
-                (Some(temp), checkout)
-            };
-            install_from_checkout(
-                project_root,
-                &source_root,
-                &remote.display,
-                &crate::home::project_skills_path(project_root),
-                Some(name),
-                Some(&remote.url),
-                Some(&revision),
-                Some(&path),
-            )
-        }
-        LockedSource::EmbeddedManageTink if name == "manage-tink" => {
-            crate::manage_tink::install_manage_tink(project_root)
-        }
-        LockedSource::EmbeddedManageTink => Err(Error::msg(format!(
-            "Embedded source does not provide skill: {name}"
-        ))),
-    }
 }
 
 pub fn add_skill(
@@ -311,7 +413,6 @@ fn add_skill_inner(
     selected_name: Option<&str>,
     report: bool,
 ) -> Result<AddOutcome, Error> {
-    init::ensure_project_layout(project_root)?;
     let destination_root = crate::home::project_skills_path(project_root);
     match sources::classify_add_input(source_value)? {
         AddSource::LocalPath(local_source) => {
@@ -322,22 +423,24 @@ fn add_skill_inner(
             let outcome = install_from_checkout(
                 project_root,
                 &source_root,
-                &source_root.display().to_string(),
                 &destination_root,
-                selected_name,
-                None,
-                None,
-                None,
+                CheckoutInstallOptions {
+                    source_display: &output::display_path(&source_root),
+                    selected_name,
+                    source_url: None,
+                    revision: None,
+                    source_path: None,
+                },
             )?;
             if report {
-                report_add(&outcome);
+                report_add(&outcome)?;
             }
             Ok(outcome)
         }
         AddSource::Github(remote) => {
             let outcome = add_from_remote(project_root, &destination_root, &remote, selected_name)?;
             if report {
-                report_add(&outcome);
+                report_add(&outcome)?;
             }
             Ok(outcome)
         }
@@ -350,34 +453,34 @@ fn add_skill_inner(
             let skill = library::load(&name)?;
             let outcome = place_from_library(project_root, &skill, &destination_root)?;
             if report {
-                report_add(&outcome);
+                report_add(&outcome)?;
             }
             Ok(outcome)
         }
     }
 }
 
-fn report_add(outcome: &AddOutcome) {
+fn report_add(outcome: &AddOutcome) -> Result<(), Error> {
     let style = CliStyle::auto_stdout();
     match (outcome.created, outcome.origin) {
-        (true, AddOrigin::Library) => println!(
+        (true, AddOrigin::Library) => output::stdout_line(format_args!(
             "{} {} → {} {}",
             style.success("Installed"),
             style.skill(&outcome.name),
-            style.accent(outcome.project_path.display()),
+            style.accent(output::display_path(&outcome.project_path)),
             style.muted("(from library)")
-        ),
-        (true, AddOrigin::Source) => println!(
+        )),
+        (true, AddOrigin::Source) => output::stdout_line(format_args!(
             "{} {} → {}",
             style.success("Installed"),
             style.skill(&outcome.name),
-            style.accent(outcome.project_path.display())
-        ),
-        (false, _) => println!(
+            style.accent(output::display_path(&outcome.project_path))
+        )),
+        (false, _) => output::stdout_line(format_args!(
             "{} {}",
             style.muted("Unchanged"),
             style.skill(&outcome.name)
-        ),
+        )),
     }
 }
 
@@ -402,11 +505,129 @@ fn add_from_remote(
     install_from_checkout(
         project_root,
         &source_root,
-        &remote.display,
         destination_root,
-        selected_name,
-        Some(&remote.url),
-        Some(&revision),
-        selected_path.as_deref(),
+        CheckoutInstallOptions {
+            source_display: &remote.display,
+            selected_name,
+            source_url: Some(&remote.url),
+            revision: Some(&revision),
+            source_path: selected_path.as_deref(),
+        },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+
+    #[test]
+    fn prepared_local_skill_owns_snapshot_bytes() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("alpha");
+        fs::create_dir_all(&source).unwrap();
+        let original = "---\nname: alpha\ndescription: Original fixture.\n---\n\n# Alpha\n";
+        fs::write(source.join("SKILL.md"), original).unwrap();
+        let prepared = prepare_locked_skill(
+            "alpha",
+            LockedSource::LocalPath {
+                declared: "alpha".into(),
+                project_root: temp.path().to_path_buf(),
+            },
+        )
+        .unwrap();
+
+        fs::write(
+            source.join("SKILL.md"),
+            "---\nname: alpha\ndescription: Mutated fixture.\n---\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(prepared.skill().path.join("SKILL.md")).unwrap(),
+            original
+        );
+    }
+
+    #[test]
+    fn prepared_local_skill_refuses_receipt_owned_source() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("common-skillset");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(
+            source.join("SKILL.md"),
+            "---\nname: common-skillset\ndescription: Receipt fixture.\n---\n",
+        )
+        .unwrap();
+        fs::write(source.join(".tink-skillset.json"), "{}\n").unwrap();
+
+        let error = prepare_locked_skill(
+            "common-skillset",
+            LockedSource::LocalPath {
+                declared: "common-skillset".into(),
+                project_root: temp.path().to_path_buf(),
+            },
+        )
+        .err()
+        .expect("receipt-owned source must be refused");
+
+        assert!(
+            error
+                .to_string()
+                .contains("tink skillset add common-skillset"),
+            "{error}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prepared_local_skill_refuses_symlinked_ancestor() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("project");
+        let outside = temp.path().join("outside");
+        let source = outside.join("alpha");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(&source).unwrap();
+        fs::write(
+            source.join("SKILL.md"),
+            "---\nname: alpha\ndescription: Outside fixture.\n---\n",
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&outside, project.join("jump")).unwrap();
+
+        let error = prepare_locked_skill(
+            "alpha",
+            LockedSource::LocalPath {
+                declared: "jump/alpha".into(),
+                project_root: project,
+            },
+        )
+        .err()
+        .expect("ancestor symlink must be refused");
+
+        assert!(error.to_string().contains("symlink"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn locked_remote_skill_refuses_symlinked_ancestor() {
+        let temp = tempfile::tempdir().unwrap();
+        let checkout = temp.path().join("checkout");
+        let outside = temp.path().join("outside");
+        let source = outside.join("alpha");
+        fs::create_dir_all(&checkout).unwrap();
+        fs::create_dir_all(&source).unwrap();
+        fs::write(
+            source.join("SKILL.md"),
+            "---\nname: alpha\ndescription: Outside fixture.\n---\n",
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&outside, checkout.join("jump")).unwrap();
+
+        let error = select_locked_skill(&checkout, "alpha", Some("jump/alpha"))
+            .expect_err("ancestor symlink must be refused");
+
+        assert!(error.to_string().contains("symlink"), "{error}");
+    }
 }

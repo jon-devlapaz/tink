@@ -19,8 +19,10 @@ curl -fsSL https://raw.githubusercontent.com/jon-devlapaz/tink/main/install.sh |
 ```
 
 That installs a release binary into `~/.local/bin/tink` (override with
-`TINK_INSTALL_DIR`). Requires `curl` and `tar`. Supported hosts: macOS and
-Linux on x86_64/arm64.
+`TINK_INSTALL_DIR`). Requires `curl`, `tar`, and Python 3. The installer checks
+GitHub's SHA-256 asset digest, accepts exactly one regular `tink` archive entry,
+probes the advertised version, and atomically replaces the destination.
+Supported hosts: macOS and Linux on x86_64/arm64.
 
 Update later with:
 
@@ -30,8 +32,8 @@ tink update
 
 ### From source
 
-You need a current Rust toolchain. For GitHub skill sources, `git` must be on
-`PATH`.
+The checkout pins Rust 1.95.0 with rustfmt and Clippy. For GitHub skill sources,
+`git` must be on `PATH`.
 
 ```console
 cargo install --git https://github.com/jon-devlapaz/tink.git --locked
@@ -151,6 +153,11 @@ tink skill remove skill-name
   install.
 - tink never inits Git, stages, commits, or pushes.
 
+Executable intent is preserved when Tink copies complete skill trees. Regular
+files are canonicalized to Git-portable `0644` or `0755` modes, while Unix path
+identity remains byte-exact even for non-UTF-8 names. Symlinks and special files
+are refused.
+
 ### Skillsets
 
 Skillset names are explicit and canonical: every name must end in `-skillset`;
@@ -195,14 +202,30 @@ tink destroy --yes
 tink update
 ```
 
+`tink skill list --catalog` always emits the `project`, `root`, `skill` TSV
+header, including for an empty catalog. Within fields, backslash, tab, carriage
+return, and newline are escaped as `\\\\`, `\\t`, `\\r`, and `\\n` so every
+skill remains one three-column row.
+
 **Breaking in 0.3.0:** `skill list --home` → `--catalog`; `skill list --stash` → `--library`. On-disk layout is still `$TINK_HOME/skills/` and `catalog/by-project/`. After a major CLI upgrade, refresh the live project skill: `tink skill remove manage-tink && tink init --no-zen --no-tink-skills`.
+
+Project lockfiles now use digest format/version 2 so file boundaries and Unix
+executable modes are actually pinned. An older lock is deliberately refused;
+run `tink skill lock` to regenerate it, then commit the result. Existing
+skillset receipts migrate through `tink skillset refresh NAME-skillset`.
 
 If the GitHub tip is already in the library and matches the tip byte-for-byte,
 `skill add` may install from the library. If a standalone library skill differs,
 tink repairs it and warns. A bare standalone skill name (not a path and not `owner/repo`) promotes from
 the library into the project. `skill remove` deletes the project skill
 directory and drops that name from the by-project catalog; it does not delete
-library trees. `destroy` also drops this project's catalog entry.
+library trees. `destroy` removes `.agents/skills/`, removes `.agents/` only when
+it is then empty, and drops this project's catalog entry. It preserves
+`AGENTS.md`, `ZEN.md`, unrelated `.agents/` siblings, and all library trees.
+
+Successful output goes to stdout; warnings and failures go to stderr. A closed
+stdout is normal pipeline termination (exit 0), while command and usage failures
+remain exit 1 and exit 2 respectively.
 
 ### Uninstall the CLI
 

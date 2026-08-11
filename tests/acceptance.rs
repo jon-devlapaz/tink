@@ -53,10 +53,31 @@ impl Workspace {
     }
 
     fn catalog_meta(&self, project_name: &str) -> PathBuf {
-        self.inventory
-            .join("catalog")
-            .join("by-project")
+        let project = self
+            .root
             .join(project_name)
+            .canonicalize()
+            .expect("canonical project");
+        let by_project = self.inventory.join("catalog").join("by-project");
+        if let Ok(entries) = fs::read_dir(&by_project) {
+            for entry in entries.flatten() {
+                let meta = entry.path().join("meta.json");
+                let Ok(raw) = fs::read_to_string(&meta) else {
+                    continue;
+                };
+                let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+                    continue;
+                };
+                let Some(root) = value.get("root").and_then(serde_json::Value::as_str) else {
+                    continue;
+                };
+                if Path::new(root).canonicalize().ok().as_deref() == Some(project.as_path()) {
+                    return meta;
+                }
+            }
+        }
+        by_project
+            .join(format!(".missing-{project_name}"))
             .join("meta.json")
     }
 
@@ -77,7 +98,8 @@ impl Workspace {
     }
 
     fn assert_cataloged(&self, project_name: &str, skill: &str) {
-        let raw = fs::read_to_string(self.catalog_meta(project_name))
+        let meta = self.catalog_meta(project_name);
+        let raw = fs::read_to_string(&meta)
             .unwrap_or_else(|_| panic!("missing catalog for {project_name}"));
         assert!(
             raw.contains(&format!("\"{skill}\"")),
@@ -88,11 +110,9 @@ impl Workspace {
             "expected library at skills/{skill}"
         );
         assert!(
-            !self
-                .inventory
-                .join("catalog")
-                .join("by-project")
-                .join(project_name)
+            !meta
+                .parent()
+                .expect("catalog project directory")
                 .join(skill)
                 .exists(),
             "must not copy skill trees into catalog/by-project"
@@ -629,6 +649,51 @@ fn a6_add_repairs_divergent_library_and_installs_project() {
     assert!(!archived.contains("from app"));
 }
 
+#[cfg(unix)]
+#[test]
+fn a6b_closed_warning_pipe_does_not_interrupt_completed_add() {
+    use std::os::fd::OwnedFd;
+    use std::os::unix::net::UnixStream;
+    use std::process::Stdio;
+
+    let ws = Workspace::new();
+    let app = ws.project("app");
+    let other = ws.project("other");
+    for project in [&app, &other] {
+        ws.cmd(project)
+            .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+            .assert()
+            .success();
+    }
+    let first = ws.root.join("demo-a");
+    let second = ws.root.join("demo-b");
+    write_skill(&first, "demo-skill", "from app");
+    write_skill(&second, "demo-skill", "from other");
+    ws.cmd(&app)
+        .args(["skill", "add", first.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let (read_end, write_end) = UnixStream::pair().expect("stderr pipe");
+    drop(read_end);
+    let write_end: OwnedFd = write_end.into();
+    let status = StdCommand::new(assert_cmd::cargo::cargo_bin!("tink"))
+        .current_dir(&other)
+        .env("TINK_HOME", &ws.inventory)
+        .args(["skill", "add", second.to_str().unwrap()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(write_end))
+        .status()
+        .expect("add with closed warning pipe");
+
+    assert_eq!(status.code(), Some(0));
+    let project =
+        fs::read_to_string(Workspace::skill_path(&other, "demo-skill").join("SKILL.md")).unwrap();
+    let archived = fs::read_to_string(ws.library_skill("demo-skill").join("SKILL.md")).unwrap();
+    assert!(project.contains("from other"));
+    assert!(archived.contains("from other"));
+}
+
 #[test]
 fn a8_add_uses_library_when_remote_tip_matches() {
     let ws = Workspace::new();
@@ -893,6 +958,120 @@ fn a12_add_refuses_unrelated_existing_tink_home() {
     assert!(!project.join("skills").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn a14_add_preserves_executable_permissions_in_project_and_library() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    let source = ws.root.join("executable-skill");
+    write_skill(&source, "executable-skill", "mode fixture");
+    let script = source.join("run.sh");
+    fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .success();
+
+    for copied in [
+        Workspace::skill_path(&project, "executable-skill").join("run.sh"),
+        ws.library_skill("executable-skill").join("run.sh"),
+    ] {
+        assert_eq!(
+            fs::metadata(copied).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a15_add_preserves_distinct_non_utf8_unix_filenames() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    let source = ws.root.join("opaque-name-skill");
+    write_skill(&source, "opaque-name-skill", "raw filename fixture");
+    let names = [
+        OsString::from_vec(vec![0x80]),
+        OsString::from_vec(vec![0x81]),
+    ];
+    for (name, body) in names
+        .iter()
+        .zip([b"first".as_slice(), b"second".as_slice()])
+    {
+        if let Err(error) = fs::write(source.join(name), body) {
+            #[cfg(target_os = "macos")]
+            {
+                assert_eq!(error.raw_os_error(), Some(92), "unexpected fixture error");
+                assert!(!Workspace::skill_path(&project, "opaque-name-skill").exists());
+                return;
+            }
+            #[cfg(not(target_os = "macos"))]
+            panic!("filesystem rejected non-UTF-8 fixture: {error}");
+        }
+    }
+
+    ws.cmd(&project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .success();
+
+    for root in [
+        Workspace::skill_path(&project, "opaque-name-skill"),
+        ws.library_skill("opaque-name-skill"),
+    ] {
+        assert_eq!(fs::read(root.join(&names[0])).unwrap(), b"first");
+        assert_eq!(fs::read(root.join(&names[1])).unwrap(), b"second");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a16_standalone_add_refuses_receipt_owned_sources_before_any_mutation() {
+    for dangling_receipt in [false, true] {
+        let ws = Workspace::new();
+        let project = ws.project("app");
+        let source = ws.root.join("common-skillset");
+        write_skill(
+            &source,
+            "common-skillset",
+            "receipt ownership boundary fixture",
+        );
+        let receipt = source.join(".tink-skillset.json");
+        if dangling_receipt {
+            std::os::unix::fs::symlink(source.join("missing-receipt"), &receipt).unwrap();
+        } else {
+            fs::write(&receipt, "{}\n").unwrap();
+        }
+
+        ws.cmd(&project)
+            .args(["skill", "add", source.to_str().unwrap()])
+            .assert()
+            .failure()
+            .stdout(predicate::str::is_empty())
+            .stderr(predicate::str::contains(
+                "tink skillset add common-skillset",
+            ));
+
+        assert!(!project.join(".agents").exists());
+        assert!(!ws.inventory.exists());
+    }
+}
+
 // --- K*: skillsets ---
 
 #[test]
@@ -941,6 +1120,10 @@ fn k1_skillset_add_installs_explicit_members_and_checks_digest() {
     assert!(library.join("alpha/SKILL.md").is_file());
     assert!(library.join("beta/SKILL.md").is_file());
     assert!(library.join(".tink-skillset.json").is_file());
+    let receipt: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(installed.join(".tink-skillset.json")).unwrap())
+            .unwrap();
+    assert_eq!(receipt["digestVersion"], 2);
 
     ws.cmd(&project)
         .args(["skillset", "add", "common-skillset"])
@@ -1895,7 +2078,7 @@ fn m1_skill_verify_accepts_empty_manifest_for_empty_project() {
     .unwrap();
     fs::write(
         project.join(".tink").join("skills.lock"),
-        "version = 1\nskills = []\n",
+        "version = 2\nskills = []\n",
     )
     .unwrap();
     ws.cmd(&project)
@@ -2032,6 +2215,147 @@ fn m6_skill_verify_requires_manifest() {
         .stderr(predicate::str::contains("Missing project manifest"));
 }
 
+#[test]
+fn m7_skill_sync_rejects_late_bad_hash_before_any_publication() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    for name in ["alpha", "beta"] {
+        let source = project.join("sources").join(name);
+        write_skill(&source, name, "manifest preflight fixture");
+        ws.cmd(&project)
+            .args(["skill", "add", source.to_str().unwrap()])
+            .assert()
+            .success();
+    }
+    ws.cmd(&project)
+        .args([
+            "skill",
+            "lock",
+            "--source",
+            "alpha=sources/alpha",
+            "--source",
+            "beta=sources/beta",
+        ])
+        .assert()
+        .success();
+    for name in ["alpha", "beta"] {
+        ws.cmd(&project)
+            .args(["skill", "remove", name])
+            .assert()
+            .success();
+        fs::remove_dir_all(ws.library_skill(name)).unwrap();
+    }
+    let lock_path = project.join(".tink/skills.lock");
+    let mut lock = fs::read_to_string(&lock_path).unwrap();
+    let hash_start = lock.rfind("sha256 = \"").unwrap() + "sha256 = \"".len();
+    lock.replace_range(hash_start..hash_start + 64, &"0".repeat(64));
+    fs::write(&lock_path, lock).unwrap();
+
+    ws.cmd(&project)
+        .args(["skill", "sync"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Skill content hash mismatch: beta",
+        ));
+
+    assert!(!Workspace::skill_path(&project, "alpha").exists());
+    assert!(!ws.library_skill("alpha").exists());
+    assert!(!ws.catalog_meta("app").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn m8_skill_sync_preflights_late_library_refusal_before_publication() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    for name in ["alpha", "beta"] {
+        let source = project.join("sources").join(name);
+        write_skill(&source, name, "library preflight fixture");
+        ws.cmd(&project)
+            .args(["skill", "add", source.to_str().unwrap()])
+            .assert()
+            .success();
+    }
+    ws.cmd(&project)
+        .args([
+            "skill",
+            "lock",
+            "--source",
+            "alpha=sources/alpha",
+            "--source",
+            "beta=sources/beta",
+        ])
+        .assert()
+        .success();
+    for name in ["alpha", "beta"] {
+        ws.cmd(&project)
+            .args(["skill", "remove", name])
+            .assert()
+            .success();
+        fs::remove_dir_all(ws.library_skill(name)).unwrap();
+    }
+    let outside = ws.root.join("outside-library-target");
+    fs::create_dir_all(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, ws.library_skill("beta")).unwrap();
+
+    ws.cmd(&project)
+        .args(["skill", "sync"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("symlink"));
+
+    assert!(!Workspace::skill_path(&project, "alpha").exists());
+    assert!(!ws.library_skill("alpha").exists());
+    assert!(!ws.catalog_meta("app").exists());
+}
+
+#[test]
+fn m9_legacy_lock_requires_relock_and_migrates_to_v2() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    fs::create_dir_all(project.join(".tink")).unwrap();
+    fs::write(
+        project.join(".tink/skills.toml"),
+        "version = 1\nskills = []\n",
+    )
+    .unwrap();
+    fs::write(
+        project.join(".tink/skills.lock"),
+        "version = 1\nskills = []\n",
+    )
+    .unwrap();
+
+    ws.cmd(&project)
+        .args(["skill", "verify"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("run `tink skill lock`"));
+    ws.cmd(&project).args(["skill", "lock"]).assert().success();
+
+    assert!(
+        fs::read_to_string(project.join(".tink/skills.lock"))
+            .unwrap()
+            .starts_with("version = 2\n")
+    );
+    ws.cmd(&project)
+        .args(["skill", "verify"])
+        .assert()
+        .success();
+}
+
 // --- L*: list ---
 
 #[test]
@@ -2081,6 +2405,75 @@ fn l3_skill_list_catalog_prints_tsv() {
                 .and(predicate::str::contains("demo-skill"))
                 .and(predicate::str::contains("manage-tink")),
         );
+}
+
+#[test]
+fn l11_hidden_project_remains_visible_in_catalog_listing() {
+    let ws = Workspace::new();
+    let project = ws.project(".app");
+    ws.cmd(&project).arg("init").assert().success();
+    let canonical = project.canonicalize().unwrap();
+
+    ws.cmd(&project)
+        .args(["skill", "list", "--catalog"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!(
+            ".app\t{}\tmanage-tink",
+            canonical.display()
+        )));
+}
+
+#[test]
+fn l12_catalog_listing_escapes_row_delimiters_without_changing_columns() {
+    let ws = Workspace::new();
+    let project = ws.project("project\trow\nnext\u{1b}[31m");
+    ws.cmd(&project).arg("init").assert().success();
+    let canonical = project.canonicalize().unwrap();
+    let escaped_root = canonical
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('\t', "\\t")
+        .replace('\r', "\\r")
+        .replace('\n', "\\n")
+        .replace('\u{1b}', "\\x1b");
+
+    let output = ws
+        .cmd(&project)
+        .args(["skill", "list", "--catalog"])
+        .output()
+        .expect("run skill list --catalog");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let lines: Vec<_> = stdout.lines().collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "catalog output must remain one row per skill"
+    );
+    assert_eq!(lines[0], "project\troot\tskill");
+    let fields: Vec<_> = lines[1].split('\t').collect();
+    assert_eq!(
+        fields,
+        [
+            "project\\trow\\nnext\\x1b[31m",
+            &escaped_root,
+            "manage-tink"
+        ]
+    );
+}
+
+#[test]
+fn l13_empty_catalog_listing_is_header_only_tsv() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.initialize_inventory();
+
+    ws.cmd(&project)
+        .args(["skill", "list", "--catalog"])
+        .assert()
+        .success()
+        .stdout("project\troot\tskill\n");
 }
 
 #[test]
@@ -2243,6 +2636,55 @@ fn l9_skill_list_refuses_symlinked_home_owner_directories() {
         assert!(owned.is_symlink());
         assert!(outside.is_dir());
     }
+}
+
+#[test]
+fn l10_catalog_distinguishes_projects_with_the_same_basename() {
+    let ws = Workspace::new();
+    let first = ws.root.join("first/app");
+    let second = ws.root.join("second/app");
+    fs::create_dir_all(&first).unwrap();
+    fs::create_dir_all(&second).unwrap();
+    for project in [&first, &second] {
+        ws.cmd(project)
+            .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+            .assert()
+            .success();
+    }
+    let alpha = ws.root.join("alpha");
+    let beta = ws.root.join("beta");
+    write_skill(&alpha, "alpha", "first project");
+    write_skill(&beta, "beta", "second project");
+    ws.cmd(&first)
+        .args(["skill", "add", alpha.to_str().unwrap()])
+        .assert()
+        .success();
+    ws.cmd(&second)
+        .args(["skill", "add", beta.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let output = ws
+        .cmd(&first)
+        .args(["skill", "list", "--catalog"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains(&format!(
+        "app\t{}\talpha",
+        first.canonicalize().unwrap().display()
+    )));
+    assert!(stdout.contains(&format!(
+        "app\t{}\tbeta",
+        second.canonicalize().unwrap().display()
+    )));
+    assert_eq!(
+        fs::read_dir(ws.inventory.join("catalog/by-project"))
+            .unwrap()
+            .count(),
+        2
+    );
 }
 
 // --- H*: library ---
@@ -2556,6 +2998,45 @@ fn h8_skill_harvest_skips_tink_home_and_unsafe_trees() {
     assert!(home_body.contains("stash resident"));
 }
 
+#[cfg(unix)]
+#[test]
+fn h14_harvest_skips_receipt_owned_sources_without_library_publication() {
+    for dangling_receipt in [false, true] {
+        let ws = Workspace::new();
+        let home = ws.root.join("home");
+        let project = ws.project("app");
+        let source = home.join(".agents").join("skills").join("common-skillset");
+        write_skill(
+            &source,
+            "common-skillset",
+            "receipt ownership boundary fixture",
+        );
+        let receipt = source.join(".tink-skillset.json");
+        if dangling_receipt {
+            std::os::unix::fs::symlink(source.join("missing-receipt"), &receipt).unwrap();
+        } else {
+            fs::write(&receipt, "{}\n").unwrap();
+        }
+
+        ws.cmd(&project)
+            .env("HOME", &home)
+            .args(["skill", "harvest"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("0 harvested"))
+            .stderr(
+                predicate::str::contains("Skipped")
+                    .and(predicate::str::contains("common-skillset"))
+                    .and(predicate::str::contains(
+                        "tink skillset add common-skillset",
+                    )),
+            );
+
+        assert!(!ws.library_skill("common-skillset").exists());
+        assert!(!project.join(".agents").exists());
+    }
+}
+
 #[test]
 fn h9_completion_offers_current_library_matches_without_creating_home() {
     let ws = Workspace::new();
@@ -2729,7 +3210,11 @@ fn h13_exact_cache_match_does_not_publish_skillset_as_standalone() {
         .args(["skill", "add", source.to_str().unwrap()])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Library entry is a skillset"));
+        .stderr(
+            predicate::str::contains("Source is owned by a skillset").and(
+                predicate::str::contains("tink skillset add bundle-skillset"),
+            ),
+        );
 
     assert_eq!(
         fs::read(library_root.join("SKILL.md")).unwrap(),
@@ -3169,7 +3654,7 @@ fn p8_refresh_all_preflights_before_updating_any_skill() {
 // --- D*: destroy ---
 
 #[test]
-fn d1_destroy_yes_removes_agents_zen_agents_md() {
+fn d1_destroy_yes_removes_agents_and_preserves_guidance() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
@@ -3185,6 +3670,8 @@ fn d1_destroy_yes_removes_agents_zen_agents_md() {
     assert!(project.join(".agents").is_dir());
     assert!(project.join("ZEN.md").is_file());
     assert!(project.join("AGENTS.md").is_file());
+    let zen_before = fs::read(project.join("ZEN.md")).unwrap();
+    let agents_before = fs::read(project.join("AGENTS.md")).unwrap();
     assert!(ws.inventory.join("layout.json").is_file());
     ws.assert_cataloged("app", "manage-tink");
     ws.assert_cataloged("app", "extra-skill");
@@ -3195,8 +3682,8 @@ fn d1_destroy_yes_removes_agents_zen_agents_md() {
         .success();
 
     assert!(!project.join(".agents").exists());
-    assert!(!project.join("ZEN.md").exists());
-    assert!(!project.join("AGENTS.md").exists());
+    assert_eq!(fs::read(project.join("ZEN.md")).unwrap(), zen_before);
+    assert_eq!(fs::read(project.join("AGENTS.md")).unwrap(), agents_before);
     assert!(ws.inventory.join("layout.json").is_file());
     assert!(
         ws.library_skill("manage-tink").join("SKILL.md").is_file(),
@@ -3251,10 +3738,12 @@ fn d4_destroy_refuses_symlinked_catalog_without_external_or_project_writes() {
     let project = ws.project("app");
     ws.cmd(&project).arg("init").assert().success();
     let catalog = ws.inventory.join("catalog");
+    let catalog_meta = ws.catalog_meta("app");
+    let catalog_meta_relative = catalog_meta.strip_prefix(&catalog).unwrap().to_path_buf();
     let external = ws.root.join("external-catalog-destroy");
     fs::rename(&catalog, &external).unwrap();
     std::os::unix::fs::symlink(&external, &catalog).unwrap();
-    let external_meta = external.join("by-project").join("app").join("meta.json");
+    let external_meta = external.join(catalog_meta_relative);
     let catalog_before = fs::read(&external_meta).unwrap();
     let project_before =
         fs::read(Workspace::skill_path(&project, "manage-tink").join("SKILL.md")).unwrap();
@@ -3272,6 +3761,28 @@ fn d4_destroy_refuses_symlinked_catalog_without_external_or_project_writes() {
         project_before
     );
     assert!(project.join(".agents").is_dir());
+}
+
+#[test]
+fn d5_destroy_preserves_unrelated_agents_siblings() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills"])
+        .assert()
+        .success();
+    let foreign = project.join(".agents/foreign-config.json");
+    fs::write(&foreign, b"keep\n").unwrap();
+
+    ws.cmd(&project)
+        .args(["destroy", "--yes"])
+        .assert()
+        .success();
+
+    assert!(!project.join(".agents/skills").exists());
+    assert_eq!(fs::read(&foreign).unwrap(), b"keep\n");
+    assert!(project.join(".agents").is_dir());
+    assert!(!ws.catalog_meta("app").exists());
 }
 
 // --- X*: skill remove ---
@@ -3524,10 +4035,12 @@ fn x7_remove_refuses_symlinked_catalog_without_external_or_project_writes() {
         .success();
 
     let catalog = ws.inventory.join("catalog");
+    let catalog_meta = ws.catalog_meta("app");
+    let catalog_meta_relative = catalog_meta.strip_prefix(&catalog).unwrap().to_path_buf();
     let external = ws.root.join("external-catalog-remove");
     fs::rename(&catalog, &external).unwrap();
     std::os::unix::fs::symlink(&external, &catalog).unwrap();
-    let external_meta = external.join("by-project").join("app").join("meta.json");
+    let external_meta = external.join(catalog_meta_relative);
     let catalog_before = fs::read(&external_meta).unwrap();
     let project_skill = Workspace::skill_path(&project, "demo-skill");
     let project_before = fs::read(project_skill.join("SKILL.md")).unwrap();
@@ -3632,6 +4145,15 @@ fn package_version() -> String {
 }
 
 fn write_release_fixture(dir: &Path, version: &str, binary_src: &Path) -> PathBuf {
+    write_release_fixture_with_mode(dir, version, binary_src, 0o755)
+}
+
+fn write_release_fixture_with_mode(
+    dir: &Path,
+    version: &str,
+    binary_src: &Path,
+    unix_mode: u32,
+) -> PathBuf {
     let target = host_release_target();
     assert_ne!(
         target, "unsupported",
@@ -3645,7 +4167,7 @@ fn write_release_fixture(dir: &Path, version: &str, binary_src: &Path) -> PathBu
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&staged_bin, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(&staged_bin, fs::Permissions::from_mode(unix_mode)).unwrap();
     }
     let archive = dir.join(&asset);
     let status = StdCommand::new("tar")
@@ -3657,6 +4179,11 @@ fn write_release_fixture(dir: &Path, version: &str, binary_src: &Path) -> PathBu
         .status()
         .expect("tar");
     assert!(status.success());
+    let archive_digest = {
+        use sha2::{Digest, Sha256};
+        let bytes = fs::read(&archive).unwrap();
+        format!("{:x}", Sha256::digest(bytes))
+    };
 
     let archive_url = format!("file://{}", archive.display());
     let meta = dir.join("release.json");
@@ -3666,13 +4193,633 @@ fn write_release_fixture(dir: &Path, version: &str, binary_src: &Path) -> PathBu
   "assets": [
     {{
       "name": "{asset}",
-      "browser_download_url": "{archive_url}"
+      "browser_download_url": "{archive_url}",
+      "digest": "sha256:{archive_digest}"
     }}
   ]
 }}"#
     );
     fs::write(&meta, body).unwrap();
     meta
+}
+
+#[cfg(unix)]
+fn wait_for_marker(path: &Path, child: &mut std::process::Child) {
+    let started = std::time::Instant::now();
+    while !path.exists() {
+        if let Some(status) = child.try_wait().expect("poll fixture process") {
+            panic!(
+                "fixture process exited with {status} before marker: {}",
+                path.display()
+            );
+        }
+        if started.elapsed() >= std::time::Duration::from_secs(60) {
+            interrupt_process_group(child.id());
+            let _ = child.wait();
+            panic!("timed out waiting for fixture marker: {}", path.display());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+#[cfg(unix)]
+fn interrupt_process_group(process_group: u32) {
+    let status = StdCommand::new("python3")
+        .args([
+            "-c",
+            "import os, signal, sys; os.killpg(int(sys.argv[1]), signal.SIGINT)",
+            &process_group.to_string(),
+        ])
+        .status()
+        .expect("signal process group");
+    assert!(
+        status.success(),
+        "could not interrupt fixture process group"
+    );
+}
+
+#[cfg(unix)]
+fn terminate_process(process: u32) {
+    let status = StdCommand::new("python3")
+        .args([
+            "-c",
+            "import os, signal, sys; os.kill(int(sys.argv[1]), signal.SIGTERM)",
+            &process.to_string(),
+        ])
+        .status()
+        .expect("signal fixture process");
+    assert!(status.success(), "could not terminate fixture process");
+}
+
+#[cfg(unix)]
+fn wait_for_output_bounded(
+    mut child: std::process::Child,
+    timeout: std::time::Duration,
+    context: &str,
+) -> std::process::Output {
+    let process_group = child.id();
+    let started = std::time::Instant::now();
+    loop {
+        if child.try_wait().expect("poll bounded fixture").is_some() {
+            return child.wait_with_output().expect("collect bounded fixture");
+        }
+        if started.elapsed() >= timeout {
+            interrupt_process_group(process_group);
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("{context} exceeded {timeout:?} after candidate start");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn v4_closed_stdout_does_not_panic_or_exit_101() {
+    use std::os::fd::OwnedFd;
+    use std::os::unix::net::UnixStream;
+    use std::process::Stdio;
+
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let (read_end, write_end) = UnixStream::pair().expect("stdout pipe");
+    drop(read_end);
+    let write_end: OwnedFd = write_end.into();
+    let output = StdCommand::new(assert_cmd::cargo::cargo_bin!("tink"))
+        .current_dir(&project)
+        .env("TINK_HOME", &ws.inventory)
+        .args(["skill", "list"])
+        .stdout(Stdio::from(write_end))
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn tink with closed stdout")
+        .wait_with_output()
+        .expect("wait for tink");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "closed stdout must exit cleanly: stderr={stderr:?}"
+    );
+    assert!(!stderr.contains("panicked at"));
+}
+
+#[cfg(unix)]
+#[test]
+fn v5_closed_stderr_does_not_hide_command_failure() {
+    use std::os::fd::OwnedFd;
+    use std::os::unix::net::UnixStream;
+    use std::process::Stdio;
+
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    let missing = project.join("missing-skill");
+    let (read_end, write_end) = UnixStream::pair().expect("stderr pipe");
+    drop(read_end);
+    let write_end: OwnedFd = write_end.into();
+
+    let status = StdCommand::new(assert_cmd::cargo::cargo_bin!("tink"))
+        .current_dir(&project)
+        .env("TINK_HOME", &ws.inventory)
+        .args(["skill", "add"])
+        .arg(&missing)
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(write_end))
+        .status()
+        .expect("run tink with closed stderr");
+
+    assert_eq!(
+        status.code(),
+        Some(1),
+        "closed stderr must not turn an underlying command failure into success"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn u6_install_script_rejects_invalid_payload_and_preserves_existing_binary() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let ws = Workspace::new();
+    let fixture = ws.root.join("install-release-fixture");
+    fs::create_dir_all(&fixture).unwrap();
+    let invalid_payload = fixture.join("invalid-tink");
+    fs::write(&invalid_payload, b"this is not a tink executable\n").unwrap();
+    fs::set_permissions(&invalid_payload, fs::Permissions::from_mode(0o644)).unwrap();
+    let meta = write_release_fixture_with_mode(&fixture, "99.0.0", &invalid_payload, 0o644);
+
+    let install_dir = ws.root.join("install");
+    fs::create_dir_all(&install_dir).unwrap();
+    let installed = install_dir.join("tink");
+    let known_good = b"#!/bin/sh\nprintf 'tink 0.3.14\\n'\n";
+    fs::write(&installed, known_good).unwrap();
+    fs::set_permissions(&installed, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let output = StdCommand::new("sh")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("install.sh"))
+        .env("TINK_INSTALL_DIR", &install_dir)
+        .env("TINK_RELEASES_API", format!("file://{}", meta.display()))
+        .output()
+        .expect("run install.sh");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let installed_after = fs::read(&installed).unwrap();
+
+    assert!(
+        !output.status.success()
+            && !stdout.contains("Installed tink")
+            && installed_after == known_good,
+        "invalid installer payload must fail without success output or clobbering: status={:?}, stdout={stdout:?}, stderr={stderr:?}, preserved={}",
+        output.status.code(),
+        installed_after == known_good
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn u7_install_script_publishes_verified_payload_after_successful_probe() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let ws = Workspace::new();
+    let fixture = ws.root.join("valid-install-release-fixture");
+    fs::create_dir_all(&fixture).unwrap();
+    let replacement = fixture.join("replacement-tink");
+    fs::write(&replacement, b"#!/bin/sh\nprintf 'tink 99.0.0\\n'\n").unwrap();
+    fs::set_permissions(&replacement, fs::Permissions::from_mode(0o755)).unwrap();
+    let meta = write_release_fixture(&fixture, "99.0.0", &replacement);
+
+    let install_dir = ws.root.join("install");
+    fs::create_dir_all(&install_dir).unwrap();
+    let installed = install_dir.join("tink");
+    fs::write(&installed, b"#!/bin/sh\nprintf 'tink 0.3.14\\n'\n").unwrap();
+    fs::set_permissions(&installed, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let output = StdCommand::new("sh")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("install.sh"))
+        .env("TINK_INSTALL_DIR", &install_dir)
+        .env("TINK_RELEASES_API", format!("file://{}", meta.display()))
+        .output()
+        .expect("run install.sh");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "install failed: {stdout}");
+    assert!(stdout.contains("Installed tink v99.0.0"));
+    assert!(stdout.contains("tink 99.0.0"));
+
+    assert_eq!(
+        fs::read(&installed).unwrap(),
+        fs::read(&replacement).unwrap()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn u8_install_script_rejects_non_semver_metadata_cleanly() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let ws = Workspace::new();
+    let fixture = ws.root.join("invalid-semver-release-fixture");
+    fs::create_dir_all(&fixture).unwrap();
+    let metadata = fixture.join("release.json");
+    fs::write(&metadata, r#"{"tag_name":"v01.2.3","assets":[]}"#).unwrap();
+    let install_dir = ws.root.join("install");
+    fs::create_dir_all(&install_dir).unwrap();
+    let installed = install_dir.join("tink");
+    let known_good = b"#!/bin/sh\nprintf 'tink 0.3.14\\n'\n";
+    fs::write(&installed, known_good).unwrap();
+    fs::set_permissions(&installed, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let output = StdCommand::new("sh")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("install.sh"))
+        .env("TINK_INSTALL_DIR", &install_dir)
+        .env(
+            "TINK_RELEASES_API",
+            format!("file://{}", metadata.display()),
+        )
+        .output()
+        .expect("run install.sh");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("invalid semantic version"), "{stderr}");
+    assert!(!stderr.contains("Traceback"), "{stderr}");
+    assert_eq!(fs::read(&installed).unwrap(), known_good);
+}
+
+#[test]
+fn u9_install_script_rejects_and_redacts_unsafe_api_url() {
+    let ws = Workspace::new();
+    let install_dir = ws.root.join("install");
+    let output = StdCommand::new("sh")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("install.sh"))
+        .env("TINK_INSTALL_DIR", &install_dir)
+        .env(
+            "TINK_RELEASES_API",
+            "https://user:supersecret@example.test/releases?token=private",
+        )
+        .output()
+        .expect("run install.sh");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("not an allowed release URL"), "{stderr}");
+    assert!(!stderr.contains("supersecret"), "{stderr}");
+    assert!(!stderr.contains("private"), "{stderr}");
+    assert!(!install_dir.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn u10_install_script_bounds_candidate_probe_and_preserves_existing_binary() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+
+    let ws = Workspace::new();
+    let fixture = ws.root.join("hanging-release-fixture");
+    fs::create_dir_all(&fixture).unwrap();
+    let hanging = fixture.join("hanging-tink");
+    fs::write(
+        &hanging,
+        b"#!/bin/sh\nprintf started > \"$TINK_PROBE_STARTED\"\nexec sleep 120\n",
+    )
+    .unwrap();
+    fs::set_permissions(&hanging, fs::Permissions::from_mode(0o755)).unwrap();
+    let metadata = write_release_fixture(&fixture, "99.0.0", &hanging);
+    let install_dir = ws.root.join("install");
+    fs::create_dir_all(&install_dir).unwrap();
+    let installed = install_dir.join("tink");
+    let known_good = b"#!/bin/sh\nprintf 'tink 0.3.14\\n'\n";
+    fs::write(&installed, known_good).unwrap();
+    fs::set_permissions(&installed, fs::Permissions::from_mode(0o755)).unwrap();
+    let candidate_started = ws.root.join("hanging-candidate-started");
+
+    let mut command = StdCommand::new("sh");
+    command
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("install.sh"))
+        .env("TINK_INSTALL_DIR", &install_dir)
+        .env("TINK_PROBE_STARTED", &candidate_started)
+        .env(
+            "TINK_RELEASES_API",
+            format!("file://{}", metadata.display()),
+        )
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0);
+    let mut child = command.spawn().expect("spawn bounded installer fixture");
+    wait_for_marker(&candidate_started, &mut child);
+    let output = wait_for_output_bounded(
+        child,
+        std::time::Duration::from_secs(25),
+        "bounded installer probe",
+    );
+
+    assert!(!output.status.success());
+    assert_eq!(fs::read(&installed).unwrap(), known_good);
+}
+
+#[cfg(unix)]
+#[test]
+fn u11_install_script_rejects_non_ascii_semver_digits_and_preserves_existing_binary() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let ws = Workspace::new();
+    let fixture = ws.root.join("non-ascii-semver-release-fixture");
+    fs::create_dir_all(&fixture).unwrap();
+    let metadata = fixture.join("release.json");
+    fs::write(&metadata, r#"{"tag_name":"v١.2.3","assets":[]}"#).unwrap();
+    let install_dir = ws.root.join("install");
+    fs::create_dir_all(&install_dir).unwrap();
+    let installed = install_dir.join("tink");
+    let known_good = b"#!/bin/sh\nprintf 'tink 0.3.14\\n'\n";
+    fs::write(&installed, known_good).unwrap();
+    fs::set_permissions(&installed, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let output = StdCommand::new("sh")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("install.sh"))
+        .env("TINK_INSTALL_DIR", &install_dir)
+        .env(
+            "TINK_RELEASES_API",
+            format!("file://{}", metadata.display()),
+        )
+        .output()
+        .expect("run install.sh");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("invalid semantic version"), "{stderr}");
+    assert!(!stderr.contains("Traceback"), "{stderr}");
+    assert_eq!(fs::read(&installed).unwrap(), known_good);
+}
+
+#[cfg(unix)]
+#[test]
+fn u12_install_script_kills_timed_out_candidate_descendants() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+
+    let ws = Workspace::new();
+    let fixture = ws.root.join("descendant-release-fixture");
+    fs::create_dir_all(&fixture).unwrap();
+    let candidate = fixture.join("descendant-tink");
+    fs::write(
+        &candidate,
+        b"#!/bin/sh\nprintf started > \"$TINK_PROBE_STARTED\"\n(sleep 6; printf survived > \"$TINK_DESCENDANT_MARKER\") &\nexit 0\n",
+    )
+    .unwrap();
+    fs::set_permissions(&candidate, fs::Permissions::from_mode(0o755)).unwrap();
+    let metadata = write_release_fixture(&fixture, "99.0.0", &candidate);
+    let marker = ws.root.join("descendant-survived");
+    let install_dir = ws.root.join("install");
+    fs::create_dir_all(&install_dir).unwrap();
+    let installed = install_dir.join("tink");
+    let known_good = b"#!/bin/sh\nprintf 'tink 0.3.14\\n'\n";
+    fs::write(&installed, known_good).unwrap();
+    fs::set_permissions(&installed, fs::Permissions::from_mode(0o755)).unwrap();
+    let candidate_started = ws.root.join("descendant-candidate-started");
+
+    let mut command = StdCommand::new("sh");
+    command
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("install.sh"))
+        .env("TINK_INSTALL_DIR", &install_dir)
+        .env("TINK_PROBE_STARTED", &candidate_started)
+        .env("TINK_DESCENDANT_MARKER", &marker)
+        .env(
+            "TINK_RELEASES_API",
+            format!("file://{}", metadata.display()),
+        )
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0);
+    let mut child = command
+        .spawn()
+        .expect("spawn descendant-cleanup installer fixture");
+    wait_for_marker(&candidate_started, &mut child);
+    let output = wait_for_output_bounded(
+        child,
+        std::time::Duration::from_secs(25),
+        "bounded installer descendant cleanup",
+    );
+
+    assert!(!output.status.success());
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    assert!(!marker.exists(), "timed-out candidate descendant survived");
+    assert_eq!(fs::read(&installed).unwrap(), known_good);
+}
+
+#[cfg(unix)]
+#[test]
+fn u13_install_script_rolls_back_when_published_probe_fails() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let ws = Workspace::new();
+    let fixture = ws.root.join("published-probe-release-fixture");
+    fs::create_dir_all(&fixture).unwrap();
+    let candidate = fixture.join("path-sensitive-tink");
+    fs::write(
+        &candidate,
+        b"#!/bin/sh\ncase \"$0\" in */install/tink) exit 7 ;; esac\nprintf 'tink 99.0.0\\n'\n",
+    )
+    .unwrap();
+    fs::set_permissions(&candidate, fs::Permissions::from_mode(0o755)).unwrap();
+    let metadata = write_release_fixture(&fixture, "99.0.0", &candidate);
+    let install_dir = ws.root.join("install");
+    fs::create_dir_all(&install_dir).unwrap();
+    let installed = install_dir.join("tink");
+    let known_good = b"#!/bin/sh\nprintf 'tink 0.3.14\\n'\n";
+    fs::write(&installed, known_good).unwrap();
+    fs::set_permissions(&installed, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let output = StdCommand::new("sh")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("install.sh"))
+        .env("TINK_INSTALL_DIR", &install_dir)
+        .env(
+            "TINK_RELEASES_API",
+            format!("file://{}", metadata.display()),
+        )
+        .output()
+        .expect("run install.sh");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert!(!stdout.contains("Installed"), "{stdout}");
+    assert!(stderr.contains("published tink failed"), "{stderr}");
+    assert_eq!(fs::read(&installed).unwrap(), known_good);
+    assert_eq!(
+        fs::metadata(&installed).unwrap().permissions().mode() & 0o777,
+        0o755
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn u14_install_interrupt_kills_candidate_group_without_traceback() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+
+    let ws = Workspace::new();
+    let fixture = ws.root.join("install-cancel-release-fixture");
+    fs::create_dir_all(&fixture).unwrap();
+    let candidate = fixture.join("cancel-tink");
+    fs::write(
+        &candidate,
+        b"#!/bin/sh\nprintf started > \"$TINK_CANCEL_STARTED\"\nsleep 3\nprintf survived > \"$TINK_CANCEL_SURVIVED\"\nprintf 'tink 99.0.0\\n'\n",
+    )
+    .unwrap();
+    fs::set_permissions(&candidate, fs::Permissions::from_mode(0o755)).unwrap();
+    let metadata = write_release_fixture(&fixture, "99.0.0", &candidate);
+    let install_dir = ws.root.join("install");
+    fs::create_dir_all(&install_dir).unwrap();
+    let installed = install_dir.join("tink");
+    let known_good = b"#!/bin/sh\nprintf 'tink 0.3.14\\n'\n";
+    fs::write(&installed, known_good).unwrap();
+    fs::set_permissions(&installed, fs::Permissions::from_mode(0o755)).unwrap();
+    let started = ws.root.join("install-candidate-started");
+    let survived = ws.root.join("install-candidate-survived");
+
+    let mut command = StdCommand::new("sh");
+    command
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("install.sh"))
+        .env("TINK_INSTALL_DIR", &install_dir)
+        .env("TINK_CANCEL_STARTED", &started)
+        .env("TINK_CANCEL_SURVIVED", &survived)
+        .env(
+            "TINK_RELEASES_API",
+            format!("file://{}", metadata.display()),
+        )
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0);
+    let mut child = command.spawn().expect("spawn install cancellation fixture");
+    let process_group = child.id();
+    wait_for_marker(&started, &mut child);
+    interrupt_process_group(process_group);
+    let output = child
+        .wait_with_output()
+        .expect("wait for interrupted installer");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert!(!stderr.contains("Traceback"), "{stderr}");
+    std::thread::sleep(std::time::Duration::from_millis(3300));
+    assert!(
+        !survived.exists(),
+        "interrupted installer left candidate running"
+    );
+    assert_eq!(fs::read(&installed).unwrap(), known_good);
+}
+
+#[cfg(unix)]
+#[test]
+fn u15_update_interrupt_kills_candidate_group_and_preserves_binary() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+
+    let ws = Workspace::new();
+    let fixture = ws.root.join("update-cancel-release-fixture");
+    fs::create_dir_all(&fixture).unwrap();
+    let candidate = fixture.join("cancel-tink");
+    fs::write(
+        &candidate,
+        b"#!/bin/sh\nprintf started > \"$TINK_CANCEL_STARTED\"\nsleep 3\nprintf survived > \"$TINK_CANCEL_SURVIVED\"\nprintf 'tink 99.0.0\\n'\n",
+    )
+    .unwrap();
+    fs::set_permissions(&candidate, fs::Permissions::from_mode(0o755)).unwrap();
+    let metadata = write_release_fixture(&fixture, "99.0.0", &candidate);
+    let install_dir = ws.root.join("install");
+    fs::create_dir_all(&install_dir).unwrap();
+    let installed = install_dir.join("tink");
+    fs::copy(assert_cmd::cargo::cargo_bin!("tink"), &installed).unwrap();
+    fs::set_permissions(&installed, fs::Permissions::from_mode(0o755)).unwrap();
+    let known_good = fs::read(&installed).unwrap();
+    let started = ws.root.join("update-candidate-started");
+    let survived = ws.root.join("update-candidate-survived");
+
+    let mut command = StdCommand::new(&installed);
+    command
+        .arg("update")
+        .env("TINK_HOME", &ws.inventory)
+        .env("TINK_CANCEL_STARTED", &started)
+        .env("TINK_CANCEL_SURVIVED", &survived)
+        .env(
+            "TINK_RELEASES_API",
+            format!("file://{}", metadata.display()),
+        )
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0);
+    let mut child = command.spawn().expect("spawn update cancellation fixture");
+    let process_group = child.id();
+    wait_for_marker(&started, &mut child);
+    interrupt_process_group(process_group);
+    let output = child
+        .wait_with_output()
+        .expect("wait for interrupted updater");
+
+    assert!(!output.status.success());
+    std::thread::sleep(std::time::Duration::from_millis(3300));
+    assert!(
+        !survived.exists(),
+        "interrupted update left candidate running"
+    );
+    assert_eq!(fs::read(&installed).unwrap(), known_good);
+}
+
+#[cfg(unix)]
+#[test]
+fn v6_install_script_keeps_verified_install_successful_when_stdout_is_closed() {
+    use std::os::fd::OwnedFd;
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::net::UnixStream;
+    use std::process::Stdio;
+
+    let ws = Workspace::new();
+    let fixture = ws.root.join("closed-stdout-install-release-fixture");
+    fs::create_dir_all(&fixture).unwrap();
+    let replacement = fixture.join("replacement-tink");
+    let replacement_bytes = b"#!/bin/sh\nprintf 'tink 99.0.0\\n'\n";
+    fs::write(&replacement, replacement_bytes).unwrap();
+    fs::set_permissions(&replacement, fs::Permissions::from_mode(0o755)).unwrap();
+    let metadata = write_release_fixture(&fixture, "99.0.0", &replacement);
+    let install_dir = ws.root.join("install");
+    fs::create_dir_all(&install_dir).unwrap();
+    let installed = install_dir.join("tink");
+    fs::write(&installed, b"#!/bin/sh\nprintf 'tink 0.3.14\\n'\n").unwrap();
+    fs::set_permissions(&installed, fs::Permissions::from_mode(0o755)).unwrap();
+    let (read_end, write_end) = UnixStream::pair().expect("stdout pipe");
+    drop(read_end);
+    let write_end: OwnedFd = write_end.into();
+
+    let output = StdCommand::new("sh")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("install.sh"))
+        .env("TINK_INSTALL_DIR", &install_dir)
+        .env(
+            "TINK_RELEASES_API",
+            format!("file://{}", metadata.display()),
+        )
+        .stdout(Stdio::from(write_end))
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn install.sh with closed stdout")
+        .wait_with_output()
+        .expect("wait for install.sh");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "verified install must survive closed advisory stdout: {stderr:?}"
+    );
+    assert_eq!(fs::read(&installed).unwrap(), replacement_bytes);
 }
 
 #[test]
@@ -3687,7 +4834,7 @@ fn u1_update_fails_closed_on_bad_releases_api() {
         )
         .assert()
         .failure()
-        .stderr(predicate::str::contains("could not download"));
+        .stderr(predicate::str::contains("not an allowed release URL"));
 }
 
 #[test]
@@ -3697,13 +4844,13 @@ fn u2_update_reports_up_to_date_for_current_version() {
     fs::create_dir_all(&fixture).unwrap();
     let version = package_version();
     let bin = assert_cmd::cargo::cargo_bin!("tink");
-    let meta = write_release_fixture(&fixture, &version, &bin);
+    let meta = write_release_fixture(&fixture, &version, bin);
     let api = format!("file://{}", meta.display());
 
     let install_dir = ws.root.join("install");
     fs::create_dir_all(&install_dir).unwrap();
     let installed = install_dir.join("tink");
-    fs::copy(&bin, &installed).unwrap();
+    fs::copy(bin, &installed).unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -3728,13 +4875,20 @@ fn u3_update_replaces_binary_when_newer_release_exists() {
     let fixture = ws.root.join("release-fixture");
     fs::create_dir_all(&fixture).unwrap();
     let bin = assert_cmd::cargo::cargo_bin!("tink");
-    let meta = write_release_fixture(&fixture, "99.0.0", &bin);
+    let replacement = fixture.join("replacement-tink");
+    fs::write(&replacement, b"#!/bin/sh\nprintf 'tink 99.0.0\\n'\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&replacement, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let meta = write_release_fixture(&fixture, "99.0.0", &replacement);
     let api = format!("file://{}", meta.display());
 
     let install_dir = ws.root.join("install");
     fs::create_dir_all(&install_dir).unwrap();
     let installed = install_dir.join("tink");
-    fs::copy(&bin, &installed).unwrap();
+    fs::copy(bin, &installed).unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -3754,8 +4908,82 @@ fn u3_update_replaces_binary_when_newer_release_exists() {
         .stdout(predicate::str::contains("Updated").and(predicate::str::contains("v99.0.0")));
 
     assert!(installed.is_file());
+    assert_eq!(
+        fs::read(&installed).unwrap(),
+        fs::read(&replacement).unwrap()
+    );
     let after = fs::metadata(&installed).unwrap().modified().unwrap();
     assert!(after >= before);
+}
+
+#[cfg(unix)]
+#[test]
+fn u4_update_rejects_invalid_payload_and_preserves_running_binary() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let ws = Workspace::new();
+    let fixture = ws.root.join("invalid-release-fixture");
+    fs::create_dir_all(&fixture).unwrap();
+    let invalid_payload = fixture.join("invalid-tink");
+    fs::write(&invalid_payload, b"this is not a tink executable\n").unwrap();
+    fs::set_permissions(&invalid_payload, fs::Permissions::from_mode(0o644)).unwrap();
+    let meta = write_release_fixture_with_mode(&fixture, "99.0.0", &invalid_payload, 0o644);
+    let api = format!("file://{}", meta.display());
+
+    let install_dir = ws.root.join("install");
+    fs::create_dir_all(&install_dir).unwrap();
+    let installed = install_dir.join("tink");
+    fs::copy(assert_cmd::cargo::cargo_bin!("tink"), &installed).unwrap();
+    fs::set_permissions(&installed, fs::Permissions::from_mode(0o755)).unwrap();
+    let before = fs::read(&installed).unwrap();
+
+    let output = StdCommand::new(&installed)
+        .arg("update")
+        .env("TINK_RELEASES_API", &api)
+        .env("TINK_HOME", &ws.inventory)
+        .output()
+        .expect("run tink update");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let after = fs::read(&installed).unwrap();
+
+    assert!(
+        !output.status.success() && !stdout.contains("Updated") && after == before,
+        "invalid update payload must fail without success output or replacing the running binary: status={:?}, stdout={stdout:?}, stderr={stderr:?}, preserved={}",
+        output.status.code(),
+        after == before
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn u5_update_refuses_downgrade_and_preserves_running_binary() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let ws = Workspace::new();
+    let fixture = ws.root.join("older-release-fixture");
+    fs::create_dir_all(&fixture).unwrap();
+    let payload = fixture.join("older-tink");
+    fs::write(&payload, b"#!/bin/sh\nprintf 'tink 0.0.1\\n'\n").unwrap();
+    fs::set_permissions(&payload, fs::Permissions::from_mode(0o755)).unwrap();
+    let meta = write_release_fixture(&fixture, "0.0.1", &payload);
+
+    let install_dir = ws.root.join("install");
+    fs::create_dir_all(&install_dir).unwrap();
+    let installed = install_dir.join("tink");
+    fs::copy(assert_cmd::cargo::cargo_bin!("tink"), &installed).unwrap();
+    fs::set_permissions(&installed, fs::Permissions::from_mode(0o755)).unwrap();
+    let before = fs::read(&installed).unwrap();
+
+    Command::new(&installed)
+        .arg("update")
+        .env("TINK_RELEASES_API", format!("file://{}", meta.display()))
+        .env("TINK_HOME", &ws.inventory)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("refusing to downgrade"));
+
+    assert_eq!(fs::read(&installed).unwrap(), before);
 }
 
 // --- G*: GitHub source inspection ---
@@ -4131,4 +5359,83 @@ fn g8_inspect_preserves_project_and_home_bytes() {
     );
     assert_eq!(fs::read(ws.inventory.join("marker")).unwrap(), home_before);
     assert!(!project.join(".agents").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn g9_inspect_termination_reaps_git_process_group() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Stdio;
+
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    let fake_bin = ws.root.join("fake-git-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let fake_git = fake_bin.join("git");
+    fs::write(
+        &fake_git,
+        b"#!/bin/sh\nprintf started > \"$TINK_GIT_STARTED\"\nsleep 3\nprintf survived > \"$TINK_GIT_SURVIVED\"\nexit 1\n",
+    )
+    .unwrap();
+    fs::set_permissions(&fake_git, fs::Permissions::from_mode(0o755)).unwrap();
+    let started = ws.root.join("git-started");
+    let survived = ws.root.join("git-survived");
+    let path = std::env::join_paths(std::iter::once(fake_bin.clone()).chain(
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+    ))
+    .unwrap();
+
+    let mut command = StdCommand::new(assert_cmd::cargo::cargo_bin!("tink"));
+    command
+        .current_dir(&project)
+        .args(["inspect", "https://github.com/example/repository"])
+        .env("TINK_HOME", &ws.inventory)
+        .env("PATH", path)
+        .env("TINK_GIT_STARTED", &started)
+        .env("TINK_GIT_SURVIVED", &survived)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().expect("spawn Git cancellation fixture");
+    wait_for_marker(&started, &mut child);
+    terminate_process(child.id());
+    let output = wait_for_output_bounded(
+        child,
+        std::time::Duration::from_secs(10),
+        "Git cancellation fixture",
+    );
+
+    assert!(!output.status.success());
+    std::thread::sleep(std::time::Duration::from_millis(3300));
+    assert!(!survived.exists(), "terminated Tink left Git running");
+}
+
+#[cfg(unix)]
+#[test]
+fn g10_inspect_escapes_terminal_controls_in_remote_paths() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    let repo = ws.root.join("control-path-repo");
+    init_repo(&repo);
+    let unsafe_name = "evil\u{1b}[31m\nrow\tpart";
+    write_skill(&repo.join(unsafe_name), "safe-skill", "control fixture");
+    commit_all(&repo, "control path");
+    let public = "https://github.com/example/control-path.git";
+    let redirect = github_redirect(&repo, public);
+    let mut command = ws.cmd(&project);
+    command.args(["inspect", "https://github.com/example/control-path"]);
+    for (key, value) in &redirect {
+        command.env(key, value);
+    }
+    let output = command.output().expect("inspect control path fixture");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    assert!(
+        !stdout.contains('\u{1b}'),
+        "raw escape reached stdout: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("evil\\x1b[31m\\nrow\\tpart"),
+        "escaped path missing from stdout: {stdout:?}"
+    );
 }

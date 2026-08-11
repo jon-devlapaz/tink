@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 use tempfile::TempDir;
 
@@ -11,6 +12,7 @@ use crate::sources::RemoteSource;
 
 const GIT_LOW_SPEED_LIMIT_SETTING: &str = "http.lowSpeedLimit=1024";
 const GIT_LOW_SPEED_TIME_SETTING: &str = "http.lowSpeedTime=30";
+const GIT_TIMEOUT: Duration = Duration::from_secs(300);
 
 fn git_transport_args() -> [&'static str; 4] {
     [
@@ -45,17 +47,7 @@ fn run_git(
         command.current_dir(cwd);
     }
 
-    command.output().map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            if let Some(missing_message) = missing_message {
-                Error::msg(missing_message)
-            } else {
-                Error::msg(format!("{io_context}: {e}"))
-            }
-        } else {
-            Error::msg(format!("{io_context}: {e}"))
-        }
-    })
+    crate::process::run_bounded(&mut command, GIT_TIMEOUT, io_context, missing_message)
 }
 
 fn git_detail(stderr: &[u8], fallback: &str) -> String {

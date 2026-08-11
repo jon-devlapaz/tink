@@ -14,12 +14,18 @@ use crate::error::Error;
 use crate::git;
 use crate::home;
 use crate::init;
-use crate::paths::{map_io, refuse_symlink};
+use crate::output;
+use crate::paths::{canonicalize_beneath, map_io, refuse_symlink};
 use crate::skills;
 use crate::sources;
 
 const RECEIPT_FILE: &str = ".tink-skillset.json";
 const NAME_SUFFIX: &str = "-skillset";
+const DIGEST_VERSION: u32 = 2;
+
+fn legacy_digest_version() -> u32 {
+    1
+}
 
 /// Whether `path` contains a skillset receipt entry.
 ///
@@ -29,6 +35,18 @@ const NAME_SUFFIX: &str = "-skillset";
 pub(crate) fn has_receipt_entry(path: &Path) -> bool {
     let receipt = path.join(RECEIPT_FILE);
     receipt.exists() || receipt.is_symlink()
+}
+
+/// Refuse a skillset-owned tree at a standalone-skill boundary.
+///
+/// Receipt entry presence establishes ownership before receipt contents are trusted.
+pub(crate) fn ensure_standalone_source(path: &Path, name: &str) -> Result<(), Error> {
+    if has_receipt_entry(path) {
+        return Err(Error::msg(format!(
+            "Source is owned by a skillset; use `tink skillset add {name}`"
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +74,8 @@ struct SkillsetReceipt {
     #[serde(rename = "sourceRoot")]
     source_root: String,
     members: Vec<String>,
+    #[serde(rename = "digestVersion", default = "legacy_digest_version")]
+    digest_version: u32,
     digest: String,
 }
 
@@ -74,7 +94,10 @@ pub struct ListedSkillset {
 fn read_json<T: for<'de> Deserialize<'de>>(path: &Path, label: &str) -> Result<T, Error> {
     refuse_symlink(path)?;
     if !path.is_file() {
-        return Err(Error::msg(format!("Missing {label}: {}", path.display())));
+        return Err(Error::msg(format!(
+            "Missing {label}: {}",
+            output::display_path(path)
+        )));
     }
     let text = fs::read_to_string(path).map_err(|e| map_io(path, e))?;
     serde_json::from_str(&text).map_err(|e| Error::msg(format!("Invalid {label}: {e}")))
@@ -183,6 +206,7 @@ fn receipt_for(meta: &SkillsetMeta, digest: String) -> SkillsetReceipt {
         revision: meta.revision.clone(),
         source_root: meta.source_root.clone(),
         members: meta.members.clone(),
+        digest_version: DIGEST_VERSION,
         digest,
     }
 }
@@ -199,11 +223,17 @@ fn receipt_meta(receipt: &SkillsetReceipt) -> SkillsetMeta {
 fn read_owned_receipt(path: &Path, label: &str) -> Result<SkillsetReceipt, Error> {
     let receipt: SkillsetReceipt = read_json(&path.join(RECEIPT_FILE), label)?;
     validate_meta(&receipt_meta(&receipt))?;
+    if receipt.digest_version != 1 && receipt.digest_version != DIGEST_VERSION {
+        return Err(Error::msg(format!(
+            "Unsupported skillset digest version: {}",
+            receipt.digest_version
+        )));
+    }
     validate_digest(&receipt.digest)?;
     Ok(receipt)
 }
 
-fn validate_installed_tree(path: &Path, receipt: &SkillsetReceipt) -> Result<(), Error> {
+fn validate_member_trees(path: &Path, receipt: &SkillsetReceipt) -> Result<(), Error> {
     for member in &receipt.members {
         let member_path = path.join(member);
         refuse_symlink(&member_path)?;
@@ -212,11 +242,37 @@ fn validate_installed_tree(path: &Path, receipt: &SkillsetReceipt) -> Result<(),
         }
         skills::read_skill(&member_path, true)?;
     }
+    Ok(())
+}
+
+fn validate_installed_tree(path: &Path, receipt: &SkillsetReceipt) -> Result<(), Error> {
+    validate_member_trees(path, receipt)?;
+    if receipt.digest_version != DIGEST_VERSION {
+        return Err(Error::msg(format!(
+            "Skillset receipt uses legacy digest version {}; run `tink skillset refresh {}` to migrate it",
+            receipt.digest_version,
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("NAME-skillset")
+        )));
+    }
     let digest = skills::tree_digest(path, &[RECEIPT_FILE])?;
     if digest != receipt.digest {
         return Err(Error::msg(format!(
             "Skillset tree digest mismatch: {}",
-            path.display()
+            output::display_path(path)
+        )));
+    }
+    Ok(())
+}
+
+fn validate_legacy_tree_for_refresh(path: &Path, receipt: &SkillsetReceipt) -> Result<(), Error> {
+    validate_member_trees(path, receipt)?;
+    let digest = skills::tree_digest_legacy(path, &[RECEIPT_FILE])?;
+    if digest != receipt.digest {
+        return Err(Error::msg(format!(
+            "Skillset tree digest mismatch: {}",
+            output::display_path(path)
         )));
     }
     Ok(())
@@ -237,16 +293,14 @@ fn source_member_root(
     meta: &SkillsetMeta,
     member: &str,
 ) -> Result<PathBuf, Error> {
-    let source_root = checkout.join(normalized_source_root(&meta.source_root)?);
-    refuse_symlink(&source_root)?;
+    let source_root = canonicalize_beneath(checkout, &normalized_source_root(&meta.source_root)?)?;
     if !source_root.is_dir() {
         return Err(Error::msg(format!(
             "Skillset sourceRoot is not a directory: {}",
-            source_root.display()
+            output::display_path(&source_root)
         )));
     }
-    let member_root = source_root.join(member);
-    refuse_symlink(&member_root)?;
+    let member_root = canonicalize_beneath(&source_root, Path::new(member))?;
     if !member_root.is_dir() {
         return Err(Error::msg(format!("Skillset member not found: {member}")));
     }
@@ -265,7 +319,7 @@ fn install_from_checkout(
         refuse_symlink(&target)?;
         return Err(Error::msg(format!(
             "Refusing to overwrite existing skillset: {}",
-            target.display()
+            output::display_path(&target)
         )));
     }
 
@@ -309,13 +363,7 @@ fn replace_from_checkout(
     let target = destination_root.join(name);
     let (staging, staged) = stage_from_checkout(checkout, meta, destination_root, name)?;
 
-    let backup = staging.path().join("old");
-    fs::rename(&target, &backup).map_err(|e| map_io(&target, e))?;
-    if let Err(error) = fs::rename(&staged, &target) {
-        let _ = fs::rename(&backup, &target);
-        return Err(map_io(&target, error));
-    }
-    Ok(target)
+    skills::publish_staged_tree(staging, staged, &target)
 }
 
 pub fn add_skillset(
@@ -331,10 +379,15 @@ pub fn add_skillset(
         if !target.is_dir() {
             return Err(Error::msg(format!(
                 "Refusing to overwrite non-directory skillset: {}",
-                target.display()
+                output::display_path(&target)
             )));
         }
         let receipt = read_owned_receipt(&target, "installed skillset receipt")?;
+        if receipt.digest_version != DIGEST_VERSION {
+            return Err(Error::msg(format!(
+                "Skillset receipt uses a legacy digest; run `tink skillset refresh {name}` to migrate it"
+            )));
+        }
         if validate_installed_tree(&target, &receipt).is_err() {
             return Err(Error::msg(format!(
                 "Refusing to add {name}: local modifications are present; remove it first to discard them"
@@ -378,13 +431,19 @@ pub fn refresh_skillset(project_root: &Path, name: &str) -> Result<bool, Error> 
         return Err(Error::msg(format!("Skillset not found: {name}")));
     }
     let receipt = read_owned_receipt(&target, "installed skillset receipt")?;
-    if validate_installed_tree(&target, &receipt).is_err() {
+    let legacy_receipt = receipt.digest_version != DIGEST_VERSION;
+    let validation = if legacy_receipt {
+        validate_legacy_tree_for_refresh(&target, &receipt)
+    } else {
+        validate_installed_tree(&target, &receipt)
+    };
+    if validation.is_err() {
         return Err(Error::msg(format!(
             "Refusing to refresh {name}: local modifications are present"
         )));
     }
     preflight_library_target(name)?;
-    if receipt_meta(&receipt) == meta {
+    if !legacy_receipt && receipt_meta(&receipt) == meta {
         sync_library_from_project(&target)?;
         return Ok(false);
     }
@@ -452,9 +511,12 @@ pub fn list_installed(project_root: &Path) -> Result<Vec<ListedSkillset>, Error>
 
     let mut entries: Vec<_> = fs::read_dir(&skills_root)
         .map_err(|e| map_io(&skills_root, e))?
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .collect();
+        .map(|entry| {
+            entry
+                .map(|entry| entry.path())
+                .map_err(|e| map_io(&skills_root, e))
+        })
+        .collect::<Result<_, _>>()?;
     entries.sort();
 
     let mut skillsets = Vec::new();
@@ -517,13 +579,13 @@ fn preflight_library_target(name: &str) -> Result<(), Error> {
     if !target.is_dir() {
         return Err(Error::msg(format!(
             "Library name collision for skillset: {}",
-            target.display()
+            output::display_path(&target)
         )));
     }
     validate_library_receipt(&target).map_err(|_| {
         Error::msg(format!(
             "Library name collision for skillset: {}; existing entry is not an owned skillset",
-            target.display()
+            output::display_path(&target)
         ))
     })
 }
@@ -547,14 +609,7 @@ fn copy_project_tree(
         return Ok(());
     }
 
-    let backup = staging.path().join("old");
-    fs::rename(&target, &backup).map_err(|e| map_io(&target, e))?;
-    if let Err(error) = fs::rename(&staged, &target) {
-        let _ = fs::rename(&backup, &target);
-        return Err(map_io(&target, error));
-    }
-    let _ = fs::remove_dir_all(&backup);
-    Ok(())
+    skills::publish_staged_tree(staging, staged, &target).map(|_| ())
 }
 
 fn sync_library_from_project(project: &Path) -> Result<LibraryWrite, Error> {
@@ -591,15 +646,18 @@ pub fn list_library(home_root: Option<&Path>) -> Result<Vec<ListedSkillset>, Err
     if !library.is_dir() {
         return Err(Error::msg(format!(
             "Refusing to read non-directory library: {}",
-            library.display()
+            output::display_path(&library)
         )));
     }
 
     let mut entries: Vec<_> = fs::read_dir(&library)
         .map_err(|e| map_io(&library, e))?
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .collect();
+        .map(|entry| {
+            entry
+                .map(|entry| entry.path())
+                .map_err(|e| map_io(&library, e))
+        })
+        .collect::<Result<_, _>>()?;
     entries.sort();
     let mut skillsets = Vec::new();
     for path in entries {
@@ -622,6 +680,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn legacy_receipt_is_only_accepted_for_refresh_migration() {
+        let temp = tempfile::tempdir().unwrap();
+        let installed = temp.path().join("demo-skillset");
+        let member = installed.join("demo");
+        fs::create_dir_all(&member).unwrap();
+        fs::write(
+            member.join("SKILL.md"),
+            "---\nname: demo\ndescription: Legacy receipt fixture.\n---\n",
+        )
+        .unwrap();
+        let digest = skills::tree_digest_legacy(&installed, &[RECEIPT_FILE]).unwrap();
+        let receipt = SkillsetReceipt {
+            source: "https://github.com/example/skills.git".into(),
+            revision: "a".repeat(40),
+            source_root: "skills".into(),
+            members: vec!["demo".into()],
+            digest_version: 1,
+            digest,
+        };
+
+        assert!(validate_legacy_tree_for_refresh(&installed, &receipt).is_ok());
+        let error = validate_installed_tree(&installed, &receipt).unwrap_err();
+        assert!(error.to_string().contains("skillset refresh"), "{error}");
+    }
+
+    #[test]
     fn source_root_rejects_escape_and_empty_segments() {
         for value in [
             "",
@@ -637,6 +721,34 @@ mod tests {
             normalized_source_root("skills/common").unwrap(),
             PathBuf::from("skills/common")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_member_root_refuses_symlinked_source_root_ancestor() {
+        let temp = tempfile::tempdir().unwrap();
+        let checkout = temp.path().join("checkout");
+        let outside = temp.path().join("outside");
+        let member = outside.join("skills/alpha");
+        fs::create_dir_all(&checkout).unwrap();
+        fs::create_dir_all(&member).unwrap();
+        fs::write(
+            member.join("SKILL.md"),
+            "---\nname: alpha\ndescription: Outside fixture.\n---\n",
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&outside, checkout.join("jump")).unwrap();
+        let meta = SkillsetMeta {
+            source: "https://github.com/example/skills.git".into(),
+            revision: "a".repeat(40),
+            source_root: "jump/skills".into(),
+            members: vec!["alpha".into()],
+        };
+
+        let error = source_member_root(&checkout, &meta, "alpha")
+            .expect_err("ancestor symlink must be refused");
+
+        assert!(error.to_string().contains("symlink"), "{error}");
     }
 
     #[test]

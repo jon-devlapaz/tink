@@ -1,3 +1,4 @@
+use std::io::{self, Write};
 use std::process::ExitCode;
 
 use clap::{CommandFactory, Parser};
@@ -14,8 +15,15 @@ fn main() -> ExitCode {
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(err) => {
-            eprintln!("Failed to resolve current directory: {err}");
-            return ExitCode::from(1);
+            let result = writeln!(
+                io::stderr().lock(),
+                "Failed to resolve current directory: {err}"
+            );
+            // A closed diagnostic pipe is deliberate process control, not a panic.
+            return match result {
+                Ok(()) => ExitCode::from(1),
+                Err(_) => ExitCode::from(1),
+            };
         }
     };
     run(cli, cwd)

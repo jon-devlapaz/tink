@@ -14,18 +14,30 @@ pub struct DestroyReport {
     pub removed: Vec<PathBuf>,
 }
 
-/// Drop this project's by-project catalog entry, then remove `.agents/`,
-/// `ZEN.md`, and `AGENTS.md` from the project root. Does not touch the home
-/// library. Catalog sync runs before disk deletes; sync errors leave project
-/// files intact. Refuses symlinks. Requires `--yes` or an interactive `y`
-/// confirmation (default no).
+/// Remove this project's `.agents/skills/`, then drop its by-project catalog
+/// entry. An empty `.agents/` directory is removed, but unrelated siblings are
+/// preserved.
+/// `ZEN.md` and `AGENTS.md` are preserved because the current
+/// project layout has no durable proof that Tink created either file. Does not
+/// touch the home library. Catalog cleanup is preflighted before disk deletes;
+/// expected catalog refusals leave project files intact. Refuses symlinks.
+/// Requires `--yes` or an
+/// interactive `y` confirmation (default no).
 pub fn destroy_project(project_root: &Path, yes: bool) -> Result<DestroyReport, Error> {
+    destroy_project_at(project_root, yes, None)
+}
+
+fn destroy_project_at(
+    project_root: &Path,
+    yes: bool,
+    catalog_home: Option<&Path>,
+) -> Result<DestroyReport, Error> {
     if !yes {
         confirm_destroy()?;
     }
 
-    let mut to_remove = Vec::new();
     let agents = crate::home::project_agents_path(project_root);
+    let skills = crate::home::project_skills_path(project_root);
     if agents.exists() || agents.is_symlink() {
         refuse_symlink(&agents)?;
         if !agents.is_dir() {
@@ -34,35 +46,42 @@ pub fn destroy_project(project_root: &Path, yes: bool) -> Result<DestroyReport, 
                 agents.display()
             )));
         }
-        to_remove.push(agents);
     }
-
-    for name in ["ZEN.md", "AGENTS.md"] {
-        let path = project_root.join(name);
-        if !path.exists() && !path.is_symlink() {
-            continue;
-        }
-        refuse_symlink(&path)?;
-        if !path.is_file() {
+    if skills.exists() || skills.is_symlink() {
+        refuse_symlink(&skills)?;
+        if !skills.is_dir() {
             return Err(Error::msg(format!(
-                "Refusing to remove non-file: {}",
-                path.display()
+                "Refusing to remove non-directory: {}",
+                skills.display()
             )));
         }
-        to_remove.push(path);
     }
 
-    catalog::forget_project(project_root)?;
+    match catalog_home {
+        Some(home) => catalog::preflight_forget_project_at(Some(home), project_root)?,
+        None => catalog::preflight_forget_project(project_root)?,
+    }
 
     let mut removed = Vec::new();
-    for path in to_remove {
-        if path.is_dir() {
-            fs::remove_dir_all(&path).map_err(|e| map_io(&path, e))?;
-        } else {
-            fs::remove_file(&path).map_err(|e| map_io(&path, e))?;
-        }
-        removed.push(path);
+    if skills.is_dir() {
+        fs::remove_dir_all(&skills).map_err(|e| map_io(&skills, e))?;
+        removed.push(skills);
     }
+    if agents.is_dir()
+        && fs::read_dir(&agents)
+            .map_err(|e| map_io(&agents, e))?
+            .next()
+            .is_none()
+    {
+        fs::remove_dir(&agents).map_err(|e| map_io(&agents, e))?;
+        removed.push(agents);
+    }
+
+    match catalog_home {
+        Some(home) => catalog::forget_project_at(Some(home), project_root)?,
+        None => catalog::forget_project(project_root)?,
+    }
+
     Ok(DestroyReport { removed })
 }
 
@@ -77,7 +96,7 @@ fn confirm_destroy() -> Result<(), Error> {
     write!(
         stdout,
         "{} {}",
-        style.warn("Delete .agents/, ZEN.md, and AGENTS.md in this project?"),
+        style.warn("Delete .agents/skills/ in this project?"),
         style.accent("[y/N]")
     )
     .map_err(|e| Error::msg(format!("prompt: {e}")))?;
@@ -94,4 +113,70 @@ fn confirm_destroy() -> Result<(), Error> {
         return Ok(());
     }
     Err(Error::msg("Destroy cancelled"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn destroy_preserves_preexisting_project_guidance() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("project");
+        let home = temp.path().join("home");
+        fs::create_dir_all(crate::home::project_skills_path(&project)).unwrap();
+        let agents_body = "# Existing agent guidance\n";
+        let zen_body = "# Existing maintainability guidance\n";
+        fs::write(project.join("AGENTS.md"), agents_body).unwrap();
+        fs::write(project.join("ZEN.md"), zen_body).unwrap();
+        catalog::deposit_skill_at(Some(&home), &project, "alpha").unwrap();
+
+        let report = destroy_project_at(&project, true, Some(&home)).unwrap();
+        assert!(!crate::home::project_agents_path(&project).exists());
+        assert!(catalog::list_catalog(Some(&home)).unwrap().is_empty());
+        assert!(
+            project.join("AGENTS.md").is_file(),
+            "destroy removed pre-existing AGENTS.md"
+        );
+        assert!(
+            project.join("ZEN.md").is_file(),
+            "destroy removed pre-existing ZEN.md"
+        );
+        assert_eq!(
+            fs::read_to_string(project.join("AGENTS.md")).unwrap(),
+            agents_body
+        );
+        assert_eq!(
+            fs::read_to_string(project.join("ZEN.md")).unwrap(),
+            zen_body
+        );
+        assert_eq!(
+            report.removed,
+            vec![
+                crate::home::project_skills_path(&project),
+                crate::home::project_agents_path(&project)
+            ]
+        );
+    }
+
+    #[test]
+    fn destroy_preserves_unrelated_agents_siblings() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("project");
+        let home = temp.path().join("home");
+        let agents = crate::home::project_agents_path(&project);
+        fs::create_dir_all(crate::home::project_skills_path(&project)).unwrap();
+        fs::write(agents.join("foreign-config.json"), b"keep\n").unwrap();
+        catalog::deposit_skill_at(Some(&home), &project, "alpha").unwrap();
+
+        destroy_project_at(&project, true, Some(&home)).unwrap();
+
+        assert!(!crate::home::project_skills_path(&project).exists());
+        assert_eq!(
+            fs::read(agents.join("foreign-config.json")).unwrap(),
+            b"keep\n"
+        );
+        assert!(agents.is_dir());
+        assert!(catalog::list_catalog(Some(&home)).unwrap().is_empty());
+    }
 }
