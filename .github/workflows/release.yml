@@ -247,7 +247,7 @@ jobs:
           gh release upload "${tag}" "${expected_assets[@]}" --clobber
           uploaded_assets=()
           mapfile -t uploaded_assets < <(
-            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" \
+            gh release view "${tag}" --json assets \
               --jq '.assets[] | [.name, .state, (.digest // "")] | @tsv' |
               sort
           )
