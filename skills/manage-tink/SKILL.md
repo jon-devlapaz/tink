@@ -29,7 +29,8 @@ If `tink` is missing, report the installation command and stop:
 Otherwise, run only the read command matching the request:
 
 - Project state or names: `tink skill check` or `tink skill list`.
-- Catalog or library: `tink skill list --catalog` or `tink skill list --library`.
+- Catalog or library: `tink skill list --catalog` or `tink library list`
+  (`tink skill list --library` remains a compatibility alias).
 - Project or library skillsets: `tink skillset list` or
   `tink skillset list --library`.
 - Public GitHub structure: `tink inspect GITHUB_URL`.
@@ -173,7 +174,7 @@ from the mutation command alone.
 | …and ZEN / tink-skills / skip manage-tink | Only the matching `--with-*` / `--no-*` flags |
 | Add / list / check / refresh / remove … | The matching `tink skill …` command |
 | List catalog | `tink skill list --catalog` |
-| List library / promote from library | `tink skill list --library` / `tink skill add NAME` |
+| List library / promote from library | `tink library list` (`tink skill list --library` compatibility alias) / `tink skill add NAME` |
 | Harvest harness skills into library | `tink skill harvest` |
 | Inspect a public GitHub skill source | `tink inspect GITHUB_URL` (read-only) |
 | List project / library skillsets | `tink skillset list` / `tink skillset list --library` |

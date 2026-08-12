@@ -2414,6 +2414,29 @@ fn l1_skill_list_after_init_includes_manage_tink() {
 }
 
 #[test]
+fn l14_library_list_top_level_matches_legacy_alias() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+
+    let canonical = ws
+        .cmd(&project)
+        .args(["library", "list"])
+        .output()
+        .expect("run library list");
+    let legacy = ws
+        .cmd(&project)
+        .args(["skill", "list", "--library"])
+        .output()
+        .expect("run skill list --library");
+
+    assert!(canonical.status.success());
+    assert!(legacy.status.success());
+    assert_eq!(canonical.stdout, legacy.stdout);
+    assert_eq!(canonical.stderr, legacy.stderr);
+}
+
+#[test]
 fn l2_skill_list_fails_without_skills_dir() {
     let ws = Workspace::new();
     let project = ws.project("app");

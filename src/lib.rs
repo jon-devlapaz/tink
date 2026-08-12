@@ -99,6 +99,11 @@ pub enum Command {
         #[command(subcommand)]
         command: SkillCommand,
     },
+    /// Inspect the reusable standalone skill library
+    Library {
+        #[command(subcommand)]
+        command: LibraryCommand,
+    },
     /// Install grouped member skills as one nested project tree
     Skillset {
         #[command(subcommand)]
@@ -160,6 +165,12 @@ pub enum SkillCommand {
     },
     /// Copy harness skill trees into the library (create-only)
     Harvest,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum LibraryCommand {
+    /// List standalone skill names in the library
+    List,
 }
 
 #[derive(Debug, Subcommand)]
@@ -236,6 +247,9 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
             flag_tri(with_manage_tink, no_manage_tink),
         ),
         Command::Skill { command } => dispatch_skill(&cwd, command),
+        Command::Library { command } => match command {
+            LibraryCommand::List => dispatch_skill_list_library(),
+        },
         Command::Skillset { command } => dispatch_skillset(&cwd, command),
         Command::Inspect { url } => dispatch_inspect(&url),
         Command::Destroy { yes } => {
