@@ -6,6 +6,11 @@
 
 Skill manager that makes sense to you, and your agent.
 
+Tink 1.0 is feature-complete for the v1 acceptance boundary in
+[`ACCEPTANCE.md`](ACCEPTANCE.md). Maintenance prioritizes correctness,
+security, compatibility, and a simpler everyday experience over new lifecycle
+machinery.
+
 Live skills live only under a project’s `.agents/skills/<name>/`. Grouped
 skillsets use one canonical nested root at
 `.agents/skills/<name>-skillset/<member>/`. There
