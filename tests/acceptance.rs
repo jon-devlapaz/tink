@@ -3898,6 +3898,65 @@ fn p13_refresh_manage_tink_refuses_remote_library_collision_when_project_is_miss
     );
 }
 
+#[test]
+fn p14_refresh_manage_tink_preserves_remote_library_collision_for_existing_projects() {
+    let ws = Workspace::new();
+    let current_project = ws.project("current");
+    let stale_project = ws.project("stale");
+    for project in [&current_project, &stale_project] {
+        ws.cmd(project).arg("init").assert().success();
+    }
+    fs::write(
+        Workspace::skill_path(&stale_project, "manage-tink").join("references/commands.md"),
+        "stale project contents\n",
+    )
+    .expect("make stale embedded project copy");
+
+    let remote_project = ws.project("remote");
+    ws.cmd(&remote_project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    let remote = ws.root.join("remote-existing-manage-tink");
+    init_repo(&remote);
+    write_skill(&remote, "manage-tink", "remote library contents");
+    commit_all(&remote, "remote existing manage-tink");
+    let public = "https://github.com/example/remote-existing-manage-tink.git";
+    let mut add = ws.cmd(&remote_project);
+    add.args(["skill", "add", "example/remote-existing-manage-tink"]);
+    add.envs(github_redirect(&remote, public));
+    add.assert().success();
+
+    let library = ws.library_skill("manage-tink");
+    let library_skill_before = fs::read(library.join("SKILL.md")).expect("library SKILL.md");
+    let library_receipt_before =
+        fs::read(library.join(".tink-source.json")).expect("library provenance");
+
+    for project in [&current_project, &stale_project] {
+        let installed = Workspace::skill_path(project, "manage-tink");
+        let project_before =
+            fs::read(installed.join("references/commands.md")).expect("project commands");
+        ws.cmd(project)
+            .args(["skill", "refresh", "manage-tink"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("remote provenance"));
+        assert_eq!(
+            fs::read(installed.join("references/commands.md")).expect("preserved project commands"),
+            project_before
+        );
+    }
+
+    assert_eq!(
+        fs::read(library.join("SKILL.md")).expect("preserved library SKILL.md"),
+        library_skill_before
+    );
+    assert_eq!(
+        fs::read(library.join(".tink-source.json")).expect("preserved library provenance"),
+        library_receipt_before
+    );
+}
+
 // --- D*: destroy ---
 
 #[test]

@@ -265,6 +265,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | P11 | `skill refresh manage-tink` when a receipt-free reserved copy differs from the active binary | Atomically replaces it with the active binary's copy; reconciles library and catalog; subsequent `skill check` passes |
 | P12 | `skill refresh manage-tink` when the same-named skill has remote provenance | Exit ≠ 0; reports the provenance collision; user-owned tree remains byte-identical |
 | P13 | `skill refresh manage-tink` when the project copy is missing and the same-named library skill has remote provenance | Exit ≠ 0 before publication; project remains missing; library tree and receipt remain byte-identical |
+| P14 | `skill refresh manage-tink` when a current or stale receipt-free project copy exists and the same-named library skill has remote provenance | Exit ≠ 0 before publication; project trees plus library tree and receipt remain byte-identical |
 
 ### Remove
 

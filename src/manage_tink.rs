@@ -85,9 +85,9 @@ pub(crate) fn refresh_manage_tink(project_root: &Path) -> Result<RefreshOutcome,
     refuse_symlink(&agents)?;
     refuse_symlink(&skills_root)?;
     refuse_symlink(&target)?;
+    refuse_remote_library_collision()?;
 
     if !target.exists() {
-        refuse_remote_library_collision()?;
         install_manage_tink(project_root)?;
         return Ok(RefreshOutcome::Installed);
     }
