@@ -262,6 +262,8 @@ Ids are stable. Tests must name or comment the id they prove.
 | P8 | `skill refresh` for all when a later imported skill has local modifications | Exit ≠ 0; no project skill is updated |
 | P9 | `skill refresh manage-tink` when the embedded copy is missing | Installs the active binary's copy; reconciles library and catalog; subsequent `skill check` passes |
 | P10 | `skill refresh manage-tink` when the embedded copy already matches the active binary | Exit 0 with `Unchanged`; reconciles library and catalog; project tree remains identical |
+| P11 | `skill refresh manage-tink` when a receipt-free reserved copy differs from the active binary | Atomically replaces it with the active binary's copy; reconciles library and catalog; subsequent `skill check` passes |
+| P12 | `skill refresh manage-tink` when the same-named skill has remote provenance | Exit ≠ 0; reports the provenance collision; user-owned tree remains byte-identical |
 
 ### Remove
 

@@ -3791,6 +3791,69 @@ fn p10_refresh_manage_tink_reports_current_copy_unchanged() {
     ws.assert_cataloged("app", "manage-tink");
 }
 
+#[test]
+fn p11_refresh_manage_tink_replaces_differing_reserved_copy() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+
+    let installed = Workspace::skill_path(&project, "manage-tink");
+    let commands = installed.join("references/commands.md");
+    let embedded = fs::read(&commands).expect("embedded commands reference");
+    fs::write(&commands, "local edit to reserved embedded contents\n")
+        .expect("modify embedded commands reference");
+
+    ws.cmd(&project)
+        .args(["skill", "refresh", "manage-tink"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Refreshed manage-tink"));
+
+    assert_eq!(fs::read(&commands).expect("refreshed commands"), embedded);
+    assert_eq!(
+        fs::read(
+            ws.library_skill("manage-tink")
+                .join("references/commands.md")
+        )
+        .expect("library commands"),
+        embedded
+    );
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
+    ws.assert_cataloged("app", "manage-tink");
+}
+
+#[test]
+fn p12_refresh_manage_tink_refuses_remote_provenance_collision() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("remote-manage-tink");
+    init_repo(&remote);
+    write_skill(&remote, "manage-tink", "remote user-owned contents");
+    commit_all(&remote, "remote manage-tink");
+    let public = "https://github.com/example/remote-manage-tink.git";
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", "example/remote-manage-tink"]);
+    add.envs(github_redirect(&remote, public));
+    add.assert().success();
+
+    let installed = Workspace::skill_path(&project, "manage-tink");
+    let before = fs::read(installed.join("SKILL.md")).expect("remote SKILL.md");
+    ws.cmd(&project)
+        .args(["skill", "refresh", "manage-tink"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("remote provenance"));
+    assert_eq!(
+        fs::read(installed.join("SKILL.md")).expect("preserved remote SKILL.md"),
+        before
+    );
+}
+
 // --- D*: destroy ---
 
 #[test]

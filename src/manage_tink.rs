@@ -19,6 +19,7 @@ const COMMANDS_MD: &str = include_str!("../skills/manage-tink/references/command
 pub(crate) enum RefreshOutcome {
     Installed,
     Unchanged,
+    Refreshed,
 }
 
 /// Materialize the embedded tree for read-only validation or later publication.
@@ -82,10 +83,17 @@ pub(crate) fn refresh_manage_tink(project_root: &Path) -> Result<RefreshOutcome,
             "Refusing to replace manage-tink with remote provenance",
         ));
     }
-    if !is_current(&installed)? {
-        return Err(Error::msg(
-            "manage-tink differs from this Tink binary; replacement is not available",
-        ));
+    let (_staging, embedded) = prepare_manage_tink()?;
+    if !skills::skill_contents_equal(&installed.path, &embedded.path)? {
+        library::preflight_deposit(&embedded, None)?;
+        catalog::preflight_deposit_skill(project_root)?;
+        skills::replace_verified(&embedded, &skills_root, None)?;
+        library::deposit(&embedded, None)?;
+        catalog::deposit_skill(project_root, "manage-tink")?;
+
+        let refreshed = skills::read_skill(&target, true)?;
+        require_current(&refreshed)?;
+        return Ok(RefreshOutcome::Refreshed);
     }
 
     library::preflight_deposit(&installed, None)?;

@@ -727,6 +727,7 @@ fn dispatch_skill_refresh(cwd: &Path, name: Option<&str>) -> Result<(), Error> {
             let action = match outcome {
                 manage_tink::RefreshOutcome::Installed => style.success("Installed"),
                 manage_tink::RefreshOutcome::Unchanged => style.muted("Unchanged"),
+                manage_tink::RefreshOutcome::Refreshed => style.success("Refreshed"),
             };
             println!("{} {}", action, style.skill("manage-tink"));
             Ok(())

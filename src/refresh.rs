@@ -167,7 +167,7 @@ fn apply_refresh(plan: RefreshPlan) -> Result<Option<bool>, Error> {
                 .path
                 .parent()
                 .ok_or_else(|| Error::msg("skill has no parent"))?;
-            let _installed = skills::replace_verified(&new_skill, destination_root, &next)?;
+            let _installed = skills::replace_verified(&new_skill, destination_root, Some(&next))?;
             library::deposit_refresh(&new_skill, &next)?;
             Ok(Some(tree_changed))
         }
