@@ -153,7 +153,7 @@ pub enum SkillCommand {
     },
     /// Install missing or pinned skills from the project manifest and lockfile
     Sync,
-    /// Refresh clean GitHub-imported skills; refuse local modifications
+    /// Refresh clean GitHub imports or the reserved embedded manage-tink
     Refresh {
         /// Optional skill name; default refreshes all imported skills
         name: Option<String>,

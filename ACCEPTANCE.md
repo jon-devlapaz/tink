@@ -273,7 +273,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | X2 | `skill remove <missing>` | Exit ≠ 0; mentions not found / missing; nothing deleted |
 | X3 | `skill remove` when `.agents` is a symlink | Exit ≠ 0; mentions symlink; tree unchanged |
 | X4 | Successful `skill remove <name>` | Does **not** delete `$TINK_HOME/skills/<name>/` |
-| X5 | `init` installs `manage-tink` | Embedded skill covers standalone lifecycle, operation-specific proof and partial-state reporting, project-contained lock sources, session-versus-persistent completion authority, any-update re-embed warning, library/catalog effects, skillsets, update, and destroy |
+| X5 | `init` installs `manage-tink` | Embedded skill covers standalone lifecycle, operation-specific proof and partial-state reporting, project-contained lock sources, session-versus-persistent completion authority, any-update refresh warning, library/catalog effects, skillsets, update, and destroy |
 | X6 | `skill remove <name>` when that project's catalog metadata is malformed | Exit ≠ 0; project and library skill trees remain intact |
 | X7 | `skill remove <name>` when `$TINK_HOME/catalog` is a symlink | Exit ≠ 0; mentions the symlink; project skill and external catalog target remain byte-identical |
 
@@ -293,7 +293,7 @@ Ids are stable. Tests must name or comment the id they prove.
 |---|---|---|
 | U1 | `update` when releases API is unreachable | Exit ≠ 0; clear download/metadata failure; binary unchanged |
 | U2 | `update` when latest release version matches this binary | Exit 0; stdout notes up to date; binary unchanged |
-| U3 | `update` when a newer release asset exists for this host | Exit 0; replaces the running binary; stdout notes updated version |
+| U3 | `update` when a newer release asset exists for this host | Exit 0; replaces the running binary; stdout notes updated version and the explicit per-project `tink skill refresh manage-tink` next step; does not mutate a project |
 | U4 | `update` receives a valid-digest archive whose payload fails the exact version probe | Exit ≠ 0; running binary remains byte-identical; no success output |
 | U5 | `update` metadata names an older semantic version | Exit ≠ 0; refuses downgrade before publication; running binary remains unchanged |
 | U6 | `install.sh` receives an invalid or non-executable verified payload while a binary exists | Exit ≠ 0; existing binary remains byte-identical; no success output |

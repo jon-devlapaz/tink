@@ -24,6 +24,7 @@ form for add, list, check, refresh, and remove.
 | Sync the exact pinned manifest set | `tink skill sync` (preflights expected project/library/catalog refusals, then publishes sequentially; rerun after an operational interruption) |
 | Refresh all clean imports | `tink skill refresh` |
 | Refresh one | `tink skill refresh NAME` |
+| Refresh the active binary's embedded manage-tink | `tink skill refresh manage-tink` (explicitly replaces a differing receipt-free reserved copy; refuses remote provenance) |
 | Remove one project skill | `tink skill remove NAME` |
 | Add a pinned skillset | `tink skillset add NAME-skillset` |
 | List project skillsets | `tink skillset list` |
@@ -31,7 +32,6 @@ form for add, list, check, refresh, and remove.
 | Refresh a clean pinned skillset | `tink skillset refresh NAME-skillset` |
 | Remove one project skillset | `tink skillset remove NAME-skillset` |
 | Update the tink CLI binary | `tink update` (newer host asset only; verifies release digest, archive shape, and exact candidate version before replacement) |
-| Re-embed manage-tink after separate approval | `tink skill remove manage-tink`, then `tink init --no-zen --no-tink-skills` |
 | Destroy managed project skills | `tink destroy --yes` (non-TTY/scripts) or `tink destroy` (TTY, confirm `y`); preserves guidance and unrelated `.agents/` siblings |
 
 ## Layout facts

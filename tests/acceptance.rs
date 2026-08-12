@@ -4151,6 +4151,7 @@ fn x5_manage_tink_documents_remove_and_catalog_sync() {
         "tink skill lock",
         "tink skill verify",
         "tink skill sync",
+        "tink skill refresh manage-tink",
         "tink skillset add NAME-skillset",
         "tink skillset list",
         "tink skillset list --library",
@@ -4215,12 +4216,14 @@ fn x5_manage_tink_documents_remove_and_catalog_sync() {
         "manage-tink procedures must state expected and failure behavior: {skill_md}"
     );
     assert!(
-        !skill_md.contains("tink skill remove manage-tink && tink init"),
-        "manage-tink must not chain re-embedding onto binary updates: {skill_md}"
+        !skill_md.contains("tink skill remove manage-tink")
+            && !commands.contains("tink skill remove manage-tink"),
+        "manage-tink must not teach the remove-then-init ceremony: {skill_md}\n{commands}"
     );
     assert!(
         skill_md.contains("After any binary update or observed contract mismatch")
-            && skill_md.contains("tink destroy --help"),
+            && skill_md.contains("tink destroy --help")
+            && skill_md.contains("check compares the live payload with the active binary"),
         "manage-tink must treat every update as possible contract drift: {skill_md}"
     );
     assert!(
@@ -5386,7 +5389,11 @@ fn u3_update_replaces_binary_when_newer_release_exists() {
         .env("TINK_HOME", &ws.inventory)
         .assert()
         .success()
-        .stdout(predicate::str::contains("Updated").and(predicate::str::contains("v99.0.0")));
+        .stdout(
+            predicate::str::contains("Updated")
+                .and(predicate::str::contains("v99.0.0"))
+                .and(predicate::str::contains("tink skill refresh manage-tink")),
+        );
 
     assert!(installed.is_file());
     assert_eq!(
