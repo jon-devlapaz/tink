@@ -1,6 +1,6 @@
 ---
 name: manage-tink
-description: "Tink CLI for repository-owned Agent Skills. Use when the user asks to initialize Tink; inspect GitHub skill sources; add, list, check, lock, verify, sync, refresh, or remove project skills; manage grouped skillsets; use the home library or catalog; harvest harness skills; configure shell completion; update Tink; re-embed manage-tink; or destroy project agent scaffolding."
+description: "Tink CLI for repository-owned Agent Skills. Use when the user asks to initialize Tink; inspect GitHub skill sources; add, list, check, lock, verify, sync, refresh, or remove project skills; manage grouped skillsets; use the home library or catalog; harvest harness skills; configure shell completion; update Tink; refresh embedded manage-tink; or destroy project agent scaffolding."
 ---
 
 # Manage Tink
@@ -76,7 +76,7 @@ harness roots, and only the matching `tink skillset add`, `refresh`, or
 known.
 
 **On failure:** Stop and report the failure. Do not repair Tink-managed state
-by hand. Init, add, skillset refresh, and re-embedding can fail after an
+by hand. Init, add, skillset refresh, and embedded-skill refresh can fail after an
 earlier project, library, catalog, or guidance write succeeded. Report each
 surface known or possibly changed; do not describe the failure as a no-op
 unless that was proved.
@@ -118,20 +118,22 @@ mutation and requires authority for that exact file.
 **On failure:** Report the shell and command failure. Do not edit unrelated
 shell configuration.
 
-### Step 6: Re-embed Manage Tink When Separately Authorized
+### Step 6: Refresh Manage Tink When Separately Authorized
 
 After any binary update or observed contract mismatch, explain that the live
 skill may be stale. Do not replace it automatically. Before `destroy`, compare
 the active `tink destroy --help` boundary with this skill's ownership contract;
 if it is broader, stop and renew approval. If the user explicitly authorizes
-re-embedding, run `tink skill remove manage-tink`, then
-`tink init --no-zen --no-tink-skills`.
+refreshing the embedded package, run `tink skill refresh manage-tink`.
 
-**Expected:** Separate approval exists and the binary's embedded copy becomes
-the live project skill.
+**Expected:** Missing copies are installed, current copies report `Unchanged`,
+and differing receipt-free copies are atomically replaced. The project,
+library, and catalog are reconciled, and the binary's embedded copy becomes
+the live project skill. A same-named skill with remote provenance is refused.
 
-**On failure:** Stop after the failing command and report whether the old skill
-was removed. Do not conceal a partially completed replacement.
+**On failure:** Stop after the failing command and report which project,
+library, and catalog states were proven. Do not conceal a partially completed
+publication.
 
 ### Step 7: Prove the Post-state
 
@@ -149,8 +151,8 @@ was removed. Do not conceal a partially completed replacement.
 - After `skillset remove`, verify project absence and library presence; its
   external definition should remain.
 - After update, resolve the active binary and probe its exact version. After
-  re-embedding, run project/catalog/library listings plus `tink skill check`;
-  structural check alone does not prove embedded payload identity.
+  refreshing embedded `manage-tink`, run project/catalog/library listings plus
+  `tink skill check`; check compares the live payload with the active binary.
 - After `destroy`, confirm `.agents/skills/` is gone, `.agents/` is gone only if
   it became empty, `ZEN.md` and `AGENTS.md` are preserved, unrelated `.agents/`
   siblings remain, and the project has no catalog rows; do not run `skill check`.
@@ -202,12 +204,13 @@ from the mutation command alone.
 | Configure shell completion | Only the matching shell command |
 | Persist shell completion | Only the exact startup file the user authorizes |
 | Lock / verify / sync reproducible state | Only the matching `tink skill …` command; lock requires a project-contained source mapping for each local skill |
-| Re-embed manage-tink | `tink skill remove manage-tink`, then `tink init --no-zen --no-tink-skills` |
+| Refresh embedded manage-tink | `tink skill refresh manage-tink` |
 | Remove one project skill | `tink skill remove NAME` |
-| Update the Tink binary | `tink update` only; re-embedding requires separate authority |
+| Update the Tink binary | `tink update` only; refreshing embedded `manage-tink` requires separate authority |
 | Remove managed project skills / destroy Tink setup | `tink destroy` (TTY) or `tink destroy --yes` (scripts); guidance and unrelated `.agents/` siblings are preserved |
 
-"Set up Tink" does **not** authorize ZEN, tink-skills, re-embedding, or destroy.
+"Set up Tink" does **not** authorize ZEN, tink-skills, refreshing embedded
+`manage-tink`, or destroy.
 
 ## Ownership (always)
 

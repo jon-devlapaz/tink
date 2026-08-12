@@ -182,6 +182,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | C5 | `skill check` after an installed skill's frontmatter name is corrupted | Exit ≠ 0; reports the skill-name mismatch |
 | C6 | `skill check` after an installed `SKILL.md` loses its YAML frontmatter | Exit ≠ 0; reports that YAML frontmatter is required |
 | C7 | `skill check` after an installed `SKILL.md` has unclosed frontmatter | Exit ≠ 0; reports that the frontmatter is not closed |
+| C8 | `skill check` or `skill lock` after embedded `manage-tink` differs from the active binary | Exit ≠ 0; reports the drift and the exact `tink skill refresh manage-tink` repair command; lockfiles are not written |
 
 ### Project manifest
 
@@ -259,6 +260,12 @@ Ids are stable. Tests must name or comment the id they prove.
 | P6 | `skill refresh` when upstream revision moves but skill tree bytes match | Exit 0; bumps project + library receipts |
 | P7 | `skill refresh` when project already at HEAD but library is stale | Exit 0; repairs library from project |
 | P8 | `skill refresh` for all when a later imported skill has local modifications | Exit ≠ 0; no project skill is updated |
+| P9 | `skill refresh manage-tink` when the embedded copy is missing | Installs the active binary's copy; reconciles library and catalog; subsequent `skill check` passes |
+| P10 | `skill refresh manage-tink` when the embedded copy already matches the active binary | Exit 0 with `Unchanged`; reconciles library and catalog; project tree remains identical |
+| P11 | `skill refresh manage-tink` when a receipt-free reserved copy differs from the active binary | Atomically replaces it with the active binary's copy; reconciles library and catalog; subsequent `skill check` passes |
+| P12 | `skill refresh manage-tink` when the same-named skill has remote provenance | Exit ≠ 0; reports the provenance collision; user-owned tree remains byte-identical |
+| P13 | `skill refresh manage-tink` when the project copy is missing and the same-named library skill has remote provenance | Exit ≠ 0 before publication; project remains missing; library tree and receipt remain byte-identical |
+| P14 | `skill refresh manage-tink` when a current or stale receipt-free project copy exists and the same-named library skill has remote provenance | Exit ≠ 0 before publication; project trees plus library tree and receipt remain byte-identical |
 
 ### Remove
 
@@ -268,7 +275,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | X2 | `skill remove <missing>` | Exit ≠ 0; mentions not found / missing; nothing deleted |
 | X3 | `skill remove` when `.agents` is a symlink | Exit ≠ 0; mentions symlink; tree unchanged |
 | X4 | Successful `skill remove <name>` | Does **not** delete `$TINK_HOME/skills/<name>/` |
-| X5 | `init` installs `manage-tink` | Embedded skill covers standalone lifecycle, operation-specific proof and partial-state reporting, project-contained lock sources, session-versus-persistent completion authority, any-update re-embed warning, library/catalog effects, skillsets, update, and destroy |
+| X5 | `init` installs `manage-tink` | Embedded skill covers standalone lifecycle, operation-specific proof and partial-state reporting, project-contained lock sources, session-versus-persistent completion authority, any-update refresh warning, library/catalog effects, skillsets, update, and destroy |
 | X6 | `skill remove <name>` when that project's catalog metadata is malformed | Exit ≠ 0; project and library skill trees remain intact |
 | X7 | `skill remove <name>` when `$TINK_HOME/catalog` is a symlink | Exit ≠ 0; mentions the symlink; project skill and external catalog target remain byte-identical |
 
@@ -288,7 +295,7 @@ Ids are stable. Tests must name or comment the id they prove.
 |---|---|---|
 | U1 | `update` when releases API is unreachable | Exit ≠ 0; clear download/metadata failure; binary unchanged |
 | U2 | `update` when latest release version matches this binary | Exit 0; stdout notes up to date; binary unchanged |
-| U3 | `update` when a newer release asset exists for this host | Exit 0; replaces the running binary; stdout notes updated version |
+| U3 | `update` when a newer release asset exists for this host | Exit 0; replaces the running binary; stdout notes updated version and the explicit per-project `tink skill refresh manage-tink` next step; does not mutate a project |
 | U4 | `update` receives a valid-digest archive whose payload fails the exact version probe | Exit ≠ 0; running binary remains byte-identical; no success output |
 | U5 | `update` metadata names an older semantic version | Exit ≠ 0; refuses downgrade before publication; running binary remains unchanged |
 | U6 | `install.sh` receives an invalid or non-executable verified payload while a binary exists | Exit ≠ 0; existing binary remains byte-identical; no success output |

@@ -2103,6 +2103,38 @@ fn c7_check_rejects_unclosed_skill_frontmatter() {
         ));
 }
 
+#[test]
+fn c8_check_rejects_stale_embedded_manage_tink() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+
+    fs::write(
+        Workspace::skill_path(&project, "manage-tink").join("references/commands.md"),
+        "stale embedded contents\n",
+    )
+    .expect("replace embedded commands reference");
+
+    ws.cmd(&project)
+        .args(["skill", "check"])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("manage-tink differs from this Tink binary")
+                .and(predicate::str::contains("tink skill refresh manage-tink")),
+        );
+
+    ws.cmd(&project)
+        .args(["skill", "lock"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "manage-tink differs from this Tink binary",
+        ));
+    assert!(!project.join(".tink/skills.toml").exists());
+    assert!(!project.join(".tink/skills.lock").exists());
+}
+
 // --- M*: project manifest ---
 
 #[test]
@@ -3717,6 +3749,214 @@ fn p8_refresh_all_preflights_before_updating_any_skill() {
     );
 }
 
+#[test]
+fn p9_refresh_manage_tink_installs_missing_embedded_copy() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    ws.cmd(&project)
+        .args(["skill", "refresh", "manage-tink"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Installed manage-tink"));
+
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
+    ws.assert_cataloged("app", "manage-tink");
+}
+
+#[test]
+fn p10_refresh_manage_tink_reports_current_copy_unchanged() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+
+    let installed = Workspace::skill_path(&project, "manage-tink");
+    let before = fs::read(installed.join("SKILL.md")).expect("installed SKILL.md");
+
+    ws.cmd(&project)
+        .args(["skill", "refresh", "manage-tink"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Unchanged manage-tink"));
+
+    assert_eq!(
+        fs::read(installed.join("SKILL.md")).expect("refreshed SKILL.md"),
+        before
+    );
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
+    ws.assert_cataloged("app", "manage-tink");
+}
+
+#[test]
+fn p11_refresh_manage_tink_replaces_differing_reserved_copy() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+
+    let installed = Workspace::skill_path(&project, "manage-tink");
+    let commands = installed.join("references/commands.md");
+    let embedded = fs::read(&commands).expect("embedded commands reference");
+    fs::write(&commands, "local edit to reserved embedded contents\n")
+        .expect("modify embedded commands reference");
+
+    ws.cmd(&project)
+        .args(["skill", "refresh", "manage-tink"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Refreshed manage-tink"));
+
+    assert_eq!(fs::read(&commands).expect("refreshed commands"), embedded);
+    assert_eq!(
+        fs::read(
+            ws.library_skill("manage-tink")
+                .join("references/commands.md")
+        )
+        .expect("library commands"),
+        embedded
+    );
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
+    ws.assert_cataloged("app", "manage-tink");
+}
+
+#[test]
+fn p12_refresh_manage_tink_refuses_remote_provenance_collision() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("remote-manage-tink");
+    init_repo(&remote);
+    write_skill(&remote, "manage-tink", "remote user-owned contents");
+    commit_all(&remote, "remote manage-tink");
+    let public = "https://github.com/example/remote-manage-tink.git";
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", "example/remote-manage-tink"]);
+    add.envs(github_redirect(&remote, public));
+    add.assert().success();
+
+    let installed = Workspace::skill_path(&project, "manage-tink");
+    let before = fs::read(installed.join("SKILL.md")).expect("remote SKILL.md");
+    ws.cmd(&project)
+        .args(["skill", "refresh", "manage-tink"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("remote provenance"));
+    assert_eq!(
+        fs::read(installed.join("SKILL.md")).expect("preserved remote SKILL.md"),
+        before
+    );
+}
+
+#[test]
+fn p13_refresh_manage_tink_refuses_remote_library_collision_when_project_is_missing() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("remote-library-manage-tink");
+    init_repo(&remote);
+    write_skill(&remote, "manage-tink", "remote library contents");
+    commit_all(&remote, "remote library manage-tink");
+    let public = "https://github.com/example/remote-library-manage-tink.git";
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", "example/remote-library-manage-tink"]);
+    add.envs(github_redirect(&remote, public));
+    add.assert().success();
+    ws.cmd(&project)
+        .args(["skill", "remove", "manage-tink"])
+        .assert()
+        .success();
+
+    let library = ws.library_skill("manage-tink");
+    let skill_before = fs::read(library.join("SKILL.md")).expect("library SKILL.md");
+    let receipt_before = fs::read(library.join(".tink-source.json")).expect("library provenance");
+
+    ws.cmd(&project)
+        .args(["skill", "refresh", "manage-tink"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("remote provenance"));
+
+    assert!(!Workspace::skill_path(&project, "manage-tink").exists());
+    assert_eq!(
+        fs::read(library.join("SKILL.md")).expect("preserved library SKILL.md"),
+        skill_before
+    );
+    assert_eq!(
+        fs::read(library.join(".tink-source.json")).expect("preserved library provenance"),
+        receipt_before
+    );
+}
+
+#[test]
+fn p14_refresh_manage_tink_preserves_remote_library_collision_for_existing_projects() {
+    let ws = Workspace::new();
+    let current_project = ws.project("current");
+    let stale_project = ws.project("stale");
+    for project in [&current_project, &stale_project] {
+        ws.cmd(project).arg("init").assert().success();
+    }
+    fs::write(
+        Workspace::skill_path(&stale_project, "manage-tink").join("references/commands.md"),
+        "stale project contents\n",
+    )
+    .expect("make stale embedded project copy");
+
+    let remote_project = ws.project("remote");
+    ws.cmd(&remote_project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    let remote = ws.root.join("remote-existing-manage-tink");
+    init_repo(&remote);
+    write_skill(&remote, "manage-tink", "remote library contents");
+    commit_all(&remote, "remote existing manage-tink");
+    let public = "https://github.com/example/remote-existing-manage-tink.git";
+    let mut add = ws.cmd(&remote_project);
+    add.args(["skill", "add", "example/remote-existing-manage-tink"]);
+    add.envs(github_redirect(&remote, public));
+    add.assert().success();
+
+    let library = ws.library_skill("manage-tink");
+    let library_skill_before = fs::read(library.join("SKILL.md")).expect("library SKILL.md");
+    let library_receipt_before =
+        fs::read(library.join(".tink-source.json")).expect("library provenance");
+
+    for project in [&current_project, &stale_project] {
+        let installed = Workspace::skill_path(project, "manage-tink");
+        let project_before =
+            fs::read(installed.join("references/commands.md")).expect("project commands");
+        ws.cmd(project)
+            .args(["skill", "refresh", "manage-tink"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("remote provenance"));
+        assert_eq!(
+            fs::read(installed.join("references/commands.md")).expect("preserved project commands"),
+            project_before
+        );
+    }
+
+    assert_eq!(
+        fs::read(library.join("SKILL.md")).expect("preserved library SKILL.md"),
+        library_skill_before
+    );
+    assert_eq!(
+        fs::read(library.join(".tink-source.json")).expect("preserved library provenance"),
+        library_receipt_before
+    );
+}
+
 // --- D*: destroy ---
 
 #[test]
@@ -4014,6 +4254,7 @@ fn x5_manage_tink_documents_remove_and_catalog_sync() {
         "tink skill lock",
         "tink skill verify",
         "tink skill sync",
+        "tink skill refresh manage-tink",
         "tink skillset add NAME-skillset",
         "tink skillset list",
         "tink skillset list --library",
@@ -4078,12 +4319,14 @@ fn x5_manage_tink_documents_remove_and_catalog_sync() {
         "manage-tink procedures must state expected and failure behavior: {skill_md}"
     );
     assert!(
-        !skill_md.contains("tink skill remove manage-tink && tink init"),
-        "manage-tink must not chain re-embedding onto binary updates: {skill_md}"
+        !skill_md.contains("tink skill remove manage-tink")
+            && !commands.contains("tink skill remove manage-tink"),
+        "manage-tink must not teach the remove-then-init ceremony: {skill_md}\n{commands}"
     );
     assert!(
         skill_md.contains("After any binary update or observed contract mismatch")
-            && skill_md.contains("tink destroy --help"),
+            && skill_md.contains("tink destroy --help")
+            && skill_md.contains("check compares the live payload with the active binary"),
         "manage-tink must treat every update as possible contract drift: {skill_md}"
     );
     assert!(
@@ -5249,7 +5492,11 @@ fn u3_update_replaces_binary_when_newer_release_exists() {
         .env("TINK_HOME", &ws.inventory)
         .assert()
         .success()
-        .stdout(predicate::str::contains("Updated").and(predicate::str::contains("v99.0.0")));
+        .stdout(
+            predicate::str::contains("Updated")
+                .and(predicate::str::contains("v99.0.0"))
+                .and(predicate::str::contains("tink skill refresh manage-tink")),
+        );
 
     assert!(installed.is_file());
     assert_eq!(

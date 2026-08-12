@@ -702,6 +702,10 @@ pub fn print_report(report: &UpdateReport) -> Result<(), Error> {
                 "{}",
                 style.muted(format!("Installed to {}", output::display_path(path)))
             ))?;
+            output::stdout_line(format_args!(
+                "{}",
+                style.muted("Next: run `tink skill refresh manage-tink` in each Tink project")
+            ))?;
         }
     }
     Ok(())

@@ -717,11 +717,10 @@ pub(crate) fn publish_staged_tree(
     Ok(target.to_path_buf())
 }
 
-/// Replace an existing imported skill after dirty-tree preflight elsewhere.
-pub fn replace_verified(
+fn replace_verified_inner(
     skill: &Skill,
     destination_root: &Path,
-    provenance: &Provenance,
+    provenance: Option<&Provenance>,
 ) -> Result<PathBuf, Error> {
     require_safe_tree(&skill.path)?;
     let target = destination_root.join(&skill.name);
@@ -744,8 +743,27 @@ pub fn replace_verified(
             output::display_path(&skill.path)
         )));
     }
-    provenance::write_file(&staged.join(provenance::SIDECAR_FILE), provenance)?;
+    if let Some(provenance) = provenance {
+        provenance::write_file(&staged.join(provenance::SIDECAR_FILE), provenance)?;
+    }
     publish_staged_tree(staging, staged, &target)
+}
+
+/// Replace an existing imported skill after dirty-tree preflight elsewhere.
+pub fn replace_verified(
+    skill: &Skill,
+    destination_root: &Path,
+    provenance: &Provenance,
+) -> Result<PathBuf, Error> {
+    replace_verified_inner(skill, destination_root, Some(provenance))
+}
+
+/// Replace the receipt-free embedded skill after its ownership preflight.
+pub(crate) fn replace_embedded_verified(
+    skill: &Skill,
+    destination_root: &Path,
+) -> Result<PathBuf, Error> {
+    replace_verified_inner(skill, destination_root, None)
 }
 
 #[cfg(test)]

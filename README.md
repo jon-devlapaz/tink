@@ -140,6 +140,7 @@ tink skill list
 tink skill check
 tink skill refresh
 tink skill refresh skill-name
+tink skill refresh manage-tink
 tink skill remove skill-name
 ```
 
@@ -151,7 +152,11 @@ tink skill remove skill-name
   by the error or by `tink inspect`.
 - GitHub tree URLs are inspection inputs, not `skill add` sources. Remote adds
   follow the repository's default branch and record the selected skill path.
-- Refresh only clean GitHub imports; local edits are refused.
+- Refresh only clean GitHub imports; local edits are refused. The explicit
+  `tink skill refresh manage-tink` path instead owns the reserved embedded
+  package: it installs a missing copy, leaves a current copy unchanged, or
+  atomically replaces differing receipt-free contents. Remote provenance is
+  refused.
 - tink does not overwrite a project skill that differs from what it would
   install.
 - tink never inits Git, stages, commits, or pushes.
@@ -227,7 +232,7 @@ header, including for an empty catalog. Within fields, backslash, tab, carriage
 return, and newline are escaped as `\\\\`, `\\t`, `\\r`, and `\\n` so every
 skill remains one three-column row.
 
-**Breaking in 0.3.0:** `skill list --home` → `--catalog`; `skill list --stash` → `--library`. On-disk layout is still `$TINK_HOME/skills/` and `catalog/by-project/`. After a major CLI upgrade, refresh the live project skill: `tink skill remove manage-tink && tink init --no-zen --no-tink-skills`.
+**Breaking in 0.3.0:** `skill list --home` → `--catalog`; `skill list --stash` → `--library`. On-disk layout is still `$TINK_HOME/skills/` and `catalog/by-project/`. After updating the binary, refresh each project's embedded skill with `tink skill refresh manage-tink`.
 
 Project lockfiles now use digest format/version 2 so file boundaries and Unix
 executable modes are actually pinned. An older lock is deliberately refused;

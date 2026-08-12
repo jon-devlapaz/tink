@@ -153,7 +153,7 @@ pub enum SkillCommand {
     },
     /// Install missing or pinned skills from the project manifest and lockfile
     Sync,
-    /// Refresh clean GitHub-imported skills; refuse local modifications
+    /// Refresh clean GitHub imports or the reserved embedded manage-tink
     Refresh {
         /// Optional skill name; default refreshes all imported skills
         name: Option<String>,
@@ -722,6 +722,16 @@ fn dispatch_skill_harvest(cwd: &Path) -> Result<(), Error> {
 fn dispatch_skill_refresh(cwd: &Path, name: Option<&str>) -> Result<(), Error> {
     let style = CliStyle::auto_stdout();
     match name {
+        Some("manage-tink") => {
+            let outcome = manage_tink::refresh_manage_tink(cwd)?;
+            let action = match outcome {
+                manage_tink::RefreshOutcome::Installed => style.success("Installed"),
+                manage_tink::RefreshOutcome::Unchanged => style.muted("Unchanged"),
+                manage_tink::RefreshOutcome::Refreshed => style.success("Refreshed"),
+            };
+            println!("{} {}", action, style.skill("manage-tink"));
+            Ok(())
+        }
         Some(name) => {
             let changed = refresh::refresh_skill(cwd, name)?;
             if changed {
