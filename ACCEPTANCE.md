@@ -268,7 +268,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | X2 | `skill remove <missing>` | Exit ≠ 0; mentions not found / missing; nothing deleted |
 | X3 | `skill remove` when `.agents` is a symlink | Exit ≠ 0; mentions symlink; tree unchanged |
 | X4 | Successful `skill remove <name>` | Does **not** delete `$TINK_HOME/skills/<name>/` |
-| X5 | `init` installs `manage-tink` | Embedded skill covers standalone skill lifecycle, manifests, library promotion/harvest, read-only GitHub inspection, canonical nested skillsets, project-first library authority, catalog effects, CLI update, and destroy; removals preserve library state |
+| X5 | `init` installs `manage-tink` | Embedded skill covers standalone lifecycle, operation-specific proof and partial-state reporting, project-contained lock sources, session-versus-persistent completion authority, any-update re-embed warning, library/catalog effects, skillsets, update, and destroy |
 | X6 | `skill remove <name>` when that project's catalog metadata is malformed | Exit ≠ 0; project and library skill trees remain intact |
 | X7 | `skill remove <name>` when `$TINK_HOME/catalog` is a symlink | Exit ≠ 0; mentions the symlink; project skill and external catalog target remain byte-identical |
 

@@ -76,14 +76,18 @@ harness roots, and only the matching `tink skillset add`, `refresh`, or
 known.
 
 **On failure:** Stop and report the failure. Do not repair Tink-managed state
-by hand.
+by hand. Init, add, skillset refresh, and re-embedding can fail after an
+earlier project, library, catalog, or guidance write succeeded. Report each
+surface known or possibly changed; do not describe the failure as a no-op
+unless that was proved.
 
 ### Step 4: Offer Reproducible Project State
 
 After adding or changing project skills, check for `.tink/skills.toml` and
 `.tink/skills.lock`. If absent, ask whether the user wants a reproducible
 manifest. Only after approval, run `tink skill lock`, supplying
-`--source NAME=PATH` for each local skill. If `skill verify` reports a legacy
+`--source NAME=PATH` for each local skill. Each local source path must resolve
+inside the project. If `skill verify` reports a legacy
 version-1 lock digest, ask before rerunning `skill lock`; that explicit relock
 rewrites version 2 and includes raw Unix path bytes and portable executable modes. If
 both files already exist, use `tink skill sync` only when the user requested
@@ -107,16 +111,21 @@ Use the shell-specific command only after the user asks for completion:
 - Bash: use `source <(COMPLETE=bash tink)`.
 - Fish: use `COMPLETE=fish tink | source`.
 
-**Expected:** Completion is configured for the requested shell only.
+**Expected:** Completion is configured for the current requested shell session
+only. Editing a startup file for future sessions is a separate filesystem
+mutation and requires authority for that exact file.
 
 **On failure:** Report the shell and command failure. Do not edit unrelated
 shell configuration.
 
 ### Step 6: Re-embed Manage Tink When Separately Authorized
 
-After a major binary upgrade, explain that the live skill may be stale. Do not
-replace it automatically. If the user explicitly authorizes re-embedding, run
-`tink skill remove manage-tink`, then `tink init --no-zen --no-tink-skills`.
+After any binary update or observed contract mismatch, explain that the live
+skill may be stale. Do not replace it automatically. Before `destroy`, compare
+the active `tink destroy --help` boundary with this skill's ownership contract;
+if it is broader, stop and renew approval. If the user explicitly authorizes
+re-embedding, run `tink skill remove manage-tink`, then
+`tink init --no-zen --no-tink-skills`.
 
 **Expected:** Separate approval exists and the binary's embedded copy becomes
 the live project skill.
@@ -126,12 +135,22 @@ was removed. Do not conceal a partially completed replacement.
 
 ### Step 7: Prove the Post-state
 
-- After successful mutations other than removal or destroy, run
-  `tink skill check`.
-- After `skill remove`, run `tink skill list` and `tink skill list --catalog`.
-- After `skillset remove`, run `tink skillset list`; its definition and library
-  copy should remain.
+- After `init`, run `tink skill check`, project/catalog/library listings, and
+  verify the requested optional guidance or bundle state.
+- After add, promotion, refresh, or sync, run `tink skill check` and verify the
+  affected project, catalog, and library entries. After sync, also run
+  `tink skill verify`.
+- After harvest, use its summary and `tink library list`; project check does not
+  prove a library-only mutation.
 - After `skill lock`, run `tink skill verify`.
+- After skillset add or refresh, run `tink skill check`, `tink skillset list`,
+  and `tink skillset list --library`.
+- After `skill remove`, verify project/catalog absence and library retention.
+- After `skillset remove`, verify project absence and library presence; its
+  external definition should remain.
+- After update, resolve the active binary and probe its exact version. After
+  re-embedding, run project/catalog/library listings plus `tink skill check`;
+  structural check alone does not prove embedded payload identity.
 - After `destroy`, confirm `.agents/skills/` is gone, `.agents/` is gone only if
   it became empty, `ZEN.md` and `AGENTS.md` are preserved, unrelated `.agents/`
   siblings remain, and the project has no catalog rows; do not run `skill check`.
@@ -181,6 +200,8 @@ from the mutation command alone.
 | Add / refresh / remove a canonical skillset | The matching `tink skillset … NAME-skillset` command |
 | Author a pinned skillset definition | Only the exact `catalog/by-skillset/NAME-skillset/meta.json` input; does not authorize install |
 | Configure shell completion | Only the matching shell command |
+| Persist shell completion | Only the exact startup file the user authorizes |
+| Lock / verify / sync reproducible state | Only the matching `tink skill …` command; lock requires a project-contained source mapping for each local skill |
 | Re-embed manage-tink | `tink skill remove manage-tink`, then `tink init --no-zen --no-tink-skills` |
 | Remove one project skill | `tink skill remove NAME` |
 | Update the Tink binary | `tink update` only; re-embedding requires separate authority |
