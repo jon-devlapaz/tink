@@ -112,16 +112,21 @@ jobs:
             exit 1
           fi
 
-          locked="$(python3 - <<'PY'
-          import tomllib
-          with open("Cargo.lock", "rb") as source:
-              packages = tomllib.load(source)["package"]
-          matches = [package["version"] for package in packages if package["name"] == "tink"]
-          if len(matches) != 1:
-              raise SystemExit("Cargo.lock must contain exactly one tink package")
-          print(matches[0])
-          PY
-          )"
+          locked="$(awk '
+            /^\[\[package\]\]$/ { package = ""; next }
+            /^name = "tink"$/ { package = "tink"; next }
+            package == "tink" && /^version = "/ {
+              version = $0
+              sub(/^version = "/, "", version)
+              sub(/"$/, "", version)
+              print version
+              exit
+            }
+          ' Cargo.lock)"
+          if [ -z "${locked}" ]; then
+            echo "Could not read tink version from Cargo.lock" >&2
+            exit 1
+          fi
           if [ "${locked}" != "${current}" ]; then
             echo "Cargo.lock tink version ${locked} does not match Cargo.toml ${current}" >&2
             exit 1
