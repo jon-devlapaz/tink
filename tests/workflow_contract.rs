@@ -57,6 +57,33 @@ fn bump_gates_the_tag_on_every_platform_and_publishes_refs_atomically() {
 }
 
 #[test]
+fn bump_publishes_an_intentional_pre_bump_without_incrementing_it() {
+    let marker = "# An intentionally pre-bumped, untagged manifest";
+    let pre_bump = BUMP
+        .split_once(marker)
+        .expect("intentional pre-bump branch")
+        .1
+        .split_once("IFS=. read -r major minor patch")
+        .expect("pre-bump must precede patch calculation")
+        .0;
+
+    assert!(BUMP.find("locked=\"").unwrap() < BUMP.find(marker).unwrap());
+    assert!(pre_bump.contains("baseline_tag="));
+    assert!(pre_bump.contains("must be newer than published"));
+    assert!(pre_bump.contains("baseline_tagged_version="));
+    assert!(pre_bump.contains("git merge-base --is-ancestor"));
+    assert!(pre_bump.contains("baseline_release_draft="));
+    assert!(pre_bump.contains("git tag \"${current_tag}\""));
+    assert!(pre_bump.contains(
+        "git push --atomic origin HEAD:main \"refs/tags/${current_tag}:refs/tags/${current_tag}\""
+    ));
+    assert!(pre_bump.contains("gh workflow run release.yml --ref \"${current_tag}\""));
+    assert!(pre_bump.contains("exit 0"));
+    assert!(!pre_bump.contains("sed -i"));
+    assert!(!pre_bump.contains("git commit"));
+}
+
+#[test]
 fn release_uploads_an_exact_asset_set_to_a_draft_before_publication() {
     let create = position(RELEASE, "gh release create \"${tag}\"");
     let draft = position(RELEASE, "--verify-tag --draft");
