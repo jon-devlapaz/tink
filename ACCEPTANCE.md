@@ -182,6 +182,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | C5 | `skill check` after an installed skill's frontmatter name is corrupted | Exit ≠ 0; reports the skill-name mismatch |
 | C6 | `skill check` after an installed `SKILL.md` loses its YAML frontmatter | Exit ≠ 0; reports that YAML frontmatter is required |
 | C7 | `skill check` after an installed `SKILL.md` has unclosed frontmatter | Exit ≠ 0; reports that the frontmatter is not closed |
+| C8 | `skill check` or `skill lock` after embedded `manage-tink` differs from the active binary | Exit ≠ 0; reports the drift and the exact `tink skill refresh manage-tink` repair command; lockfiles are not written |
 
 ### Project manifest
 

@@ -28,7 +28,10 @@ fn read_skill_entry(path: &Path) -> Result<Option<Skill>, Error> {
     }
     let skill = skills::read_skill(path, true)?;
     skills::validate_skill_tree(path)?;
-    provenance::read(&skill)?;
+    let provenance = provenance::read(&skill)?;
+    if skill.name == "manage-tink" && provenance.is_none() {
+        crate::manage_tink::require_current(&skill)?;
+    }
     Ok(Some(skill))
 }
 

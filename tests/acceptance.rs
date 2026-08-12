@@ -2103,6 +2103,38 @@ fn c7_check_rejects_unclosed_skill_frontmatter() {
         ));
 }
 
+#[test]
+fn c8_check_rejects_stale_embedded_manage_tink() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+
+    fs::write(
+        Workspace::skill_path(&project, "manage-tink").join("references/commands.md"),
+        "stale embedded contents\n",
+    )
+    .expect("replace embedded commands reference");
+
+    ws.cmd(&project)
+        .args(["skill", "check"])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("manage-tink differs from this Tink binary")
+                .and(predicate::str::contains("tink skill refresh manage-tink")),
+        );
+
+    ws.cmd(&project)
+        .args(["skill", "lock"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "manage-tink differs from this Tink binary",
+        ));
+    assert!(!project.join(".tink/skills.toml").exists());
+    assert!(!project.join(".tink/skills.lock").exists());
+}
+
 // --- M*: project manifest ---
 
 #[test]

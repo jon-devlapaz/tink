@@ -33,6 +33,17 @@ pub(crate) fn prepare_manage_tink() -> Result<(tempfile::TempDir, Skill), Error>
     Ok((staging, skill))
 }
 
+/// Require an installed embedded copy to match the payload in this binary.
+pub(crate) fn require_current(installed: &Skill) -> Result<(), Error> {
+    let (_staging, embedded) = prepare_manage_tink()?;
+    if skills::skill_contents_equal(&installed.path, &embedded.path)? {
+        return Ok(());
+    }
+    Err(Error::msg(
+        "manage-tink differs from this Tink binary; run `tink skill refresh manage-tink`",
+    ))
+}
+
 /// Stage the embedded skill and install it into the project via `add`.
 ///
 /// Uses the quiet add path so init can own the closing narrative.
