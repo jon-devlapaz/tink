@@ -17,7 +17,7 @@ form for add, list, check, refresh, and remove.
 | Inspect a public GitHub repository or tree | `tink inspect GITHUB_URL` |
 | List (this project) | `tink skill list` |
 | List (catalog) | `tink skill list --catalog` |
-| List (library) | `tink skill list --library` |
+| List (library) | `tink library list` (`tink skill list --library` compatibility alias) |
 | Check | `tink skill check` |
 | Generate project manifest and lockfile | `tink skill lock --source NAME=PATH` for each local skill |
 | Verify manifest, lockfile, and installed trees | `tink skill verify` |
@@ -43,7 +43,8 @@ form for add, list, check, refresh, and remove.
   mutating commands.
 - Home (`$TINK_HOME` or `~/.tink`) is not an agent discovery root. Installs
   library trees at `skills/<name>/`. List the library with
-  `tink skill list --library`; promote into a project with
+  `tink library list` (`tink skill list --library` remains a compatibility
+  alias); promote into a project with
   `tink skill add NAME` (bare standalone library skill name). Receipt-backed
   roots and receipt-bearing sources (including dangling receipt links) are excluded
   from standalone operations. `tink skill harvest` copies complete trees

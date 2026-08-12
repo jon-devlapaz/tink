@@ -31,8 +31,11 @@ closed stdout is a normal pipeline termination that exits 0 without panic.
 
 ## Commands
 
-Standalone skill verbs live only under `tink skill`. There are no top-level `add` /
-`check` / `refresh` aliases. CLI binary updates use top-level `tink update`.
+Standalone skill mutation and validation verbs live under `tink skill`. The
+library has the dedicated read-only `tink library list` surface, with
+`tink skill list --library` retained as a compatibility alias. There are no
+top-level `add` / `check` / `refresh` aliases. CLI binary updates use top-level
+`tink update`.
 
 | Command | Meaning |
 |---|---|
@@ -40,7 +43,8 @@ Standalone skill verbs live only under `tink skill`. There are no top-level `add
 | `tink skill add <source> [--skill <name-or-path>]` | Install one local path, public GitHub skill, or library skill by name; remote selectors may be unique names or repository-relative paths |
 | `tink skill list` | List project skills under `.agents/skills/` (read-only) |
 | `tink skill list --catalog` | List offline by-project catalog (`project`, `root`, `skill` TSV) |
-| `tink skill list --library` | List standalone skill names in the library; receipt-backed skillset roots are excluded |
+| `tink library list` | List standalone skill names in the library; receipt-backed skillset roots are excluded |
+| `tink skill list --library` | Compatibility alias for `tink library list` |
 | `tink skill harvest` | Copy complete skill trees from known harness roots into the library (create-only; no project writes) |
 | `tink skill check` | Validate project skills; no network; no writes |
 | `tink skill lock [--source <name=source>]` | Record the installed project skills in `.tink/skills.toml` and `.tink/skills.lock` |
@@ -210,12 +214,13 @@ Ids are stable. Tests must name or comment the id they prove.
 | L11 | A project directory name begins with `.` | Its hashed catalog identity remains visible in `skill list --catalog`; hidden project names are not mistaken for staging entries |
 | L12 | A cataloged project name or root contains tab, CR, LF, backslash, or another terminal control | `skill list --catalog` emits visible backslash escapes (including `\\t`, `\\r`, `\\n`, `\\\\`, and `\\x1b`); every data row remains exactly three TSV columns and contains no raw terminal controls |
 | L13 | `skill list --catalog` with no catalog entries | Exit 0; emits the TSV header and no data rows |
+| L14 | Compare `library list` with `skill list --library` | Both exit 0 with identical stdout and stderr |
 
 ### Library
 
 | Id | Action | Expect |
 |---|---|---|
-| H1 | `skill list --library` after init+add | Exit 0; stdout includes library skill names (at least the added skill) |
+| H1 | `library list` after init+add | Exit 0; stdout includes library skill names (at least the added skill) |
 | H2 | `skill add <name>` when library has that skill and project lacks it | Exit 0; installs under `.agents/skills/<name>/`; catalogs name; **no** network; stdout notes library |
 | H3 | `skill add <missing-bare-name>` | Exit ≠ 0; mentions library not found / missing; **no** GitHub network fetch |
 | H4 | `skill add <name>` when library has skill and project skill exists and differs | Exit ≠ 0; "Refusing to overwrite"; project target unchanged |

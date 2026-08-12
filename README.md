@@ -135,6 +135,7 @@ tink skillset list --library
 tink skillset refresh common-skillset
 tink skillset remove common-skillset
 tink inspect https://github.com/mattpocock/skills
+tink library list
 tink skill list
 tink skill check
 tink skill refresh
@@ -142,7 +143,8 @@ tink skill refresh skill-name
 tink skill remove skill-name
 ```
 
-- A bare standalone `skill-name` promotes from the library (`tink skill list --library`).
+- A bare standalone `skill-name` promotes from the library (`tink library list`;
+  `tink skill list --library` remains a compatibility alias).
   Receipt-backed roots remain skillsets and require `tink skillset ...` commands.
 - `--skill` recursively selects a unique skill name from a remote repository.
   If that name occurs more than once, use the repository-relative path reported
@@ -208,7 +210,7 @@ structure. Inspection never writes the project, catalog, or home library.
 Library, catalog, init flags, and destroy:
 
 ```console
-tink skill list --library
+tink library list
 tink skill add skill-name
 tink skill harvest
 tink skill list --catalog
