@@ -318,7 +318,7 @@ Ids are stable. Tests must name or comment the id they prove.
 
 | Id | Action | Expect |
 |---|---|---|
-| S1 | Any successful command | Does not `git init`, stage, commit, or push. Sensor: S1 (partial: `init` only). |
+| S1 | Successful local and remote commands | Tink's centralized Git process boundary refuses root `init`, `add`, `commit`, and `push` commands; representative init and remote-add paths do not create project Git state |
 | S2 | Home root | Never treated as an agent discovery root. Sensor: manual. |
 | S3 | `skill remove` or `destroy --yes` when neither `TINK_HOME` nor `HOME` can resolve an inventory | Exit 0; completes local cleanup without creating or mutating inventory state |
 

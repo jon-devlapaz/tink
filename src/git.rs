@@ -31,6 +31,25 @@ fn git_command_args<'a>(args: &[&'a str]) -> Vec<&'a str> {
     full
 }
 
+fn git_subcommand<'a>(args: &[&'a str]) -> Option<&'a str> {
+    let mut index = 0;
+    while let Some(argument) = args.get(index) {
+        match *argument {
+            "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" => index += 2,
+            value if value.starts_with('-') => index += 1,
+            value => return Some(value),
+        }
+    }
+    None
+}
+
+fn guard_git_command(args: &[&str]) -> Result<(), Error> {
+    if matches!(git_subcommand(args), Some("init" | "add" | "commit" | "push")) {
+        return Err(Error::msg("Tink refuses project-mutating Git commands"));
+    }
+    Ok(())
+}
+
 fn run_git(
     args: &[&str],
     cwd: Option<&Path>,
@@ -38,6 +57,7 @@ fn run_git(
     io_context: &str,
     missing_message: Option<&str>,
 ) -> Result<std::process::Output, Error> {
+    guard_git_command(args)?;
     let mut command = Command::new("git");
     command.args(git_command_args(args));
     if non_interactive {
@@ -235,5 +255,27 @@ mod tests {
                 "HEAD",
             ]
         );
+    }
+
+    #[test]
+    fn git_guard_rejects_project_mutations_and_allows_owned_reads() {
+        for args in [
+            &["init"][..],
+            &["add", "."][..],
+            &["commit", "-m", "message"][..],
+            &["push", "origin", "main"][..],
+            &["-C", "/tmp/repo", "commit"][..],
+        ] {
+            assert!(guard_git_command(args).is_err(), "must refuse {args:?}");
+        }
+
+        for args in [
+            &["ls-remote", "https://example.test", "HEAD"][..],
+            &["clone", "https://example.test/repo.git", "/tmp/repo"][..],
+            &["rev-parse", "HEAD"][..],
+            &["-C", "/tmp/repo", "worktree", "add", "/tmp/tree"][..],
+        ] {
+            assert!(guard_git_command(args).is_ok(), "must allow {args:?}");
+        }
     }
 }

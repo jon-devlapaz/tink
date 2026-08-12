@@ -4502,11 +4502,24 @@ fn x7_remove_refuses_symlinked_catalog_without_external_or_project_writes() {
 // --- S*: safety ---
 
 #[test]
-fn s1_init_does_not_create_git_repo() {
+fn s1_successful_local_and_remote_commands_do_not_mutate_project_git() {
     let ws = Workspace::new();
     let project = ws.project("app");
     assert!(!project.join(".git").exists());
     ws.cmd(&project).arg("init").assert().success();
+    assert!(!project.join(".git").exists());
+
+    let remote = ws.root.join("remote");
+    init_repo(&remote);
+    write_skill(&remote, "remote-skill", "remote");
+    commit_all(&remote, "initial");
+    let public_url = "https://github.com/example/remote-skill.git";
+    let envs = github_redirect(&remote, public_url);
+    ws.cmd(&project)
+        .envs(envs)
+        .args(["skill", "add", "example/remote-skill"])
+        .assert()
+        .success();
     assert!(!project.join(".git").exists());
 }
 
