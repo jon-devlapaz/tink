@@ -66,7 +66,7 @@ form for add, list, check, refresh, and remove.
   `catalog/by-project/<bounded-name>-<sha256-identity>/meta.json`. List the catalog with
   `tink skill list --catalog` (always headered three-column TSV; backslash, tab, CR,
   and LF inside fields are escaped as `\\\\`, `\\t`, `\\r`, and `\\n`).
-  Do not hand-parse `meta.json` when the CLI is available. `skill remove`
+  Do not hand-parse this derived by-project `meta.json` when the CLI is available. `skill remove`
   deletes the project skill directory and drops that name from the by-project
   catalog; it does not prune the library. `destroy` removes
   `.agents/skills/`, removes `.agents/` only when it is then empty, and drops
@@ -86,7 +86,22 @@ form for add, list, check, refresh, and remove.
   anything or write a catalog definition.
 - Skillset definitions live at
   `catalog/by-skillset/<name>-skillset/meta.json` and pin an HTTPS Git source,
-  full revision, source root, and explicit members. Installed project and
+  full revision, source root, and explicit members. Tink validates and consumes
+  this external input but has no command that writes it. Only an explicitly
+  authorized authoring step may create or change the exact definition:
+
+  ```json
+  {
+    "source": "https://github.com/example/agent-skills.git",
+    "revision": "0123456789abcdef0123456789abcdef01234567",
+    "sourceRoot": "skills/review",
+    "members": ["code-review", "security-review"]
+  }
+  ```
+
+  `tink inspect` may inform a proposal, but never infer or write the pinned
+  revision or member list automatically. Definition authoring does not authorize
+  `skillset add`. Installed project and
   library trees carry `.tink-skillset.json`. A valid project tree is primary:
   it may repair its library copy, while library state never overwrites a
   divergent project. Receipt presence owns the root even when it also contains

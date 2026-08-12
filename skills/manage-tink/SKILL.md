@@ -49,7 +49,11 @@ registries, or substitute symlinks or manual copies.
 Require canonical skillset names ending in `-skillset`; never append or remove
 the suffix. `skillset add` reads
 `$TINK_HOME/catalog/by-skillset/NAME-skillset/meta.json`; inspection does not
-create that definition.
+create that definition. Tink has no definition-writer command. Only when the user
+explicitly authorizes creating or changing a pinned skillset definition, author
+that exact external-input file using the schema in `references/commands.md`.
+Definition authoring does not authorize installing it or editing receipts,
+installed trees, or the derived by-project index.
 
 **Expected:** One primary command exactly matches the user's authority.
 
@@ -58,7 +62,10 @@ canonical name is missing, stop and ask for the missing authority or name.
 
 ### Step 3: Execute the Primary Mutation
 
-Run the selected command once. Honor create-only and divergence refusals. Use
+Execute the selected mutation once. For explicitly authorized external definition
+authoring, write only the exact `catalog/by-skillset/NAME-skillset/meta.json`
+input and stop unless installation was separately authorized. Honor create-only
+and divergence refusals. Use
 `tink skill add NAME` to promote a bare library skill. Receipt-backed roots
 remain skillsets. Use `tink skill harvest` to fill the library from known
 harness roots, and only the matching `tink skillset add`, `refresh`, or
@@ -149,7 +156,8 @@ from the mutation command alone.
   standalone skill; use `tink skillset add NAME-skillset` instead.
 - Inferring a skillset suffix or definition from inspection output.
 - Combining a binary update with project-skill replacement without approval.
-- Hand-editing receipts, catalog metadata, or divergent managed trees.
+- Treating external skillset-definition authoring as authority to edit receipts,
+  derived by-project catalog metadata, or divergent managed trees.
 - Treating command completion as proof of the requested outcome.
 
 ## Related Skills
@@ -170,6 +178,7 @@ from the mutation command alone.
 | Inspect a public GitHub skill source | `tink inspect GITHUB_URL` (read-only) |
 | List project / library skillsets | `tink skillset list` / `tink skillset list --library` |
 | Add / refresh / remove a canonical skillset | The matching `tink skillset … NAME-skillset` command |
+| Author a pinned skillset definition | Only the exact `catalog/by-skillset/NAME-skillset/meta.json` input; does not authorize install |
 | Configure shell completion | Only the matching shell command |
 | Re-embed manage-tink | `tink skill remove manage-tink`, then `tink init --no-zen --no-tink-skills` |
 | Remove one project skill | `tink skill remove NAME` |
@@ -184,6 +193,9 @@ from the mutation command alone.
 - Leave `.tink-skillset.json` untouched — it is skillset ownership and digest
   evidence. Its presence takes precedence over a root `SKILL.md`; standalone
   library commands must not expose, promote, or replace that root.
+- Skillset definitions under `catalog/by-skillset/` are the only externally
+  authored Tink-home metadata. Create or change one only with explicit authority;
+  never infer its revision or members from an inspection proposal.
 - On a refusal, stop and report it. Authorized deletes are only:
   - `tink skill remove NAME` → `.agents/skills/<name>/` and drops that name
     from the by-project catalog

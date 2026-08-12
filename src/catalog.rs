@@ -16,6 +16,7 @@ use crate::home::{
     BY_PROJECT, by_project_path, ensure_inventory_root, existing_inventory_root,
     looks_like_legacy_catalog, resolve_home,
 };
+use crate::output;
 use crate::paths::{map_io, mkdir_p, refuse_symlink, require_directory, require_file};
 
 fn safe_project_dirname(name: &str) -> String {
@@ -109,7 +110,10 @@ impl CatalogMeta {
     fn read(meta_path: &Path, project_root: &Path) -> Result<Self, Error> {
         let raw = fs::read_to_string(meta_path).map_err(|e| map_io(meta_path, e))?;
         let value = serde_json::from_str(&raw).map_err(|e| {
-            Error::msg(format!("Invalid catalog meta {}: {e}", meta_path.display()))
+            Error::msg(format!(
+                "Invalid catalog meta {}: {e}",
+                output::display_path(meta_path)
+            ))
         })?;
         Ok(Self::from_value(project_root, &value))
     }
@@ -185,7 +189,7 @@ fn remove_catalog_dir(catalog: &Path) -> Result<(), Error> {
     if !catalog.is_dir() {
         return Err(Error::msg(format!(
             "Refusing to remove non-directory catalog: {}",
-            catalog.display()
+            output::display_path(catalog)
         )));
     }
     fs::remove_dir_all(catalog).map_err(|e| map_io(catalog, e))?;
@@ -200,7 +204,7 @@ fn validate_catalog_dir(catalog: &Path) -> Result<Option<PathBuf>, Error> {
     if !catalog.is_dir() {
         return Err(Error::msg(format!(
             "Refusing non-directory catalog: {}",
-            catalog.display()
+            output::display_path(catalog)
         )));
     }
     let meta = catalog.join("meta.json");
@@ -233,7 +237,7 @@ fn migrate_owned_legacy_catalog(
         {
             return Err(Error::msg(format!(
                 "Cannot migrate ambiguous legacy catalog {}; restore its canonical root field or remove the stale entry",
-                legacy.display()
+                output::display_path(&legacy)
             )));
         }
         return Ok(());
@@ -267,7 +271,7 @@ fn existing_project_catalog(
     if !by_project.is_dir() {
         return Err(Error::msg(format!(
             "Refusing non-directory catalog: {}",
-            by_project.display()
+            output::display_path(&by_project)
         )));
     }
 
@@ -312,7 +316,7 @@ pub(crate) fn preflight_deposit_skill_at(
         if !meta.catalog_owned_by(&project_root) {
             return Err(Error::msg(format!(
                 "Catalog identity belongs to another project: {}",
-                catalog.display()
+                output::display_path(&catalog)
             )));
         }
         return Ok(());
@@ -329,7 +333,7 @@ pub(crate) fn preflight_deposit_skill_at(
     {
         return Err(Error::msg(format!(
             "Cannot migrate ambiguous legacy catalog {}; restore its canonical root field or remove the stale entry",
-            legacy.display()
+            output::display_path(&legacy)
         )));
     }
     Ok(())
@@ -358,7 +362,7 @@ pub(crate) fn deposit_skill_at(
         if !meta.catalog_owned_by(&project_root) {
             return Err(Error::msg(format!(
                 "Catalog identity belongs to another project: {}",
-                catalog.display()
+                output::display_path(&catalog)
             )));
         }
         meta
@@ -486,8 +490,8 @@ pub fn list_catalog(home: Option<&Path>) -> Result<Vec<CatalogEntry>, Error> {
     if new.exists() && legacy_catalog {
         return Err(Error::msg(format!(
             "Catalog split across {} and {}: keep catalog/by-project, remove skills/by-project, then re-run",
-            legacy.display(),
-            new.display()
+            output::display_path(&legacy),
+            output::display_path(&new)
         )));
     }
     // Prefer new location; fall back to legacy catalog until migration runs.
@@ -506,7 +510,7 @@ pub fn list_catalog(home: Option<&Path>) -> Result<Vec<CatalogEntry>, Error> {
     if !by_project.is_dir() {
         return Err(Error::msg(format!(
             "Refusing to read non-directory catalog: {}",
-            by_project.display()
+            output::display_path(&by_project)
         )));
     }
 

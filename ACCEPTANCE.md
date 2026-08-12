@@ -1,12 +1,11 @@
 # Acceptance boundary (v1)
 
-**Outcome:** A smaller Tink core in Rust that installs complete Agent Skills into
-a project's `.agents/skills/`, proves them offline, refreshes clean GitHub
-imports, removes a project skill on request, ensures a home root at `~/.tink`
-(override: `TINK_HOME`), can list or promote skills from the library
-(`skills/<name>/`) into a project, can harvest complete skill trees from known
-harness locations into that library (create-only), and can update the CLI binary
-from GitHub Releases via `tink update`.
+**Outcome:** A Rust CLI that manages complete standalone Agent Skills and pinned
+skillsets under a project's `.agents/skills/`; validates them offline; records and
+restores standalone intent through a project manifest and lockfile; maintains a
+reusable home inventory at `~/.tink` (override: `TINK_HOME`); inspects public GitHub
+skill structures without persistent writes; removes only explicitly managed project
+state; and updates the CLI binary from verified GitHub Releases.
 
 **Authority:** This file is the evaluator. A row is complete when its named automated
 sensor passes on a supported CI host with `git` on `PATH`. Rows explicitly marked
@@ -32,7 +31,7 @@ closed stdout is a normal pipeline termination that exits 0 without panic.
 
 ## Commands
 
-Skill verbs live only under `tink skill`. There are no top-level `add` /
+Standalone skill verbs live only under `tink skill`. There are no top-level `add` /
 `check` / `refresh` aliases. CLI binary updates use top-level `tink update`.
 
 | Command | Meaning |
@@ -49,6 +48,10 @@ Skill verbs live only under `tink skill`. There are no top-level `add` /
 | `tink skill verify` | Verify installed project skills against the manifest and lockfile |
 | `tink skill refresh [name]` | Refresh clean GitHub imports; refuse local edits |
 | `tink skill remove <name>` | Delete one project skill under `.agents/skills/<name>/` and drop that name from the by-project catalog (not library) |
+| `tink skillset add <name>-skillset` | Install one externally authored, revision-pinned skillset definition as a nested project tree and mirror it to the library |
+| `tink skillset list [--library]` | Group receipt-backed project or library skillsets with their member names (read-only) |
+| `tink skillset refresh <name>-skillset` | Replace one clean installed skillset from its current pinned definition; refuse local edits |
+| `tink skillset remove <name>-skillset` | Delete only the installed project skillset; preserve its definition and library copy |
 | `tink inspect <GITHUB_URL>` | Inspect skills and source-defined skillsets in a public GitHub URL without writing project or home state |
 | `tink update` | Replace this binary with a newer verified public GitHub Release (requires `curl` + `tar`) |
 | `tink destroy [--yes]` | Remove `.agents/skills/` and an empty `.agents/`; preserve `AGENTS.md`, `ZEN.md`, unrelated `.agents/` siblings, and the library; drop this project's catalog entry |
@@ -58,10 +61,13 @@ Skill verbs live only under `tink skill`. There are no top-level `add` /
 | Artifact | Contract |
 |---|---|
 | Live skills | `<project>/.agents/skills/<name>/` with `SKILL.md` |
+| Live skillsets | `<project>/.agents/skills/<name>-skillset/<member>/` with one `SKILL.md` per explicitly named member |
 | Receipt | `.tink-source.json` with exactly `source`, `revision`, `path` (non-empty strings) |
 | Home root | `$TINK_HOME` or `~/.tink` (relative `$TINK_HOME` absolutized against cwd), with `layout.json` (`kind`: `tink-skill-inventory`) |
 | Library | `skills/<name>/` skill trees copied on successful add (rebuildable collection; identical tip may install project from library; divergent → repair + warn; project overwrite still refused; not an agent discovery root) |
 | Offline catalog | `catalog/by-project/<bounded-name>-<sha256(raw-canonical-root)>/meta.json` with display `name`, `root`, raw-path `identity`, and `skills` name list; owned basename-only entries migrate on the next deposit |
+| Skillset definition | `catalog/by-skillset/<name>-skillset/meta.json` is externally authored desired state with `source`, immutable `revision`, repository-relative `sourceRoot`, and explicit `members`; Tink validates and consumes it but has no CLI writer |
+| Project manifest | `.tink/skills.toml` version 1 declares each standalone skill's `name`, typed `source`, and optional repository-relative `path` |
 | Project lock | `.tink/skills.lock` version 2; a domain-separated, length-framed SHA-256 pins path bytes, entry kind, canonical executable/non-executable mode, and contents (receipt excluded). Version 1 must be regenerated with `skill lock`. |
 | Skillset receipt | `.tink-skillset.json` digest version 2 pins the same tree semantics; `skillset refresh` is the migration path for a legacy receipt. |
 
@@ -170,6 +176,8 @@ Ids are stable. Tests must name or comment the id they prove.
 | C3 | `skill check` when `.agents` is a symlink | Exit ≠ 0; refuse |
 | C4 | `skill check` | Performs no network I/O and no filesystem writes. Sensor: manual. |
 | C5 | `skill check` after an installed skill's frontmatter name is corrupted | Exit ≠ 0; reports the skill-name mismatch |
+| C6 | `skill check` after an installed `SKILL.md` loses its YAML frontmatter | Exit ≠ 0; reports that YAML frontmatter is required |
+| C7 | `skill check` after an installed `SKILL.md` has unclosed frontmatter | Exit ≠ 0; reports that the frontmatter is not closed |
 
 ### Project manifest
 
@@ -232,6 +240,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | V4 | Close stdout before a successful listing command writes | Exit 0; no panic and no exit 101 |
 | V5 | Close stderr while an underlying command fails | Exit 1; diagnostic delivery failure does not hide the command failure |
 | V6 | Close `install.sh` stdout after a verified installation reaches advisory reporting | Exit 0 with the verified destination intact; broken advisory output cannot turn completed installation into retry ambiguity |
+| V7 | Trigger a catalog failure from a path containing terminal control characters | Exit ≠ 0; stderr renders controls as visible escapes and remains one stable output row |
 
 ### Refresh
 
@@ -290,6 +299,8 @@ Ids are stable. Tests must name or comment the id they prove.
 | U16 | `tink update` runs from a path containing terminal control characters | Exit 0 for an up-to-date binary; stdout renders controls as visible escapes with one stable output row |
 | U17 | `install.sh` receives a candidate whose probe output exceeds the capture limit | Reject before publication within the bounded probe budget; retain at most 16 MiB per stream; preserve the existing binary |
 | U18 | The installer candidate signals the supervisor while the candidate process is still being spawned | Exit nonzero without traceback; terminate and reap the candidate process group; preserve the existing binary |
+| U19 | GitHub asset metadata spells the SHA-256 algorithm and hexadecimal digest with mixed or uppercase case | Both `tink update` and `install.sh` accept the valid digest, verify the exact archive bytes, and publish normally |
+| U20 | GitHub asset metadata uses a non-ASCII case-folding confusable in the SHA-256 algorithm name | Both `tink update` and `install.sh` reject the digest metadata and preserve existing binaries byte-for-byte |
 
 ### Safety (cross-cutting)
 

@@ -225,16 +225,15 @@ impl PartialOrd for SemVersion {
 }
 
 fn parse_sha256(value: &str) -> Result<[u8; 32], Error> {
-    let hex = value
-        .strip_prefix("sha256:")
+    let (algorithm, hex) = value
+        .split_once(':')
         .ok_or_else(|| Error::msg("release asset digest must use sha256:<hex>"))?;
-    if hex.len() != 64
-        || !hex
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
+    if !algorithm.eq_ignore_ascii_case("sha256") {
+        return Err(Error::msg("release asset digest must use sha256:<hex>"));
+    }
+    if hex.len() != 64 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(Error::msg(
-            "release asset SHA-256 digest must be 64 lowercase hexadecimal characters",
+            "release asset SHA-256 digest must be 64 hexadecimal characters",
         ));
     }
     let mut digest = [0_u8; 32];
@@ -390,13 +389,13 @@ fn curl_to_file(budget: CurlBudget, url: &str, dest: &Path, context: &str) -> Re
 
 fn sha256_file(path: &Path) -> Result<[u8; 32], Error> {
     let mut file = fs::File::open(path)
-        .map_err(|error| Error::msg(format!("read {}: {error}", path.display())))?;
+        .map_err(|error| Error::msg(format!("read {}: {error}", output::display_path(path))))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
         let count = file
             .read(&mut buffer)
-            .map_err(|error| Error::msg(format!("read {}: {error}", path.display())))?;
+            .map_err(|error| Error::msg(format!("read {}: {error}", output::display_path(path))))?;
         if count == 0 {
             break;
         }
@@ -492,7 +491,7 @@ fn replace_binary(current: &Path, new_bin: &Path, expected_version: &str) -> Res
     let parent = current.parent().ok_or_else(|| {
         Error::msg(format!(
             "cannot update {}: no parent directory",
-            current.display()
+            output::display_path(current)
         ))
     })?;
     let staging = Builder::new()
@@ -501,7 +500,7 @@ fn replace_binary(current: &Path, new_bin: &Path, expected_version: &str) -> Res
         .map_err(|error| {
             Error::msg(format!(
                 "cannot stage update beside {} ({error})",
-                current.display()
+                output::display_path(current)
             ))
         })?;
     let backup = Builder::new()
@@ -510,27 +509,31 @@ fn replace_binary(current: &Path, new_bin: &Path, expected_version: &str) -> Res
         .map_err(|error| {
             Error::msg(format!(
                 "cannot preserve {} before update ({error})",
-                current.display()
+                output::display_path(current)
             ))
         })?;
     fs::copy(current, backup.path()).map_err(|error| {
         Error::msg(format!(
             "cannot preserve {} before update ({error})",
-            current.display()
+            output::display_path(current)
         ))
     })?;
     fs::copy(new_bin, staging.path()).map_err(|e| {
         Error::msg(format!(
             "cannot write {} ({}). Re-run install.sh or fix permissions.",
-            staging.path().display(),
+            output::display_path(staging.path()),
             e
         ))
     })?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(staging.path(), fs::Permissions::from_mode(0o755))
-            .map_err(|e| Error::msg(format!("chmod {}: {e}", staging.path().display())))?;
+        fs::set_permissions(staging.path(), fs::Permissions::from_mode(0o755)).map_err(|e| {
+            Error::msg(format!(
+                "chmod {}: {e}",
+                output::display_path(staging.path())
+            ))
+        })?;
     }
     // Linux refuses to execute a file while a writable handle remains open.
     // TempPath retains cleanup/persist ownership after closing that handle.
@@ -539,7 +542,7 @@ fn replace_binary(current: &Path, new_bin: &Path, expected_version: &str) -> Res
     staging.persist(current).map_err(|error| {
         Error::msg(format!(
             "cannot replace {} ({}). Re-run install.sh or fix permissions.",
-            current.display(),
+            output::display_path(current),
             error.error
         ))
     })?;
@@ -554,10 +557,9 @@ fn replace_binary(current: &Path, new_bin: &Path, expected_version: &str) -> Res
             Err(restore_error) => {
                 let cause = restore_error.error;
                 let recovery = restore_error.file.into_temp_path().keep().ok();
-                let recovery = recovery.as_deref().map_or_else(
-                    || "unavailable".to_string(),
-                    |path| path.display().to_string(),
-                );
+                let recovery = recovery
+                    .as_deref()
+                    .map_or_else(|| "unavailable".to_string(), output::display_path);
                 Err(Error::msg(format!(
                     "published tink failed exact version verification ({probe_error}); rollback failed ({cause}); recovery backup: {recovery}"
                 )))
@@ -571,13 +573,13 @@ fn validate_current_binary_target(current: &Path) -> Result<(), Error> {
     let metadata = fs::symlink_metadata(current).map_err(|error| {
         Error::msg(format!(
             "cannot inspect current binary {}: {error}",
-            current.display()
+            output::display_path(current)
         ))
     })?;
     if !metadata.file_type().is_file() {
         return Err(Error::msg(format!(
             "refusing to replace non-file current binary {}",
-            current.display()
+            output::display_path(current)
         )));
     }
     Ok(())
@@ -879,6 +881,37 @@ mod tests {
             parse_sha256("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn parse_sha256_accepts_case_insensitive_metadata() {
+        let lowercase =
+            parse_sha256("sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
+                .unwrap();
+        let mixed_case =
+            parse_sha256("ShA256:ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789")
+                .unwrap();
+
+        assert_eq!(mixed_case, lowercase);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn update_failure_paths_escape_terminal_controls() {
+        let temp = TempDir::new().unwrap();
+        let current = temp.path().join("tink-\u{1b}\nunsafe");
+        fs::create_dir(&current).unwrap();
+
+        let message = validate_current_binary_target(&current)
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            !message.contains('\u{1b}'),
+            "raw escape leaked: {message:?}"
+        );
+        assert!(message.contains("\\x1b") && message.contains("\\nunsafe"));
+        assert_eq!(message.lines().count(), 1);
     }
 
     #[test]

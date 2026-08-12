@@ -142,8 +142,11 @@ The most important ownership sensors are:
 - A14 plus `skills.rs` unit tests cover portable executable-mode propagation, umask
   normalization, and distinct non-UTF-8 Unix names. Digest tests pin unambiguous
   framing and executable-mode sensitivity.
-- V4-V6 pin closed stdout/stderr exit semantics for the CLI and installer. U4-U18
-  cover invalid payloads, downgrade refusal, strict semantic versions, URL
+- V4-V6 pin closed stdout/stderr exit semantics for the CLI and installer. V7
+  and the updater unit tests pin terminal-safe rendering for representative
+  catalog and updater failure paths. U4-U20 cover invalid payloads, downgrade
+  refusal, strict semantic versions,
+  case-insensitive SHA-256 metadata, URL
   redaction/policy, bounded candidate probes and output capture, exact published
   version probes, terminal-safe update output, and preservation or rollback of an
   existing binary.
@@ -154,6 +157,8 @@ The most important ownership sensors are:
   and stable three-column catalog output for hidden, delimiter-bearing, and empty
   project sets.
 - D1 and D5 prove guidance and unrelated `.agents/` siblings survive destroy.
+- C5-C7 characterize installed-skill name/path mismatch, missing YAML
+  frontmatter, and an unclosed frontmatter block.
 
 Use [`ACCEPTANCE.md`](../ACCEPTANCE.md) for detailed input/output contracts rather
 than copying every row here.
