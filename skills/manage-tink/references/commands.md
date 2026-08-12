@@ -19,7 +19,7 @@ form for add, list, check, refresh, and remove.
 | List (catalog) | `tink skill list --catalog` |
 | List (library) | `tink library list` (`tink skill list --library` compatibility alias) |
 | Check | `tink skill check` |
-| Generate project manifest and lockfile | `tink skill lock --source NAME=PATH` for each local skill |
+| Generate project manifest and lockfile | `tink skill lock --source NAME=PATH` for each local skill; every path must resolve inside the project |
 | Verify manifest, lockfile, and installed trees | `tink skill verify` |
 | Sync the exact pinned manifest set | `tink skill sync` (preflights expected project/library/catalog refusals, then publishes sequentially; rerun after an operational interruption) |
 | Refresh all clean imports | `tink skill refresh` |
@@ -48,22 +48,11 @@ form for add, list, check, refresh, and remove.
   `tink skill add NAME` (bare standalone library skill name). Receipt-backed
   roots and receipt-bearing sources (including dangling receipt links) are excluded
   from standalone operations. `tink skill harvest` copies complete trees
-  from known harness roots into the library create-only (never overwrites a
-  divergent library entry). Global roots include `~/.agents/skills`,
-  `~/.claude/skills`, `~/.codex/skills`, `~/.cursor/skills`,
-  `~/.cursor/skills-cursor`, `~/.copilot/skills`, `~/.github/skills`,
-  `~/.codeium/windsurf/skills`, `~/.cline/skills`, `~/.aider/skills`,
-  `~/.gemini/skills` (+ Antigravity paths), `~/.roo/skills`,
-  `~/.kilocode/skills`, `~/.amazonq/skills`, `~/.augment/skills`,
-  `~/.tabnine/skills`, `~/.sourcegraph/skills`, and
-  `~/.config/opencode/skills`. Project (cwd) roots include `.agents/skills`,
-  `.claude/skills`, `.codex/skills`, `.cursor/skills`, `.github/skills`,
-  `.windsurf/skills`, `.cline/skills`, `.clinerules/skills`, `.aider/skills`,
-  `.gemini/skills`, `.agent/skills`, `.roo/skills`, `.kilocode/skills`,
-  `.amazonq/skills`, `.augment/skills`, `.tabnine/skills`, `.opencode/skills`,
-  and `.sourcegraph/skills`. Matching GitHub tips install into the project
-  from that library; divergent library trees are repaired with a warning on
-  `skill add`. Names are recorded in
+  from CLI-owned supported harness roots into the library create-only (never
+  overwrites a divergent library entry). Do not duplicate or infer that root
+  inventory in agent policy. Matching GitHub tips install into the project from
+  that library; divergent library trees are repaired with a warning on `skill
+  add`. Names are recorded in
   `catalog/by-project/<bounded-name>-<sha256-identity>/meta.json`. List the catalog with
   `tink skill list --catalog` (always headered three-column TSV; backslash, tab, CR,
   and LF inside fields are escaped as `\\\\`, `\\t`, `\\r`, and `\\n`).

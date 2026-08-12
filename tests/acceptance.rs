@@ -4081,6 +4081,42 @@ fn x5_manage_tink_documents_remove_and_catalog_sync() {
         !skill_md.contains("tink skill remove manage-tink && tink init"),
         "manage-tink must not chain re-embedding onto binary updates: {skill_md}"
     );
+    assert!(
+        skill_md.contains("After any binary update or observed contract mismatch")
+            && skill_md.contains("tink destroy --help"),
+        "manage-tink must treat every update as possible contract drift: {skill_md}"
+    );
+    assert!(
+        skill_md.contains("current requested shell session")
+            && skill_md.contains("exact startup file"),
+        "manage-tink must separate session completion from persistent mutation: {skill_md}"
+    );
+    for proof in [
+        "After `init`",
+        "After add, promotion, refresh, or sync",
+        "After harvest",
+        "After skillset add or refresh",
+        "After update",
+    ] {
+        assert!(
+            skill_md.contains(proof),
+            "manage-tink must document operation-specific proof {proof}: {skill_md}"
+        );
+    }
+    assert!(
+        skill_md.contains("possibly changed")
+            && skill_md.contains("describe the failure as a no-op"),
+        "manage-tink must report reachable partial publication: {skill_md}"
+    );
+    assert!(
+        commands.contains("every path must resolve inside the project"),
+        "commands.md must document the local lock source boundary: {commands}"
+    );
+    assert!(
+        commands.contains("CLI-owned supported harness roots")
+            && !commands.contains("~/.claude/skills"),
+        "commands.md must leave volatile harvest-root ownership with the CLI: {commands}"
+    );
 }
 
 #[test]
