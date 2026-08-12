@@ -722,6 +722,15 @@ fn dispatch_skill_harvest(cwd: &Path) -> Result<(), Error> {
 fn dispatch_skill_refresh(cwd: &Path, name: Option<&str>) -> Result<(), Error> {
     let style = CliStyle::auto_stdout();
     match name {
+        Some("manage-tink") => {
+            let outcome = manage_tink::refresh_manage_tink(cwd)?;
+            let action = match outcome {
+                manage_tink::RefreshOutcome::Installed => style.success("Installed"),
+                manage_tink::RefreshOutcome::Unchanged => style.muted("Unchanged"),
+            };
+            println!("{} {}", action, style.skill("manage-tink"));
+            Ok(())
+        }
         Some(name) => {
             let changed = refresh::refresh_skill(cwd, name)?;
             if changed {

@@ -3749,6 +3749,48 @@ fn p8_refresh_all_preflights_before_updating_any_skill() {
     );
 }
 
+#[test]
+fn p9_refresh_manage_tink_installs_missing_embedded_copy() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    ws.cmd(&project)
+        .args(["skill", "refresh", "manage-tink"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Installed manage-tink"));
+
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
+    ws.assert_cataloged("app", "manage-tink");
+}
+
+#[test]
+fn p10_refresh_manage_tink_reports_current_copy_unchanged() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+
+    let installed = Workspace::skill_path(&project, "manage-tink");
+    let before = fs::read(installed.join("SKILL.md")).expect("installed SKILL.md");
+
+    ws.cmd(&project)
+        .args(["skill", "refresh", "manage-tink"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Unchanged manage-tink"));
+
+    assert_eq!(
+        fs::read(installed.join("SKILL.md")).expect("refreshed SKILL.md"),
+        before
+    );
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
+    ws.assert_cataloged("app", "manage-tink");
+}
+
 // --- D*: destroy ---
 
 #[test]
