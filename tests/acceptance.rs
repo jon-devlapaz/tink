@@ -3854,6 +3854,50 @@ fn p12_refresh_manage_tink_refuses_remote_provenance_collision() {
     );
 }
 
+#[test]
+fn p13_refresh_manage_tink_refuses_remote_library_collision_when_project_is_missing() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("remote-library-manage-tink");
+    init_repo(&remote);
+    write_skill(&remote, "manage-tink", "remote library contents");
+    commit_all(&remote, "remote library manage-tink");
+    let public = "https://github.com/example/remote-library-manage-tink.git";
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", "example/remote-library-manage-tink"]);
+    add.envs(github_redirect(&remote, public));
+    add.assert().success();
+    ws.cmd(&project)
+        .args(["skill", "remove", "manage-tink"])
+        .assert()
+        .success();
+
+    let library = ws.library_skill("manage-tink");
+    let skill_before = fs::read(library.join("SKILL.md")).expect("library SKILL.md");
+    let receipt_before = fs::read(library.join(".tink-source.json")).expect("library provenance");
+
+    ws.cmd(&project)
+        .args(["skill", "refresh", "manage-tink"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("remote provenance"));
+
+    assert!(!Workspace::skill_path(&project, "manage-tink").exists());
+    assert_eq!(
+        fs::read(library.join("SKILL.md")).expect("preserved library SKILL.md"),
+        skill_before
+    );
+    assert_eq!(
+        fs::read(library.join(".tink-source.json")).expect("preserved library provenance"),
+        receipt_before
+    );
+}
+
 // --- D*: destroy ---
 
 #[test]

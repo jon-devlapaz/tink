@@ -59,6 +59,24 @@ pub(crate) fn require_current(installed: &Skill) -> Result<(), Error> {
     ))
 }
 
+fn refuse_remote_library_collision() -> Result<(), Error> {
+    let Some(home) = crate::home::existing_inventory_root(None)? else {
+        return Ok(());
+    };
+    let target = crate::home::skills_library_path(&home).join("manage-tink");
+    refuse_symlink(&target)?;
+    if !target.is_dir() {
+        return Ok(());
+    }
+    let library_skill = skills::read_skill(&target, true)?;
+    if provenance::read(&library_skill)?.is_some() {
+        return Err(Error::msg(
+            "Refusing to replace library manage-tink with remote provenance",
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn refresh_manage_tink(project_root: &Path) -> Result<RefreshOutcome, Error> {
     check::check_zen_coupling(project_root)?;
     let agents = crate::home::project_agents_path(project_root);
@@ -69,6 +87,7 @@ pub(crate) fn refresh_manage_tink(project_root: &Path) -> Result<RefreshOutcome,
     refuse_symlink(&target)?;
 
     if !target.exists() {
+        refuse_remote_library_collision()?;
         install_manage_tink(project_root)?;
         return Ok(RefreshOutcome::Installed);
     }
@@ -87,7 +106,7 @@ pub(crate) fn refresh_manage_tink(project_root: &Path) -> Result<RefreshOutcome,
     if !skills::skill_contents_equal(&installed.path, &embedded.path)? {
         library::preflight_deposit(&embedded, None)?;
         catalog::preflight_deposit_skill(project_root)?;
-        skills::replace_verified(&embedded, &skills_root, None)?;
+        skills::replace_embedded_verified(&embedded, &skills_root)?;
         library::deposit(&embedded, None)?;
         catalog::deposit_skill(project_root, "manage-tink")?;
 
