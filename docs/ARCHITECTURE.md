@@ -70,10 +70,13 @@ roots, while `skillset list` provides the grouped member view.
    bytes, entry kind, regular-file mode, and contents. A version-1 lock requires an
    explicit `skill lock`; a legacy skillset receipt can migrate only through a clean
    `skillset refresh`.
-9. **Multi-owner publication is sequential and retryable, not transactional.** Tink
-   preflights expected ownership and validation refusals before publication where the
-   workflow spans project, library, and catalog state. Unexpected operational failures
-   can still interrupt later writes; rerunning the idempotent command is recovery.
+9. **Multi-owner publication is sequential and retryable, not transactional.**
+   Workflows such as `skill sync` explicitly preflight every expected project,
+   library, and catalog refusal before publishing the first skill. Standalone add
+   first ensures layout and preflights its project destination, but a later catalog
+   refusal can leave valid project/library writes in place; rerunning the idempotent
+   command repairs that derived index. Unexpected operational failures can still
+   interrupt later writes, and retry remains the recovery model.
 
 ## Standalone `skill add`
 
@@ -98,7 +101,9 @@ For a local or GitHub source, the complete publication order is:
 
 A bare-name promotion starts from step 3 with the structurally validated library tree.
 Positive cache and repair behavior is intentional; receipt ownership is the boundary,
-not a ban on library reuse.
+not a ban on library reuse. The project destination is protected before library or
+project-tree publication, but catalog parsing/deposit follows those writes by design;
+acceptance A9 pins this resumable exception to full multi-owner preflight.
 
 ## `skillset add`
 

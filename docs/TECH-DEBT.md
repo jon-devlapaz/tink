@@ -22,7 +22,7 @@
 | Smell | Location | Refactoring | Status |
 |---|---|---|---|
 | no formal legacy safety net in this repository before this journey | `docs/` | create baseline test-oriented docs and pin top-risk CLI behavior | complete |
-| Manual edge-cases for malformed installed skills are only partially characterized | `src/check.rs` and `.agents/skills/*` | extend with additional targeted tests (non-YAML, mismatch path, missing frontmatter variants) | backlog |
+| Broader malformed frontmatter field/value cases remain beyond the installed-skill structural sensors | `src/check.rs` and `.agents/skills/*` | C5-C7 now pin name/path mismatch, missing frontmatter, and unclosed frontmatter; add narrower field-shape cases only when a concrete failure appears | backlog |
 | `src/update.rs` staging/replace binary logic is separated by responsibility | `src/update.rs` | resolved by phase-3 refactor | complete |
 | `src/check.rs` skill-entry parsing is separated from read/validate flow | `src/check.rs` | resolved by phase-4 refactor | complete |
 | Catalog metadata modeling and ownership semantics (`name`, `root`, `skills`) | `src/catalog.rs` | move from loose JSON parsing helpers to `CatalogMeta` aggregate | complete |

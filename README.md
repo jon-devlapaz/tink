@@ -20,7 +20,8 @@ curl -fsSL https://raw.githubusercontent.com/jon-devlapaz/tink/main/install.sh |
 
 That installs a release binary into `~/.local/bin/tink` (override with
 `TINK_INSTALL_DIR`). Requires `curl`, `tar`, and Python 3. The installer checks
-GitHub's SHA-256 asset digest, accepts exactly one regular `tink` archive entry,
+GitHub's SHA-256 asset digest (accepting case-insensitive algorithm and hex
+spelling), accepts exactly one regular `tink` archive entry,
 probes the advertised version, and atomically replaces the destination.
 Supported hosts: macOS and Linux on x86_64/arm64.
 
@@ -165,7 +166,24 @@ Tink never appends or removes that suffix. `skillset add NAME-skillset` reads
 the pinned definition at
 `$TINK_HOME/catalog/by-skillset/NAME-skillset/meta.json`. The definition contains an
 absolute HTTPS Git URL, a full commit SHA, a repository-relative `sourceRoot`,
-and explicit member names. Tink copies those member skill trees atomically
+and explicit member names. Tink validates and consumes this externally authored
+file but has no command that writes it. For example:
+
+```json
+{
+  "source": "https://github.com/example/agent-skills.git",
+  "revision": "0123456789abcdef0123456789abcdef01234567",
+  "sourceRoot": "skills/review",
+  "members": ["code-review", "security-review"]
+}
+```
+
+Creating or changing that exact definition is a separate, explicitly authorized
+authoring step. `tink inspect` can propose source structure, but it never creates a
+definition. Do not hand-edit `.tink-skillset.json` receipts, installed skillset
+trees, or derived `catalog/by-project` entries.
+
+Tink copies those member skill trees atomically
 under `.agents/skills/NAME-skillset/`, validates the project tree, then mirrors
 that exact tree to `$TINK_HOME/skills/NAME-skillset/`. The project is primary;
 the home library conforms to it and never overwrites it. Both copies carry

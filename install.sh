@@ -345,12 +345,12 @@ asset_mode = url_mode(url, api_mode == "file")
 if asset_mode is None:
     sys.exit(f"asset {want} has invalid download URL")
 digest = asset.get("digest")
-if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest, re.IGNORECASE | re.ASCII):
     sys.exit(f"asset {want} has invalid SHA-256 digest")
 print(tag)
 print(version)
 print(url)
-print(digest[7:])
+print(digest[7:].lower())
 print(asset_mode)
 ' "${target}" "${tmp}/release.json" "${api_mode}" >"${tmp}/asset.txt" 2>"${tmp}/metadata-error.txt" \
   || die "$(cat "${tmp}/metadata-error.txt" 2>/dev/null || echo could not parse release metadata)"

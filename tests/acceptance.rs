@@ -2060,6 +2060,49 @@ description: corrupted metadata
         .stderr(predicate::str::contains("Skill name"));
 }
 
+#[test]
+fn c6_check_rejects_skill_without_yaml_frontmatter() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+
+    let installed = Workspace::skill_path(&project, "broken-skill");
+    fs::create_dir_all(&installed).expect("broken skill dir");
+    fs::write(installed.join("SKILL.md"), "# Missing frontmatter\n")
+        .expect("write malformed SKILL.md");
+
+    ws.cmd(&project)
+        .args(["skill", "check"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "SKILL.md must start with YAML frontmatter",
+        ));
+}
+
+#[test]
+fn c7_check_rejects_unclosed_skill_frontmatter() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+
+    let installed = Workspace::skill_path(&project, "broken-skill");
+    fs::create_dir_all(&installed).expect("broken skill dir");
+    fs::write(
+        installed.join("SKILL.md"),
+        "---\nname: broken-skill\ndescription: missing closing marker\n",
+    )
+    .expect("write malformed SKILL.md");
+
+    ws.cmd(&project)
+        .args(["skill", "check"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "SKILL.md frontmatter is not closed",
+        ));
+}
+
 // --- M*: project manifest ---
 
 #[test]
@@ -3972,6 +4015,28 @@ fn x5_manage_tink_documents_remove_and_catalog_sync() {
             "manage-tink SKILL.md must document {contract}: {skill_md}"
         );
     }
+    assert!(
+        skill_md.contains("no definition-writer command")
+            && skill_md.contains("explicitly authorizes")
+            && skill_md.contains("does not authorize installing"),
+        "manage-tink must bound external skillset-definition authoring: {skill_md}"
+    );
+    for field in [
+        "\"source\":",
+        "\"revision\":",
+        "\"sourceRoot\":",
+        "\"members\":",
+    ] {
+        assert!(
+            commands.contains(field),
+            "commands.md must show the complete skillset-definition field {field}: {commands}"
+        );
+    }
+    assert!(
+        commands.contains("has no command that writes it")
+            && commands.contains("Definition authoring does not authorize"),
+        "commands.md must document the external-authoring and install boundary: {commands}"
+    );
     for section in [
         "## When to Use",
         "## Inputs",
@@ -4203,6 +4268,28 @@ fn write_release_fixture_with_mode(
     meta
 }
 
+fn rewrite_release_digest(meta: &Path, algorithm: &str, uppercase_hex: bool) {
+    let mut release: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(meta).expect("read release metadata"))
+            .expect("parse release metadata");
+    let digest = release["assets"][0]["digest"]
+        .as_str()
+        .expect("release digest")
+        .to_string();
+    let (_, hex) = digest.split_once(':').expect("digest prefix");
+    let hex = if uppercase_hex {
+        hex.to_ascii_uppercase()
+    } else {
+        hex.to_string()
+    };
+    release["assets"][0]["digest"] = serde_json::Value::String(format!("{algorithm}:{hex}"));
+    fs::write(
+        meta,
+        format!("{}\n", serde_json::to_string_pretty(&release).unwrap()),
+    )
+    .expect("write uppercase release digest");
+}
+
 #[cfg(unix)]
 fn wait_for_marker(path: &Path, child: &mut std::process::Child) {
     let started = std::time::Instant::now();
@@ -4308,6 +4395,45 @@ fn v4_closed_stdout_does_not_panic_or_exit_101() {
         "closed stdout must exit cleanly: stderr={stderr:?}"
     );
     assert!(!stderr.contains("panicked at"));
+}
+
+#[test]
+fn v7_failure_paths_escape_terminal_controls() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    let inventory = ws.root.join("inventory-\u{1b}\nunsafe");
+    ws.cmd(&project)
+        .env("TINK_HOME", &inventory)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let by_project = inventory.join("catalog").join("by-project");
+    fs::remove_dir_all(&by_project).expect("remove catalog directory fixture");
+    fs::write(&by_project, "not a directory").expect("write catalog file fixture");
+
+    let output = cargo_bin_cmd!("tink")
+        .current_dir(&project)
+        .env("TINK_HOME", &inventory)
+        .args(["skill", "list", "--catalog"])
+        .output()
+        .expect("run failing catalog listing");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success(), "catalog listing should fail");
+    assert!(
+        !output.stderr.contains(&0x1b),
+        "stderr leaked raw escape: {stderr:?}"
+    );
+    assert!(
+        stderr.contains("\\x1b") && stderr.contains("\\nunsafe"),
+        "stderr did not visibly escape the unsafe path: {stderr:?}"
+    );
+    assert_eq!(
+        stderr.lines().count(),
+        1,
+        "escaped error must remain one line"
+    );
 }
 
 #[cfg(unix)]
@@ -5143,6 +5269,99 @@ fn u5_update_refuses_downgrade_and_preserves_running_binary() {
         .stderr(predicate::str::contains("refusing to downgrade"));
 
     assert_eq!(fs::read(&installed).unwrap(), before);
+}
+
+#[cfg(unix)]
+#[test]
+fn u19_update_and_installer_accept_case_insensitive_sha256_metadata() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let ws = Workspace::new();
+    let fixture = ws.root.join("uppercase-digest-release-fixture");
+    fs::create_dir_all(&fixture).unwrap();
+    let replacement = fixture.join("replacement-tink");
+    let replacement_bytes = b"#!/bin/sh\nprintf 'tink 99.0.0\\n'\n";
+    fs::write(&replacement, replacement_bytes).unwrap();
+    fs::set_permissions(&replacement, fs::Permissions::from_mode(0o755)).unwrap();
+    let metadata = write_release_fixture(&fixture, "99.0.0", &replacement);
+    rewrite_release_digest(&metadata, "ShA256", true);
+    let api = format!("file://{}", metadata.display());
+
+    let update_dir = ws.root.join("update-install");
+    fs::create_dir_all(&update_dir).unwrap();
+    let updated = update_dir.join("tink");
+    fs::copy(assert_cmd::cargo::cargo_bin!("tink"), &updated).unwrap();
+    fs::set_permissions(&updated, fs::Permissions::from_mode(0o755)).unwrap();
+    Command::new(&updated)
+        .arg("update")
+        .env("TINK_RELEASES_API", &api)
+        .env("TINK_HOME", &ws.inventory)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Updated"));
+    assert_eq!(fs::read(&updated).unwrap(), replacement_bytes);
+
+    let install_dir = ws.root.join("script-install");
+    fs::create_dir_all(&install_dir).unwrap();
+    Command::new("sh")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("install.sh"))
+        .env("TINK_INSTALL_DIR", &install_dir)
+        .env("TINK_RELEASES_API", &api)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Installed tink v99.0.0"));
+    assert_eq!(
+        fs::read(install_dir.join("tink")).unwrap(),
+        replacement_bytes
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn u20_update_and_installer_reject_non_ascii_sha256_algorithm() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let ws = Workspace::new();
+    let fixture = ws.root.join("non-ascii-digest-release-fixture");
+    fs::create_dir_all(&fixture).unwrap();
+    let replacement = fixture.join("replacement-tink");
+    fs::write(&replacement, b"#!/bin/sh\nprintf 'tink 99.0.0\\n'\n").unwrap();
+    fs::set_permissions(&replacement, fs::Permissions::from_mode(0o755)).unwrap();
+    let metadata = write_release_fixture(&fixture, "99.0.0", &replacement);
+    rewrite_release_digest(&metadata, "ſha256", false);
+    let api = format!("file://{}", metadata.display());
+
+    let update_dir = ws.root.join("update-install");
+    fs::create_dir_all(&update_dir).unwrap();
+    let updated = update_dir.join("tink");
+    fs::copy(assert_cmd::cargo::cargo_bin!("tink"), &updated).unwrap();
+    fs::set_permissions(&updated, fs::Permissions::from_mode(0o755)).unwrap();
+    let update_before = fs::read(&updated).unwrap();
+    Command::new(&updated)
+        .arg("update")
+        .env("TINK_RELEASES_API", &api)
+        .env("TINK_HOME", &ws.inventory)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "release asset digest must use sha256:<hex>",
+        ));
+    assert_eq!(fs::read(&updated).unwrap(), update_before);
+
+    let install_dir = ws.root.join("script-install");
+    fs::create_dir_all(&install_dir).unwrap();
+    let installed = install_dir.join("tink");
+    fs::copy(assert_cmd::cargo::cargo_bin!("tink"), &installed).unwrap();
+    fs::set_permissions(&installed, fs::Permissions::from_mode(0o755)).unwrap();
+    let install_before = fs::read(&installed).unwrap();
+    Command::new("sh")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("install.sh"))
+        .env("TINK_INSTALL_DIR", &install_dir)
+        .env("TINK_RELEASES_API", &api)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid SHA-256 digest"));
+    assert_eq!(fs::read(&installed).unwrap(), install_before);
 }
 
 // --- G*: GitHub source inspection ---
