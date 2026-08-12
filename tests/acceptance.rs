@@ -4,6 +4,7 @@ use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::fs;
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 use tempfile::TempDir;
@@ -196,6 +197,59 @@ fn github_redirect(local_repo: &Path, public_url: &str) -> Vec<(String, String)>
         ("GIT_CONFIG_VALUE_0".into(), public_url.into()),
         ("GIT_TERMINAL_PROMPT".into(), "0".into()),
     ]
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct TreeEntry {
+    path: PathBuf,
+    kind: &'static str,
+    mode: u32,
+    contents: Vec<u8>,
+}
+
+fn snapshot_tree(root: &Path) -> Vec<TreeEntry> {
+    fn visit(root: &Path, path: &Path, entries: &mut Vec<TreeEntry>) {
+        let mut children: Vec<_> = fs::read_dir(path)
+            .expect("read snapshot directory")
+            .map(|entry| entry.expect("snapshot entry").path())
+            .collect();
+        children.sort();
+        for child in children {
+            let metadata = fs::symlink_metadata(&child).expect("snapshot metadata");
+            let file_type = metadata.file_type();
+            let kind = if file_type.is_dir() {
+                "directory"
+            } else if file_type.is_file() {
+                "file"
+            } else if file_type.is_symlink() {
+                "symlink"
+            } else if file_type.is_socket() {
+                "socket"
+            } else {
+                "special"
+            };
+            entries.push(TreeEntry {
+                path: child
+                    .strip_prefix(root)
+                    .expect("snapshot path under root")
+                    .to_path_buf(),
+                kind,
+                mode: metadata.permissions().mode(),
+                contents: if file_type.is_file() {
+                    fs::read(&child).expect("snapshot file")
+                } else {
+                    Vec::new()
+                },
+            });
+            if file_type.is_dir() {
+                visit(root, &child, entries);
+            }
+        }
+    }
+
+    let mut entries = Vec::new();
+    visit(root, root, &mut entries);
+    entries
 }
 
 // --- I*: init ---
@@ -2028,6 +2082,24 @@ fn c3_check_refuses_agents_symlink() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("symlink").or(predicate::str::contains("Symlink")));
+}
+
+#[test]
+fn c4_check_preserves_project_and_home_trees_without_external_commands() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+    let project_before = snapshot_tree(&project);
+    let home_before = snapshot_tree(&ws.inventory);
+
+    ws.cmd(&project)
+        .env("PATH", "")
+        .args(["skill", "check"])
+        .assert()
+        .success();
+
+    assert_eq!(snapshot_tree(&project), project_before);
+    assert_eq!(snapshot_tree(&ws.inventory), home_before);
 }
 
 #[test]

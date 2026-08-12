@@ -178,7 +178,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | C1 | `skill check` after valid `init` + `skill add` | Exit 0 |
 | C2 | `skill check` without `.agents/skills` | Exit ≠ 0 |
 | C3 | `skill check` when `.agents` is a symlink | Exit ≠ 0; refuse |
-| C4 | `skill check` | Performs no network I/O and no filesystem writes. Sensor: manual. |
+| C4 | `skill check` | Leaves the project and Tink home trees byte-for-byte and mode-for-mode unchanged; succeeds without external commands on `PATH` |
 | C5 | `skill check` after an installed skill's frontmatter name is corrupted | Exit ≠ 0; reports the skill-name mismatch |
 | C6 | `skill check` after an installed `SKILL.md` loses its YAML frontmatter | Exit ≠ 0; reports that YAML frontmatter is required |
 | C7 | `skill check` after an installed `SKILL.md` has unclosed frontmatter | Exit ≠ 0; reports that the frontmatter is not closed |
