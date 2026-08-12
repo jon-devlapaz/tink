@@ -63,6 +63,11 @@ fn release_uploads_an_exact_asset_set_to_a_draft_before_publication() {
     let upload = position(RELEASE, "gh release upload \"${tag}\"");
     let clobber = position(RELEASE, "--clobber");
     let local_digest = position(RELEASE, "sha256sum \"${asset}\"");
+    let draft_asset_query = upload
+        + position(
+            &RELEASE[upload..],
+            "gh release view \"${tag}\" --json assets",
+        );
     let remote_digest = upload + position(&RELEASE[upload..], ".digest // \"\"");
     let validation = position(
         RELEASE,
@@ -72,7 +77,8 @@ fn release_uploads_an_exact_asset_set_to_a_draft_before_publication() {
 
     assert!(create < draft && draft < upload);
     assert!(local_digest < upload);
-    assert!(upload < clobber && clobber < remote_digest);
+    assert!(upload < clobber && clobber < draft_asset_query);
+    assert!(draft_asset_query < remote_digest);
     assert!(remote_digest < validation && validation < publish);
     assert!(RELEASE.contains("expected_assets=("));
     assert!(RELEASE.contains("actual_assets=("));
