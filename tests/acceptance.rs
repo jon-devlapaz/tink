@@ -4524,6 +4524,46 @@ fn s1_successful_local_and_remote_commands_do_not_mutate_project_git() {
 }
 
 #[test]
+fn s2_library_skill_is_not_project_live_until_explicitly_added() {
+    let ws = Workspace::new();
+    let bootstrap = ws.project("bootstrap");
+    ws.cmd(&bootstrap)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    write_skill(&ws.library_skill("library-only"), "library-only", "body");
+
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    ws.cmd(&project)
+        .args(["skill", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("library-only").not());
+    ws.cmd(&project)
+        .args(["skill", "check"])
+        .assert()
+        .success();
+
+    ws.cmd(&project)
+        .args(["skill", "add", "library-only"])
+        .assert()
+        .success();
+    ws.cmd(&project)
+        .args(["skill", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("library-only"));
+    ws.cmd(&project)
+        .args(["skill", "check"])
+        .assert()
+        .success();
+}
+
+#[test]
 fn s3_remove_and_destroy_complete_when_implicit_home_cannot_resolve() {
     let ws = Workspace::new();
     let remove_project = ws.project("remove-app");

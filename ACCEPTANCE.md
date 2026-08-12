@@ -319,7 +319,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | Id | Action | Expect |
 |---|---|---|
 | S1 | Successful local and remote commands | Tink's centralized Git process boundary refuses root `init`, `add`, `commit`, and `push` commands; representative init and remote-add paths do not create project Git state |
-| S2 | Home root | Never treated as an agent discovery root. Sensor: manual. |
+| S2 | A valid skill exists only in the home library | Project `skill list` and `skill check` do not treat it as live; explicit `skill add <name>` promotes it into the project, after which both commands observe it |
 | S3 | `skill remove` or `destroy --yes` when neither `TINK_HOME` nor `HOME` can resolve an inventory | Exit 0; completes local cleanup without creating or mutating inventory state |
 
 ## Proof

@@ -118,8 +118,10 @@ flowchart LR
   tink -->|"add <library-name>"| live
 ```
 
-Home (`~/.tink` or `$TINK_HOME`) is **not** an agent discovery root. Library holds
-skill trees; catalog holds by-project **names** only.
+Tink lists and validates live project skills only under `.agents/skills/`. It
+never promotes a home-library entry automatically or configures an agent
+harness to discover the home. Library holds skill trees; catalog holds
+by-project **names** only.
 
 ## Use (everyday)
 
