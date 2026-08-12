@@ -44,7 +44,10 @@ fn git_subcommand<'a>(args: &[&'a str]) -> Option<&'a str> {
 }
 
 fn guard_git_command(args: &[&str]) -> Result<(), Error> {
-    if matches!(git_subcommand(args), Some("init" | "add" | "commit" | "push")) {
+    if matches!(
+        git_subcommand(args),
+        Some("init" | "add" | "commit" | "push")
+    ) {
         return Err(Error::msg("Tink refuses project-mutating Git commands"));
     }
     Ok(())

@@ -4543,10 +4543,7 @@ fn s2_library_skill_is_not_project_live_until_explicitly_added() {
         .assert()
         .success()
         .stdout(predicate::str::contains("library-only").not());
-    ws.cmd(&project)
-        .args(["skill", "check"])
-        .assert()
-        .success();
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
 
     ws.cmd(&project)
         .args(["skill", "add", "library-only"])
@@ -4557,10 +4554,7 @@ fn s2_library_skill_is_not_project_live_until_explicitly_added() {
         .assert()
         .success()
         .stdout(predicate::str::contains("library-only"));
-    ws.cmd(&project)
-        .args(["skill", "check"])
-        .assert()
-        .success();
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
 }
 
 #[test]
