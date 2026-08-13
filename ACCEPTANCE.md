@@ -178,7 +178,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | C1 | `skill check` after valid `init` + `skill add` | Exit 0 |
 | C2 | `skill check` without `.agents/skills` | Exit ≠ 0 |
 | C3 | `skill check` when `.agents` is a symlink | Exit ≠ 0; refuse |
-| C4 | `skill check` | Performs no network I/O and no filesystem writes. Sensor: manual. |
+| C4 | `skill check` | Leaves the project and Tink home trees byte-for-byte and mode-for-mode unchanged; succeeds without external commands on `PATH` |
 | C5 | `skill check` after an installed skill's frontmatter name is corrupted | Exit ≠ 0; reports the skill-name mismatch |
 | C6 | `skill check` after an installed `SKILL.md` loses its YAML frontmatter | Exit ≠ 0; reports that YAML frontmatter is required |
 | C7 | `skill check` after an installed `SKILL.md` has unclosed frontmatter | Exit ≠ 0; reports that the frontmatter is not closed |
@@ -318,8 +318,8 @@ Ids are stable. Tests must name or comment the id they prove.
 
 | Id | Action | Expect |
 |---|---|---|
-| S1 | Any successful command | Does not `git init`, stage, commit, or push. Sensor: S1 (partial: `init` only). |
-| S2 | Home root | Never treated as an agent discovery root. Sensor: manual. |
+| S1 | Successful local and remote commands | Tink's centralized Git process boundary refuses root `init`, `add`, `commit`, and `push` commands; representative init and remote-add paths do not create project Git state |
+| S2 | A valid skill exists only in the home library | Project `skill list` and `skill check` do not treat it as live; explicit `skill add <name>` promotes it into the project, after which both commands observe it |
 | S3 | `skill remove` or `destroy --yes` when neither `TINK_HOME` nor `HOME` can resolve an inventory | Exit 0; completes local cleanup without creating or mutating inventory state |
 
 ## Proof

@@ -6,6 +6,11 @@
 
 Skill manager that makes sense to you, and your agent.
 
+Tink 1.0 is feature-complete for the v1 acceptance boundary in
+[`ACCEPTANCE.md`](ACCEPTANCE.md). Maintenance prioritizes correctness,
+security, compatibility, and a simpler everyday experience over new lifecycle
+machinery.
+
 Live skills live only under a project’s `.agents/skills/<name>/`. Grouped
 skillsets use one canonical nested root at
 `.agents/skills/<name>-skillset/<member>/`. There
@@ -118,8 +123,10 @@ flowchart LR
   tink -->|"add <library-name>"| live
 ```
 
-Home (`~/.tink` or `$TINK_HOME`) is **not** an agent discovery root. Library holds
-skill trees; catalog holds by-project **names** only.
+Tink lists and validates live project skills only under `.agents/skills/`. It
+never promotes a home-library entry automatically or configures an agent
+harness to discover the home. Library holds skill trees; catalog holds
+by-project **names** only.
 
 ## Use (everyday)
 

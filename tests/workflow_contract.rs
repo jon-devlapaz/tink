@@ -57,6 +57,54 @@ fn bump_gates_the_tag_on_every_platform_and_publishes_refs_atomically() {
 }
 
 #[test]
+fn bump_publishes_an_intentional_pre_bump_without_incrementing_it() {
+    let marker = "# An intentionally pre-bumped, untagged manifest";
+    let pre_bump = BUMP
+        .split_once(marker)
+        .expect("intentional pre-bump branch")
+        .1
+        .split_once("IFS=. read -r major minor patch")
+        .expect("pre-bump must precede patch calculation")
+        .0;
+
+    assert!(BUMP.find("locked=\"").unwrap() < BUMP.find(marker).unwrap());
+    assert!(pre_bump.contains("baseline_tag="));
+    assert!(pre_bump.contains("must be newer than published"));
+    assert!(pre_bump.contains("baseline_tagged_version="));
+    assert!(pre_bump.contains("git merge-base --is-ancestor"));
+    assert!(pre_bump.contains("baseline_release_draft="));
+    assert!(pre_bump.contains("git tag \"${current_tag}\""));
+    assert!(pre_bump.contains(
+        "git push --atomic origin HEAD:main \"refs/tags/${current_tag}:refs/tags/${current_tag}\""
+    ));
+    assert!(pre_bump.contains("gh workflow run release.yml --ref \"${current_tag}\""));
+    assert!(pre_bump.contains("exit 0"));
+    assert!(!pre_bump.contains("sed -i"));
+    assert!(!pre_bump.contains("git commit"));
+
+    let tag = pre_bump.find("git tag \"${current_tag}\"").unwrap();
+    let push = pre_bump.find("git push --atomic origin HEAD:main").unwrap();
+    let dispatch = pre_bump.find("gh workflow run release.yml").unwrap();
+    for guard in [
+        "if ! git rev-parse --verify --quiet \"refs/tags/${current_tag}\"",
+        "if [ -z \"${baseline_tag}\" ]",
+        "if ! python3 - \"${current}\" \"${baseline_version}\"",
+        "if ! git rev-parse --verify --quiet \"refs/tags/${baseline_tag}\"",
+        "if [ \"${baseline_tagged_version}\" != \"${baseline_version}\" ]",
+        "if ! git merge-base --is-ancestor",
+        "if [ \"${baseline_release_draft}\" != \"false\" ]",
+        "if [ \"$(git rev-parse HEAD)\" != \"$(git rev-parse origin/main)\" ]",
+    ] {
+        assert!(
+            pre_bump.find(guard).unwrap() < tag,
+            "guard must precede tag creation: {guard}"
+        );
+    }
+    assert!(tag < push, "tag must be created before atomic publication");
+    assert!(push < dispatch, "publication must precede release dispatch");
+}
+
+#[test]
 fn release_uploads_an_exact_asset_set_to_a_draft_before_publication() {
     let create = position(RELEASE, "gh release create \"${tag}\"");
     let draft = position(RELEASE, "--verify-tag --draft");

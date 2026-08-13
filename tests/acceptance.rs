@@ -4,6 +4,7 @@ use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::fs;
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 use tempfile::TempDir;
@@ -196,6 +197,59 @@ fn github_redirect(local_repo: &Path, public_url: &str) -> Vec<(String, String)>
         ("GIT_CONFIG_VALUE_0".into(), public_url.into()),
         ("GIT_TERMINAL_PROMPT".into(), "0".into()),
     ]
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct TreeEntry {
+    path: PathBuf,
+    kind: &'static str,
+    mode: u32,
+    contents: Vec<u8>,
+}
+
+fn snapshot_tree(root: &Path) -> Vec<TreeEntry> {
+    fn visit(root: &Path, path: &Path, entries: &mut Vec<TreeEntry>) {
+        let mut children: Vec<_> = fs::read_dir(path)
+            .expect("read snapshot directory")
+            .map(|entry| entry.expect("snapshot entry").path())
+            .collect();
+        children.sort();
+        for child in children {
+            let metadata = fs::symlink_metadata(&child).expect("snapshot metadata");
+            let file_type = metadata.file_type();
+            let kind = if file_type.is_dir() {
+                "directory"
+            } else if file_type.is_file() {
+                "file"
+            } else if file_type.is_symlink() {
+                "symlink"
+            } else if file_type.is_socket() {
+                "socket"
+            } else {
+                "special"
+            };
+            entries.push(TreeEntry {
+                path: child
+                    .strip_prefix(root)
+                    .expect("snapshot path under root")
+                    .to_path_buf(),
+                kind,
+                mode: metadata.permissions().mode(),
+                contents: if file_type.is_file() {
+                    fs::read(&child).expect("snapshot file")
+                } else {
+                    Vec::new()
+                },
+            });
+            if file_type.is_dir() {
+                visit(root, &child, entries);
+            }
+        }
+    }
+
+    let mut entries = Vec::new();
+    visit(root, root, &mut entries);
+    entries
 }
 
 // --- I*: init ---
@@ -2028,6 +2082,24 @@ fn c3_check_refuses_agents_symlink() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("symlink").or(predicate::str::contains("Symlink")));
+}
+
+#[test]
+fn c4_check_preserves_project_and_home_trees_without_external_commands() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+    let project_before = snapshot_tree(&project);
+    let home_before = snapshot_tree(&ws.inventory);
+
+    ws.cmd(&project)
+        .env("PATH", "")
+        .args(["skill", "check"])
+        .assert()
+        .success();
+
+    assert_eq!(snapshot_tree(&project), project_before);
+    assert_eq!(snapshot_tree(&ws.inventory), home_before);
 }
 
 #[test]
@@ -4430,12 +4502,59 @@ fn x7_remove_refuses_symlinked_catalog_without_external_or_project_writes() {
 // --- S*: safety ---
 
 #[test]
-fn s1_init_does_not_create_git_repo() {
+fn s1_successful_local_and_remote_commands_do_not_mutate_project_git() {
     let ws = Workspace::new();
     let project = ws.project("app");
     assert!(!project.join(".git").exists());
     ws.cmd(&project).arg("init").assert().success();
     assert!(!project.join(".git").exists());
+
+    let remote = ws.root.join("remote");
+    init_repo(&remote);
+    write_skill(&remote, "remote-skill", "remote");
+    commit_all(&remote, "initial");
+    let public_url = "https://github.com/example/remote-skill.git";
+    let envs = github_redirect(&remote, public_url);
+    ws.cmd(&project)
+        .envs(envs)
+        .args(["skill", "add", "example/remote-skill"])
+        .assert()
+        .success();
+    assert!(!project.join(".git").exists());
+}
+
+#[test]
+fn s2_library_skill_is_not_project_live_until_explicitly_added() {
+    let ws = Workspace::new();
+    let bootstrap = ws.project("bootstrap");
+    ws.cmd(&bootstrap)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    write_skill(&ws.library_skill("library-only"), "library-only", "body");
+
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    ws.cmd(&project)
+        .args(["skill", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("library-only").not());
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
+
+    ws.cmd(&project)
+        .args(["skill", "add", "library-only"])
+        .assert()
+        .success();
+    ws.cmd(&project)
+        .args(["skill", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("library-only"));
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
 }
 
 #[test]

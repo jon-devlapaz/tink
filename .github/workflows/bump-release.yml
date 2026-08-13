@@ -112,6 +112,26 @@ jobs:
             exit 1
           fi
 
+          locked="$(awk '
+            /^\[\[package\]\]$/ { package = ""; next }
+            /^name = "tink"$/ { package = "tink"; next }
+            package == "tink" && /^version = "/ {
+              version = $0
+              sub(/^version = "/, "", version)
+              sub(/"$/, "", version)
+              print version
+              exit
+            }
+          ' Cargo.lock)"
+          if [ -z "${locked}" ]; then
+            echo "Could not read tink version from Cargo.lock" >&2
+            exit 1
+          fi
+          if [ "${locked}" != "${current}" ]; then
+            echo "Cargo.lock tink version ${locked} does not match Cargo.toml ${current}" >&2
+            exit 1
+          fi
+
           current_tag="v${current}"
           if git rev-parse --verify --quiet "refs/tags/${current_tag}" >/dev/null; then
             current_tagged_version="$(git show "${current_tag}:Cargo.toml" | sed -n 's/^version = "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)"/\1/p' | head -n1)"
@@ -130,6 +150,59 @@ jobs:
               echo "Re-dispatched incomplete release ${current_tag}; rerun this bump after it publishes." >&2
               exit 1
             fi
+          fi
+
+          # An intentionally pre-bumped, untagged manifest (for example 1.0.0)
+          # publishes that exact version instead of incrementing it again.
+          if ! git rev-parse --verify --quiet "refs/tags/${current_tag}" >/dev/null; then
+            baseline_tag="$(gh release view --json tagName --jq '.tagName' 2>/dev/null || true)"
+            if [ -z "${baseline_tag}" ]; then
+              echo "Cannot publish ${current_tag} without a published release baseline" >&2
+              exit 1
+            fi
+            baseline_version="${baseline_tag#v}"
+            if ! python3 - "${current}" "${baseline_version}" <<'PY'
+          import re
+          import sys
+
+          current, baseline = sys.argv[1:]
+          pattern = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
+          if pattern.fullmatch(current) is None or pattern.fullmatch(baseline) is None:
+              raise SystemExit(1)
+          raise SystemExit(0 if tuple(map(int, current.split("."))) > tuple(map(int, baseline.split("."))) else 1)
+          PY
+            then
+              echo "Pre-bumped version ${current} must be newer than published ${baseline_tag}" >&2
+              exit 1
+            fi
+            if ! git rev-parse --verify --quiet "refs/tags/${baseline_tag}" >/dev/null; then
+              echo "Published baseline tag ${baseline_tag} is missing locally" >&2
+              exit 1
+            fi
+            baseline_tagged_version="$(git show "${baseline_tag}:Cargo.toml" | sed -n 's/^version = "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)"/\1/p' | head -n1)"
+            if [ "${baseline_tagged_version}" != "${baseline_version}" ]; then
+              echo "Baseline tag ${baseline_tag} does not contain Cargo version ${baseline_version}" >&2
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "${baseline_tag}^{commit}" origin/main; then
+              echo "Baseline tag ${baseline_tag} is not contained in origin/main" >&2
+              exit 1
+            fi
+            baseline_release_draft="$(gh release view "${baseline_tag}" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+            if [ "${baseline_release_draft}" != "false" ]; then
+              echo "Baseline release ${baseline_tag} is not published" >&2
+              exit 1
+            fi
+            if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+              echo "origin/main advanced after this workflow started; a newer run owns the release" >&2
+              exit 1
+            fi
+
+            git tag "${current_tag}"
+            git push --atomic origin HEAD:main "refs/tags/${current_tag}:refs/tags/${current_tag}"
+            gh workflow run release.yml --ref "${current_tag}"
+            echo "Dispatched intentional release for ${current_tag}"
+            exit 0
           fi
 
           IFS=. read -r major minor patch <<< "${current}"
