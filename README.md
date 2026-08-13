@@ -81,16 +81,15 @@ In an empty project directory:
 
 ```console
 tink init
-tink skill add jon-devlapaz/tink-skills --skill skill-scout
 tink skill list
 tink skill check
 ```
 
-That installs live skill directories under `.agents/skills/`. Optional:  
-`tink init --with-tink-skills` pulls the full
-[tink-skills](https://github.com/jon-devlapaz/tink-skills) bundle (scout +
-eval loop). On a TTY, `init` may ask about ZEN and that bundle; non-interactive
-runs skip them unless you pass flags.
+On a TTY, `init` asks whether to install `skill-scout` and `triangulate-me`
+from [tink-skills](https://github.com/jon-devlapaz/tink-skills). Accept that
+prompt to install both live skill directories under `.agents/skills/`.
+Non-interactive runs skip the optional bundle unless you pass
+`--with-tink-skills`.
 
 Defaults after `init`:
 
@@ -135,7 +134,7 @@ tink skill add ../my-skill
 tink skill add skill-name
 tink skill add owner/repository --skill skill-name
 tink skill add owner/repository --skill packages/group/skills/skill-name
-tink skill add jon-devlapaz/tink-skills --skill skill-eval-loop
+tink skill add jon-devlapaz/skill-eval-loop --skill skill-eval-loop
 tink skillset add common-skillset
 tink skillset list
 tink skillset list --library

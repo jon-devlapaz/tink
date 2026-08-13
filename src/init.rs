@@ -165,7 +165,7 @@ pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitRep
             "{}{} and {}{}{}?",
             style.warn("Add "),
             style.skill("skill-scout"),
-            style.skill("skill-eval-loop"),
+            style.skill("triangulate-me"),
             style.warn(" from "),
             style.link(
                 &format!("https://github.com/{TINK_SKILLS_SOURCE}"),

@@ -92,7 +92,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | I7 | `init --no-manage-tink` | Does **not** install `manage-tink` |
 | I8 | `init` with relative `TINK_HOME` (e.g. `../home`) from project cwd | Exit 0; home is the absolutized sibling path (not nested under the project); stdout shows an absolute home path |
 | I9 | Run non-interactive `init` twice with an unchanged project | Second run exits 0, reports `Ready` / `Already present`, and leaves project/home contract files byte-identical |
-| I10 | Run `init --with-tink-skills` against an incomplete optional bundle, repair the bundle, then rerun the same command | First run fails but preserves completed setup; second run exits 0 and converges to `manage-tink` plus both bundle skills |
+| I10 | Run `init --with-tink-skills` against an incomplete optional bundle, repair the bundle, then rerun the same command | First run fails but preserves completed setup; second run exits 0 and converges to `manage-tink`, `skill-scout`, and `triangulate-me` |
 | I11 | Run `init` with `TINK_HOME` pointed at the non-empty project directory | Exit ≠ 0; refuses to claim the directory and leaves the project byte-identical |
 | I12 | Run `init` with a marker-only partial Tink home left by interrupted initialization | Exit 0; recreates the owned library/catalog directories and leaves a valid inventory |
 
