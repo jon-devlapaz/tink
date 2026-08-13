@@ -14,4 +14,4 @@ Follow the maintainability principles in [ZEN.md](ZEN.md).
 pub const ZEN_REFERENCE_MARKER: &str = "[ZEN.md](ZEN.md)";
 
 pub const TINK_SKILLS_SOURCE: &str = "jon-devlapaz/tink-skills";
-pub const TINK_SKILLS: &[&str] = &["skill-scout", "skill-eval-loop"];
+pub const TINK_SKILLS: &[&str] = &["skill-scout", "triangulate-me"];

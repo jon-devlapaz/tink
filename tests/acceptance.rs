@@ -432,12 +432,12 @@ fn i10_init_bundle_failure_is_resumable() {
     first
         .assert()
         .failure()
-        .stderr(predicate::str::contains("skill-eval-loop"));
+        .stderr(predicate::str::contains("triangulate-me"));
 
     ws.assert_cataloged("app", "manage-tink");
     ws.assert_cataloged("app", "skill-scout");
-    assert!(!Workspace::skill_path(&project, "skill-eval-loop").exists());
-    assert!(!ws.library_skill("skill-eval-loop").exists());
+    assert!(!Workspace::skill_path(&project, "triangulate-me").exists());
+    assert!(!ws.library_skill("triangulate-me").exists());
     ws.cmd(&project).args(["skill", "check"]).assert().success();
     let manage_before =
         fs::read(Workspace::skill_path(&project, "manage-tink").join("SKILL.md")).unwrap();
@@ -445,11 +445,11 @@ fn i10_init_bundle_failure_is_resumable() {
         fs::read(Workspace::skill_path(&project, "skill-scout").join("SKILL.md")).unwrap();
 
     write_skill(
-        &remote.join("skills").join("skill-eval-loop"),
-        "skill-eval-loop",
-        "Evaluate skills.",
+        &remote.join("skills").join("triangulate-me"),
+        "triangulate-me",
+        "Triangulate a claim.",
     );
-    commit_all(&remote, "add skill-eval-loop");
+    commit_all(&remote, "add triangulate-me");
 
     let mut second = ws.cmd(&project);
     second.args(args);
@@ -459,11 +459,11 @@ fn i10_init_bundle_failure_is_resumable() {
     second
         .assert()
         .success()
-        .stdout(predicate::str::contains("Added skill-eval-loop"));
+        .stdout(predicate::str::contains("Added triangulate-me"));
 
     ws.assert_cataloged("app", "manage-tink");
     ws.assert_cataloged("app", "skill-scout");
-    ws.assert_cataloged("app", "skill-eval-loop");
+    ws.assert_cataloged("app", "triangulate-me");
     assert_eq!(
         fs::read(Workspace::skill_path(&project, "manage-tink").join("SKILL.md")).unwrap(),
         manage_before,
