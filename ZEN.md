@@ -15,3 +15,23 @@
 11. A check proves only what it tests; expose assumptions, uncertainty, actions, and evidence.
 12. Stop when the full acceptance boundary is proven.
 13. After it works, remove every artifact not required to keep it working.
+
+
+
+1. Complexity is incremental: you have to sweat the small stuff.
+2. Working code isn’t enough.
+3. Make continual small investments to improve system design.
+4. Modules should be deep.
+5. Interfaces should be designed to make the most common usage as
+simple as possible.
+6. It’s more important for a module to have a simple interface than a
+simple implementation.
+7. General-purpose modules are deeper.
+8. Separate general-purpose and special-purpose code.
+9. Different layers should have different abstractions.
+10. Pull complexity downward.
+11. Define errors (and special cases) out of existence.
+12. Design it twice.
+13. Comments should describe things that are not obvious from the code.
+14. Software should be designed for ease of reading, not ease of writing.
+15. The increments of software development should be abstractions, not features.
