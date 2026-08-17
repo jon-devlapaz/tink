@@ -9,8 +9,18 @@ pub const EMBEDDED_MANAGE_TINK: &str = "tink:embedded/manage-tink";
 #[derive(Debug)]
 pub enum AddSource {
     LocalPath(PathBuf),
-    Github(RemoteSource),
+    Github(GithubAddSource),
     LibraryName(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct GithubAddSource {
+    pub remote: RemoteSource,
+    /// First `/tree/<ref>/` segment from a GitHub tree URL. Used only to refuse
+    /// slash-containing refs; checkout still follows the remote default branch.
+    pub tree_ref: Option<String>,
+    /// Repository-relative skill path from a GitHub tree URL.
+    pub skill_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -67,7 +77,14 @@ pub fn classify_add_input(value: &str) -> Result<AddSource, Error> {
         return Err(Error::msg(format!("Path does not exist: {value}")));
     }
     if looks_like_remote_source(value) {
-        return Ok(AddSource::Github(parse_remote(value)?));
+        if value.contains("://") {
+            return Ok(AddSource::Github(parse_github_add_source(value)?));
+        }
+        return Ok(AddSource::Github(GithubAddSource {
+            remote: parse_remote(value)?,
+            tree_ref: None,
+            skill_path: None,
+        }));
     }
     Ok(AddSource::LibraryName(value.to_string()))
 }
@@ -228,6 +245,73 @@ fn github_part_ok(part: &str) -> bool {
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-')
 }
 
+/// Parse a public GitHub HTTPS add source, including skill tree URLs.
+pub fn parse_github_add_source(value: &str) -> Result<GithubAddSource, Error> {
+    let err = || Error::msg("Remote sources must be public GitHub HTTPS URLs or owner/repository");
+    let url = value.parse::<url_lite::Url>().map_err(|_| err())?;
+    if url.scheme != "https" || url.host.as_deref() != Some("github.com") {
+        return Err(err());
+    }
+    if url.userinfo.is_some() || !url.query.is_empty() || url.fragment.is_some() {
+        return Err(err());
+    }
+    let parts: Vec<&str> = url
+        .path
+        .trim_matches('/')
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect();
+    if parts.len() < 2 {
+        return Err(Error::msg(
+            "Remote GitHub source must identify exactly one owner and repository",
+        ));
+    }
+    let owner = parts[0];
+    let repo = parts[1].trim_end_matches(".git");
+    if !github_part_ok(owner) || !github_part_ok(repo) {
+        return Err(err());
+    }
+    let remote = RemoteSource {
+        display: value.to_string(),
+        url: format!("https://github.com/{owner}/{repo}.git"),
+    };
+    if parts.len() == 2 {
+        return Ok(GithubAddSource {
+            remote,
+            tree_ref: None,
+            skill_path: None,
+        });
+    }
+    if parts[2] != "tree" || parts.len() < 4 {
+        return Err(Error::msg(
+            "GitHub URL must use the /tree/<ref>/<path> form",
+        ));
+    }
+    let tree_ref = parts[3];
+    if tree_ref.is_empty() {
+        return Err(Error::msg("GitHub URL is missing the Git ref"));
+    }
+    let mut skill_path = PathBuf::new();
+    for part in &parts[4..] {
+        if *part == "." || *part == ".." || part.contains('\\') {
+            return Err(Error::msg(
+                "GitHub tree path must stay inside the repository",
+            ));
+        }
+        skill_path.push(part);
+    }
+    let skill_path = if skill_path.as_os_str().is_empty() {
+        None
+    } else {
+        Some(skill_path.to_string_lossy().replace('\\', "/"))
+    };
+    Ok(GithubAddSource {
+        remote,
+        tree_ref: Some(tree_ref.to_string()),
+        skill_path,
+    })
+}
+
 /// Parse `owner/repo` or `https://github.com/owner/repo[.git]`.
 pub fn parse_remote(value: &str) -> Result<RemoteSource, Error> {
     if let Some((owner, repo)) = value.split_once('/')
@@ -354,12 +438,39 @@ mod tests {
         assert!(classify_add_input("./definitely-missing").is_err());
         assert!(matches!(
             classify_add_input("example/skills").unwrap(),
-            AddSource::Github(_)
+            AddSource::Github(GithubAddSource {
+                skill_path: None,
+                ..
+            })
         ));
         assert!(matches!(
             classify_add_input("https://github.com/example/skills").unwrap(),
-            AddSource::Github(_)
+            AddSource::Github(GithubAddSource {
+                skill_path: None,
+                ..
+            })
         ));
+        let tree = classify_add_input(
+            "https://github.com/mattpocock/skills/tree/main/skills/engineering/improve-codebase-architecture",
+        )
+        .unwrap();
+        match tree {
+            AddSource::Github(source) => {
+                assert_eq!(
+                    source.remote.url,
+                    "https://github.com/mattpocock/skills.git"
+                );
+                assert_eq!(source.tree_ref.as_deref(), Some("main"));
+                assert_eq!(
+                    source.skill_path.as_deref(),
+                    Some("skills/engineering/improve-codebase-architecture")
+                );
+            }
+            other => panic!("expected github tree source, got {other:?}"),
+        }
+        assert!(
+            classify_add_input("https://github.com/example/skills/blob/main/SKILL.md").is_err()
+        );
         assert!(matches!(
             classify_add_input("reviewer").unwrap(),
             AddSource::LibraryName(name) if name == "reviewer"

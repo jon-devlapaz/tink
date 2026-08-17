@@ -40,7 +40,7 @@ top-level `add` / `check` / `refresh` aliases. CLI binary updates use top-level
 | Command | Meaning |
 |---|---|
 | `tink init` | Create `.agents/skills/`; install `manage-tink` by default; optional ZEN + tink-skills; ensure `~/.tink` |
-| `tink skill add <source> [--skill <name-or-path>]` | Install one local path, public GitHub skill, or library skill by name; remote selectors may be unique names or repository-relative paths |
+| `tink skill add <source> [--skill <name-or-path>]` | Install one local path, public GitHub skill, GitHub skill tree URL, or library skill by name; remote selectors may be unique names or repository-relative paths |
 | `tink skill list` | List project skills under `.agents/skills/` (read-only) |
 | `tink skill list --catalog` | List offline by-project catalog (`project`, `root`, `skill` TSV) |
 | `tink library list` | List standalone skill names in the library; receipt-backed skillset roots are excluded |
@@ -135,6 +135,9 @@ Ids are stable. Tests must name or comment the id they prove.
 | R10 | A canonical nested skill and a directory/name-mismatched `SKILL.md` declare the same name | Name selection ignores the malformed candidate and installs the one valid tree; inspection may still diagnose both |
 | R11 | Root and nested skills share a name, then `--skill .` selects the listed root path | Installs the root skill and records receipt path `"."` |
 | R12 | `skill add tink:embedded/manage-tink` through the free-form add boundary | Exit ≠ 0; embedded lock sources are not accepted as remote add sources |
+| R13 | `skill add` a GitHub skill tree URL | Installs that skill directory; receipt `source` is the canonical repository URL, `path` is the tree path, and `skill refresh` follows the remote default branch at that path |
+| R14 | `skill add` a GitHub tree URL that is not itself a skill | Exit ≠ 0 before project/library/catalog writes; lists skill paths under that boundary |
+| R15 | `skill add` a GitHub tree URL whose ref contains `/` | Exit ≠ 0; refuse the ambiguous URL; no project/library/catalog writes |
 
 ### Skillsets
 

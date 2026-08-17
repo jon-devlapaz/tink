@@ -347,12 +347,13 @@ fn install_from_checkout(
         }
         let path = crate::paths::canonicalize_beneath(&source_root, Path::new(source_path))?;
         let skill = skills::read_skill(&path, source_path != ".")?;
-        if options.selected_name != Some(skill.name.as_str())
-            && options.selected_name != Some(source_path)
+        if let Some(selected_name) = options.selected_name
+            && selected_name != skill.name
+            && selected_name != source_path
         {
             return Err(Error::msg(format!(
-                "Locked skill path does not contain {:?}",
-                options.selected_name
+                "Skill selector {selected_name:?} does not match {} at {source_path}",
+                skill.name
             )));
         }
         skill
@@ -437,8 +438,8 @@ fn add_skill_inner(
             }
             Ok(outcome)
         }
-        AddSource::Github(remote) => {
-            let outcome = add_from_remote(project_root, &destination_root, &remote, selected_name)?;
+        AddSource::Github(source) => {
+            let outcome = add_from_remote(project_root, &destination_root, &source, selected_name)?;
             if report {
                 report_add(&outcome)?;
             }
@@ -487,33 +488,105 @@ fn report_add(outcome: &AddOutcome) -> Result<(), Error> {
 fn add_from_remote(
     project_root: &Path,
     destination_root: &Path,
-    remote: &RemoteSource,
+    source: &sources::GithubAddSource,
     selected_name: Option<&str>,
 ) -> Result<AddOutcome, Error> {
+    if selected_name.is_some() && source.skill_path.is_some() {
+        return Err(Error::msg(
+            "Do not combine --skill with a GitHub tree URL; the URL already selects the skill",
+        ));
+    }
+    if let (Some(tree_ref), Some(skill_path)) =
+        (source.tree_ref.as_deref(), source.skill_path.as_deref())
+    {
+        reject_ambiguous_tree_ref(&source.remote, tree_ref, skill_path)?;
+    }
     // A selected name may be ambiguous in the repository, so discovery must run
     // before the library can be trusted. Preserve the root-skill no-clone path.
-    if selected_name.is_none() {
-        let tip = git::remote_head(remote)?;
-        if let Some(cached) = library::for_remote_tip(&remote.url, &tip, None)? {
+    if selected_name.is_none() && source.skill_path.is_none() {
+        let tip = git::remote_head(&source.remote)?;
+        if let Some(cached) = library::for_remote_tip(&source.remote.url, &tip, None)? {
             return place_from_library(project_root, &cached, destination_root);
         }
     }
-    let (_temp, source_root, revision) = git::checkout(remote)?;
-    let selected_path = selected_name
-        .map(|selector| select_remote_skill_path(&source_root, &remote.display, selector))
-        .transpose()?;
+    let (_temp, source_root, revision) = git::checkout(&source.remote)?;
+    let selected_path = if let Some(skill_path) = source.skill_path.as_deref() {
+        Some(explicit_remote_skill_path(
+            &source_root,
+            &source.remote,
+            skill_path,
+        )?)
+    } else {
+        selected_name
+            .map(|selector| {
+                select_remote_skill_path(&source_root, &source.remote.display, selector)
+            })
+            .transpose()?
+    };
     install_from_checkout(
         project_root,
         &source_root,
         destination_root,
         CheckoutInstallOptions {
-            source_display: &remote.display,
+            source_display: &source.remote.display,
             selected_name,
-            source_url: Some(&remote.url),
+            source_url: Some(&source.remote.url),
             revision: Some(&revision),
             source_path: selected_path.as_deref(),
         },
     )
+}
+
+fn reject_ambiguous_tree_ref(
+    remote: &RemoteSource,
+    requested_ref: &str,
+    relative_path: &str,
+) -> Result<(), Error> {
+    let remote_refs = git::remote_ref_names(remote)?;
+    let mut candidate = requested_ref.to_string();
+    for segment in relative_path.split('/') {
+        candidate.push('/');
+        candidate.push_str(segment);
+        if remote_refs.contains(&candidate) {
+            return Err(Error::msg(format!(
+                "GitHub URL is ambiguous because Git ref `{candidate}` contains `/`; use a ref without `/`"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn explicit_remote_skill_path(
+    source_root: &Path,
+    remote: &RemoteSource,
+    url_path: &str,
+) -> Result<String, Error> {
+    let path = crate::paths::canonicalize_beneath(source_root, Path::new(url_path))
+        .map_err(|error| Error::msg(format!("GitHub tree path {url_path} is invalid: {error}")))?;
+    if path.join("SKILL.md").is_file() {
+        return Ok(url_path.to_string());
+    }
+    let discovery = skills::discover_recursive(&path)?;
+    if discovery.skills.is_empty() {
+        return Err(Error::msg(format!(
+            "GitHub tree path is not a skill: {url_path}"
+        )));
+    }
+    let commands = discovery
+        .skills
+        .iter()
+        .map(|skill| {
+            let relative = repository_relative_path(source_root, skill)?;
+            Ok(format!(
+                "  tink skill add {} --skill {relative}",
+                remote.url
+            ))
+        })
+        .collect::<Result<Vec<_>, Error>>()?
+        .join("\n");
+    Err(Error::msg(format!(
+        "GitHub tree path is not a skill. Choose one:\n{commands}"
+    )))
 }
 
 #[cfg(test)]

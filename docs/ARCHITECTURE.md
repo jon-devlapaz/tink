@@ -85,7 +85,7 @@ roots, while `skillset list` provides the grouped member view.
 | Input | Route |
 |---|---|
 | Local path | Canonicalize, discover/select one valid skill, then use the source-install path. |
-| GitHub source | Resolve/checkout through `git.rs`, select one skill, and create a source receipt. |
+| GitHub source | Resolve/checkout through `git.rs`, select one skill, and create a source receipt. A `/tree/<ref>/<path>` URL selects that repository-relative path; checkout still follows the remote default branch. |
 | Bare library name | `library.rs` loads one structurally validated standalone tree; receipt-classified roots are directed to `skillset add`. Source-receipt validation happens later during project checks. |
 
 For a local or GitHub source, the complete publication order is:

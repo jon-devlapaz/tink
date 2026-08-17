@@ -11,6 +11,7 @@ form for add, list, check, refresh, and remove.
 | Init + both | `tink init --with-zen --with-tink-skills` |
 | Init without embedded manage-tink | add `--no-manage-tink` |
 | Add one skill | `tink skill add SOURCE` |
+| Add from a GitHub skill tree URL | `tink skill add https://github.com/OWNER/REPO/tree/REF/PATH` |
 | Add from multi-skill repo | `tink skill add SOURCE --skill NAME_OR_REPOSITORY_PATH` |
 | Add from library | `tink skill add NAME` |
 | Harvest harness skills into library | `tink skill harvest` |

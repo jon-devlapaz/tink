@@ -135,6 +135,7 @@ tink skill add skill-name
 tink skill add owner/repository --skill skill-name
 tink skill add owner/repository --skill packages/group/skills/skill-name
 tink skill add jon-devlapaz/skill-eval-loop --skill skill-eval-loop
+tink skill add https://github.com/mattpocock/skills/tree/main/skills/engineering/improve-codebase-architecture
 tink skillset add common-skillset
 tink skillset list
 tink skillset list --library
@@ -156,8 +157,10 @@ tink skill remove skill-name
 - `--skill` recursively selects a unique skill name from a remote repository.
   If that name occurs more than once, use the repository-relative path reported
   by the error or by `tink inspect`.
-- GitHub tree URLs are inspection inputs, not `skill add` sources. Remote adds
-  follow the repository's default branch and record the selected skill path.
+- A GitHub skill tree URL installs that skill directory. The receipt still
+  records the canonical repository URL, resolved default-branch revision, and
+  repository-relative path. Refresh follows the remote default branch at that
+  path. Do not combine `--skill` with a tree URL that already names a skill.
 - Refresh only clean GitHub imports; local edits are refused. The explicit
   `tink skill refresh manage-tink` path instead owns the reserved embedded
   package: it installs a missing copy, leaves a current copy unchanged, or

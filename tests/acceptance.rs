@@ -183,6 +183,19 @@ fn commit_all(path: &Path, message: &str) -> String {
         .to_string()
 }
 
+fn current_branch(path: &Path) -> String {
+    let output = StdCommand::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(path)
+        .output()
+        .expect("branch");
+    assert!(output.status.success());
+    String::from_utf8(output.stdout)
+        .expect("utf8")
+        .trim()
+        .to_string()
+}
+
 fn github_redirect(local_repo: &Path, public_url: &str) -> Vec<(String, String)> {
     let file_url = format!(
         "file://{}",
@@ -1594,6 +1607,144 @@ fn r12_add_rejects_embedded_lock_source() {
         .stderr(predicate::str::contains(
             "Remote sources must be public GitHub HTTPS URLs or owner/repository",
         ));
+}
+
+#[test]
+fn r13_add_github_skill_tree_url_writes_receipt_and_refreshes() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("tree-skill-repo");
+    init_repo(&remote);
+    let skill_path = "skills/engineering/improve-codebase-architecture";
+    write_skill(
+        &remote.join(skill_path),
+        "improve-codebase-architecture",
+        "v1",
+    );
+    write_skill(
+        &remote.join("skills/engineering/other-skill"),
+        "other-skill",
+        "sibling",
+    );
+    let revision = commit_all(&remote, "tree skills");
+    let branch = current_branch(&remote);
+    let public = "https://github.com/example/tree-skills.git";
+    let tree_url = format!("https://github.com/example/tree-skills/tree/{branch}/{skill_path}");
+    let redirect = github_redirect(&remote, public);
+
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", &tree_url]);
+    add.envs(redirect.clone());
+    add.assert().success();
+
+    let installed = Workspace::skill_path(&project, "improve-codebase-architecture");
+    assert!(
+        fs::read_to_string(installed.join("SKILL.md"))
+            .unwrap()
+            .contains("v1")
+    );
+    let receipt: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(installed.join(".tink-source.json")).unwrap())
+            .unwrap();
+    assert_eq!(receipt["source"], public);
+    assert_eq!(receipt["revision"], revision);
+    assert_eq!(receipt["path"], skill_path);
+    ws.assert_cataloged("app", "improve-codebase-architecture");
+
+    write_skill(
+        &remote.join(skill_path),
+        "improve-codebase-architecture",
+        "v2",
+    );
+    commit_all(&remote, "update tree skill");
+    let mut refresh = ws.cmd(&project);
+    refresh.args(["skill", "refresh", "improve-codebase-architecture"]);
+    refresh.envs(redirect);
+    refresh.assert().success();
+    assert!(
+        fs::read_to_string(installed.join("SKILL.md"))
+            .unwrap()
+            .contains("v2")
+    );
+}
+
+#[test]
+fn r14_add_github_group_tree_url_refuses_without_writes() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("group-tree-repo");
+    init_repo(&remote);
+    write_skill(
+        &remote.join("skills/engineering/alpha"),
+        "alpha",
+        "group member",
+    );
+    write_skill(
+        &remote.join("skills/engineering/beta"),
+        "beta",
+        "group member",
+    );
+    commit_all(&remote, "group skills");
+    let branch = current_branch(&remote);
+    let public = "https://github.com/example/group-tree.git";
+    let tree_url =
+        format!("https://github.com/example/group-tree/tree/{branch}/skills/engineering");
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", &tree_url]);
+    add.envs(github_redirect(&remote, public));
+    add.assert().failure().stderr(
+        predicate::str::contains("not a skill")
+            .and(predicate::str::contains("skills/engineering/alpha"))
+            .and(predicate::str::contains("skills/engineering/beta")),
+    );
+
+    assert!(!Workspace::skill_path(&project, "alpha").exists());
+    assert!(!Workspace::skill_path(&project, "beta").exists());
+    assert!(!ws.library_skill("alpha").exists());
+    assert!(!ws.library_skill("beta").exists());
+}
+
+#[test]
+fn r15_add_github_tree_url_refuses_slash_containing_ref() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("slash-ref-repo");
+    init_repo(&remote);
+    fs::write(remote.join("README.md"), "base\n").unwrap();
+    commit_all(&remote, "base");
+    git(&remote, &["checkout", "-b", "feature/grouped"]);
+    write_skill(&remote.join("skills/alpha"), "alpha", "slash ref");
+    commit_all(&remote, "slash ref");
+    let public = "https://github.com/example/slash-ref.git";
+    let mut add = ws.cmd(&project);
+    add.args([
+        "skill",
+        "add",
+        "https://github.com/example/slash-ref/tree/feature/grouped/skills/alpha",
+    ]);
+    add.envs(github_redirect(&remote, public));
+    add.assert().failure().stderr(
+        predicate::str::contains("ambiguous")
+            .and(predicate::str::contains("feature/grouped"))
+            .and(predicate::str::contains("contains `/`")),
+    );
+    assert!(!Workspace::skill_path(&project, "alpha").exists());
+    assert!(!ws.library_skill("alpha").exists());
 }
 
 #[test]

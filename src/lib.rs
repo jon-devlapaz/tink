@@ -125,7 +125,7 @@ pub enum Command {
 pub enum SkillCommand {
     /// Copy one complete skill into the project
     Add {
-        /// Local path, `owner/repo`, public GitHub HTTPS URL, or library skill name
+        /// Local path, `owner/repo`, public GitHub HTTPS or skill tree URL, or library skill name
         #[arg(add = ArgValueCompleter::new(add_source_candidates))]
         source: String,
         /// Unique skill name or repository-relative skill path
