@@ -165,6 +165,14 @@ pub enum SkillCommand {
     },
     /// Copy harness skill trees into the library (create-only)
     Harvest,
+    /// Publish one standalone project skill to the reusable library
+    Promote {
+        /// Directory name below `.agents/skills/`
+        name: String,
+        /// Replace a divergent reusable library copy
+        #[arg(long)]
+        replace: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -222,7 +230,7 @@ pub fn run(cli: Cli, cwd: PathBuf) -> ExitCode {
         Err(err) => {
             let style = CliStyle::auto_stderr();
             match output::stderr_line(format_args!("{}", style.error(&err))) {
-                Ok(()) => ExitCode::from(1),
+                Ok(()) => ExitCode::from(if err.is_conflict() { 3 } else { 1 }),
                 // Downstream closure is expected for CLI pipelines. Never convert
                 // it into Rust's default printing panic / exit status 101.
                 Err(_) => ExitCode::from(1),
@@ -390,6 +398,7 @@ fn dispatch_skill(cwd: &Path, command: SkillCommand) -> Result<(), Error> {
         SkillCommand::Refresh { name } => dispatch_skill_refresh(cwd, name.as_deref()),
         SkillCommand::Remove { name } => dispatch_skill_remove(cwd, &name),
         SkillCommand::Harvest => dispatch_skill_harvest(cwd),
+        SkillCommand::Promote { name, replace } => dispatch_skill_promote(cwd, &name, replace),
     }
 }
 
@@ -716,6 +725,27 @@ fn dispatch_skill_harvest(cwd: &Path) -> Result<(), Error> {
         out.muted("skipped")
     );
     println!("{} {}", out.muted("Home"), out.accent(home.display()));
+    Ok(())
+}
+
+fn dispatch_skill_promote(cwd: &Path, name: &str, replace: bool) -> Result<(), Error> {
+    let style = CliStyle::auto_stdout();
+    let outcome = library::promote(cwd, name, replace)?;
+    let action = match outcome.write {
+        library::PromotionWrite::Created => style.success("Created"),
+        library::PromotionWrite::Unchanged => style.muted("Unchanged"),
+        library::PromotionWrite::Replaced => style.success("Replaced"),
+    };
+    println!(
+        "{} {} {}\n{} {}\n{} {}",
+        action,
+        style.skill(name),
+        style.accent(outcome.destination.display()),
+        style.muted("Origin"),
+        style.accent(format!("project skill {name}")),
+        style.muted("Digest"),
+        style.accent(outcome.digest),
+    );
     Ok(())
 }
 

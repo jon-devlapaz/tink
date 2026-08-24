@@ -36,6 +36,23 @@ pub enum CreateOnlyWrite {
     Skipped(Option<String>),
 }
 
+/// Result of explicitly publishing a project skill to the reusable library.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromotionWrite {
+    Created,
+    Unchanged,
+    Replaced,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromotionOutcome {
+    pub destination: PathBuf,
+    pub digest: String,
+    pub write: PromotionWrite,
+}
+
+const PROMOTION_IGNORED_ROOTS: &[&str] = &[".git", provenance::SIDECAR_FILE, ".tink-skillset.json"];
+
 fn clear_path(target: &Path) -> Result<(), Error> {
     refuse_symlink(target)?;
     if target.is_dir() {
@@ -51,6 +68,121 @@ fn library_root(home: Option<&Path>) -> Result<PathBuf, Error> {
     let root = skills_library_path(&home);
     mkdir_p(&root)?;
     Ok(root)
+}
+
+fn promotion_source(project_root: &Path, name: &str) -> Result<Skill, Error> {
+    if !skills::valid_skill_name(name) {
+        return Err(Error::msg(format!("Invalid skill name: {name}")));
+    }
+    let agents = crate::home::project_agents_path(project_root);
+    let skills_root = crate::home::project_skills_path(project_root);
+    refuse_symlink(&agents)?;
+    refuse_symlink(&skills_root)?;
+    if !skills_root.is_dir() {
+        return Err(Error::msg("Missing .agents/skills"));
+    }
+    let path = skills_root.join(name);
+    let skill = skills::read_skill(&path, true)?;
+    crate::skillsets::ensure_standalone_source(&path, name)?;
+    if path.join(".git").exists() || path.join(".git").is_symlink() {
+        return Err(Error::msg(format!(
+            "Refusing repository metadata in skill: {}",
+            path.display()
+        )));
+    }
+    skills::validate_skill_tree(&path)?;
+    // Imported skills may be promoted, but their receipt must still be sound.
+    // It is deliberately excluded from the reusable payload below.
+    let _ = provenance::read(&skill)?;
+    Ok(skill)
+}
+
+/// Publish a standalone project skill as a receipt-free library payload.
+///
+/// All source validation happens before the home is created or any staging
+/// directory is made. A divergent destination is a conflict unless `replace`
+/// is explicit.
+pub fn promote(project_root: &Path, name: &str, replace: bool) -> Result<PromotionOutcome, Error> {
+    promote_at(None, project_root, name, replace)
+}
+
+fn promote_at(
+    home: Option<&Path>,
+    project_root: &Path,
+    name: &str,
+    replace: bool,
+) -> Result<PromotionOutcome, Error> {
+    let skill = promotion_source(project_root, name)?;
+    let digest = skills::tree_digest(&skill.path, PROMOTION_IGNORED_ROOTS)?;
+    let library = library_root(home)?;
+    let target = library.join(name);
+    refuse_symlink(&target)?;
+
+    if target.exists() {
+        if !target.is_dir() {
+            return Err(Error::msg(format!(
+                "Refusing to replace non-directory library skill: {}",
+                target.display()
+            )));
+        }
+        crate::skillsets::ensure_standalone_source(&target, name)?;
+        skills::read_skill(&target, true)?;
+        skills::validate_skill_tree(&target)?;
+        let destination_digest = skills::tree_digest(&target, PROMOTION_IGNORED_ROOTS)?;
+        let has_receipt = target.join(provenance::SIDECAR_FILE).exists()
+            || target.join(provenance::SIDECAR_FILE).is_symlink();
+        if destination_digest == digest && !has_receipt {
+            return Ok(PromotionOutcome {
+                destination: target,
+                digest,
+                write: PromotionWrite::Unchanged,
+            });
+        }
+        if !replace {
+            return Err(Error::conflict(format!(
+                "Library skill {name:?} differs from the project skill.\nSource digest: {digest}\nDestination digest: {destination_digest}\nRefusing to overwrite it; rerun with: tink skill promote {name} --replace"
+            )));
+        }
+    }
+
+    let staging = tempfile::Builder::new()
+        .prefix(".tink-promote-")
+        .tempdir_in(&library)
+        .map_err(|e| Error::msg(format!("promotion staging dir: {e}")))?;
+    let staged = staging.path().join(name);
+    skills::copy_skill_tree(&skill.path, &staged, PROMOTION_IGNORED_ROOTS)?;
+    skills::read_skill(&staged, true)?;
+    skills::validate_skill_tree(&staged)?;
+    if staged.join(provenance::SIDECAR_FILE).exists() || staged.join(".tink-skillset.json").exists()
+    {
+        return Err(Error::msg("Promotion staging retained a Tink receipt"));
+    }
+    if skills::tree_digest(&staged, PROMOTION_IGNORED_ROOTS)? != digest {
+        return Err(Error::msg("Promotion staging digest does not match source"));
+    }
+
+    let write = if target.exists() {
+        skills::publish_staged_tree(staging, staged, &target)?;
+        PromotionWrite::Replaced
+    } else {
+        fs::rename(&staged, &target).map_err(|e| map_io(&target, e))?;
+        PromotionWrite::Created
+    };
+    skills::read_skill(&target, true)?;
+    skills::validate_skill_tree(&target)?;
+    if target.join(provenance::SIDECAR_FILE).exists()
+        || target.join(".tink-skillset.json").exists()
+        || skills::tree_digest(&target, PROMOTION_IGNORED_ROOTS)? != digest
+    {
+        return Err(Error::msg(
+            "Published library skill failed promotion verification",
+        ));
+    }
+    Ok(PromotionOutcome {
+        destination: target,
+        digest,
+        write,
+    })
 }
 
 /// Validated standalone skill trees currently in the library.

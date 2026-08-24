@@ -6,6 +6,7 @@ use std::io;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ErrorKind {
     Message,
+    Conflict,
     StdoutBrokenPipe,
     StderrBrokenPipe,
 }
@@ -21,6 +22,14 @@ impl Error {
         Self {
             message: message.into(),
             kind: ErrorKind::Message,
+        }
+    }
+
+    /// A safe refusal caused by an existing conflicting resource.
+    pub fn conflict(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            kind: ErrorKind::Conflict,
         }
     }
 
@@ -42,6 +51,10 @@ impl Error {
 
     pub(crate) fn is_stdout_broken_pipe(&self) -> bool {
         self.kind == ErrorKind::StdoutBrokenPipe
+    }
+
+    pub(crate) fn is_conflict(&self) -> bool {
+        self.kind == ErrorKind::Conflict
     }
 }
 

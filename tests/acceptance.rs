@@ -3359,6 +3359,132 @@ fn h14_harvest_skips_receipt_owned_sources_without_library_publication() {
 }
 
 #[test]
+fn h15_skill_promote_creates_receipt_free_payload_and_installs_normally() {
+    let ws = Workspace::new();
+    let project = ws.project("source");
+    let target = ws.project("target");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    let source = Workspace::skill_path(&project, "demo-skill");
+    write_skill(&source, "demo-skill", "project payload");
+    fs::write(source.join("run.sh"), "#!/bin/sh\nexit 0\n").unwrap();
+    fs::set_permissions(source.join("run.sh"), fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        source.join(".tink-source.json"),
+        "{\n  \"source\": \"https://github.com/example/skills.git\",\n  \"revision\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n  \"path\": \"demo-skill\"\n}\n",
+    )
+    .unwrap();
+
+    ws.cmd(&project)
+        .args(["skill", "promote", "demo-skill"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Created")
+                .and(predicate::str::contains("demo-skill"))
+                .and(predicate::str::contains("Digest")),
+        );
+    let published = ws.library_skill("demo-skill");
+    assert!(!published.join(".tink-source.json").exists());
+    assert!(!published.join(".tink-skillset.json").exists());
+    assert_eq!(
+        fs::metadata(published.join("run.sh"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o111,
+        0o111
+    );
+    ws.cmd(&project)
+        .args(["skill", "promote", "demo-skill"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Unchanged"));
+
+    ws.cmd(&target)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    ws.cmd(&target)
+        .args(["skill", "add", "demo-skill"])
+        .assert()
+        .success();
+    assert!(
+        Workspace::skill_path(&target, "demo-skill")
+            .join("SKILL.md")
+            .is_file()
+    );
+}
+
+#[test]
+fn h16_skill_promote_refuses_divergence_until_replace() {
+    let ws = Workspace::new();
+    let project = ws.project("source");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    let source = Workspace::skill_path(&project, "demo-skill");
+    write_skill(&source, "demo-skill", "project payload");
+    ws.cmd(&project)
+        .args(["skill", "promote", "demo-skill"])
+        .assert()
+        .success();
+    write_skill(
+        ws.library_skill("demo-skill").as_path(),
+        "demo-skill",
+        "different library payload",
+    );
+    let before = fs::read_to_string(ws.library_skill("demo-skill").join("SKILL.md")).unwrap();
+
+    ws.cmd(&project)
+        .args(["skill", "promote", "demo-skill"])
+        .assert()
+        .code(3)
+        .stderr(
+            predicate::str::contains("Source digest:")
+                .and(predicate::str::contains("Destination digest:"))
+                .and(predicate::str::contains("--replace")),
+        );
+    assert_eq!(
+        fs::read_to_string(ws.library_skill("demo-skill").join("SKILL.md")).unwrap(),
+        before
+    );
+    ws.cmd(&project)
+        .args(["skill", "promote", "demo-skill", "--replace"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Replaced"));
+    assert!(
+        fs::read_to_string(ws.library_skill("demo-skill").join("SKILL.md"))
+            .unwrap()
+            .contains("project payload")
+    );
+}
+
+#[test]
+fn h17_skill_promote_rejects_malformed_receipt_before_library_write() {
+    let ws = Workspace::new();
+    let project = ws.project("source");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    let source = Workspace::skill_path(&project, "demo-skill");
+    write_skill(&source, "demo-skill", "project payload");
+    fs::write(source.join(".tink-source.json"), "not JSON").unwrap();
+
+    ws.cmd(&project)
+        .args(["skill", "promote", "demo-skill"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Invalid provenance JSON"));
+    assert!(!ws.library_skill("demo-skill").exists());
+}
+
+#[test]
 fn h9_completion_offers_current_library_matches_without_creating_home() {
     let ws = Workspace::new();
     let project = ws.project("app");

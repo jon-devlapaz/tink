@@ -46,6 +46,7 @@ top-level `add` / `check` / `refresh` aliases. CLI binary updates use top-level
 | `tink library list` | List standalone skill names in the library; receipt-backed skillset roots are excluded |
 | `tink skill list --library` | Compatibility alias for `tink library list` |
 | `tink skill harvest` | Copy complete skill trees from known harness roots into the library (create-only; no project writes) |
+| `tink skill promote <name> [--replace]` | Publish one validated standalone project skill to the library as a receipt-free payload; divergent library content requires `--replace` |
 | `tink skill check` | Validate project skills; no network; no writes |
 | `tink skill lock [--source <name=source>]` | Record the installed project skills in `.tink/skills.toml` and `.tink/skills.lock` |
 | `tink skill sync` | Restore the locked project skills from their typed sources |
@@ -118,6 +119,14 @@ Ids are stable. Tests must name or comment the id they prove.
 | A14 | `skill add` regular executable and non-executable files | Preserves executable semantics in project and library using portable `0o755`/`0o644` modes while stripping special bits and umask-only variation |
 | A15 | `skill add` a tree with two distinct non-UTF-8 Unix filenames | On filesystems that admit opaque names, preserves both names and their distinct contents in project and library; macOS/APFS may reject the fixture before Tink writes |
 | A16 | `skill add` a standalone-looking source with a regular or dangling `.tink-skillset.json` entry | Exit ≠ 0 before project, home, library, or catalog creation; direct the user to `tink skillset add NAME` |
+
+### Standalone promotion
+
+| Id | Action | Expect |
+|---|---|---|
+| H15 | `skill promote NAME` for a valid project standalone skill | Creates a receipt-free library payload, reports its digest, preserves executable modes, and a later `skill add NAME` installs it through the normal managed path |
+| H16 | `skill promote NAME` when the library payload differs | Exit 3 with source/destination digests and the exact `--replace` opt-in; neither tree changes; `--replace` atomically updates only that library entry |
+| H17 | `skill promote NAME` with a malformed project source receipt | Exit ≠ 0 before staging or library publication; the existing project and library remain unchanged |
 
 ### Remote add
 
