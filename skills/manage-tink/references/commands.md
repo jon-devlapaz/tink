@@ -5,10 +5,8 @@ form for add, list, read, check, refresh, and remove.
 
 | Intent | Command |
 |---|---|
-| Safe init | `tink init --no-zen --no-tink-skills` |
-| Init + ZEN | `tink init --with-zen --no-tink-skills` |
-| Init + tink-skills | `tink init --no-zen --with-tink-skills` |
-| Init + both | `tink init --with-zen --with-tink-skills` |
+| Safe init | `tink init --no-tink-skills` |
+| Init + tink-skills | `tink init --with-tink-skills` |
 | Init without embedded manage-tink | add `--no-manage-tink` |
 | Add one skill | `tink skill add SOURCE` |
 | Add from a GitHub skill tree URL | `tink skill add https://github.com/OWNER/REPO/tree/REF/PATH` |
@@ -66,7 +64,8 @@ form for add, list, read, check, refresh, and remove.
   deletes the project skill directory and drops that name from the by-project
   catalog; it does not prune the library. `destroy` removes
   `.agents/skills/`, removes `.agents/` only when it is then empty, and drops
-  this project's catalog entry. It preserves `AGENTS.md`, `ZEN.md`, unrelated
+  this project's catalog entry. It preserves files outside `.agents/`
+  (including `AGENTS.md`), unrelated
   `.agents/` siblings, library trees, and other projects' catalog rows.
   Project skill overwrites are still refused.
 - Project lockfiles use version 2 tree digests with unambiguous entry framing,

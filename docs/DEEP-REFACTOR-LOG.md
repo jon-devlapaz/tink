@@ -168,7 +168,7 @@ old evidence.
 - **Scope / acceptance boundary:** Replace historical phase notes in
   `docs/ARCHITECTURE.md` and `docs/TESTING.md` with current owner, authority, command
   flow, sensor, and delivery-boundary maps. Change no production or workflow behavior.
-- **Baseline:** A source-restricted reader using only `ZEN.md`, `ARCHITECTURE.md`, and
+- **Baseline:** A source-restricted reader using only `ARCHITECTURE.md` and
   `TESTING.md` scored 0/6 supported answers. It could not identify receipt ownership,
   project/library authority, either complete add path, collision/cache sensors, or the
   automated release boundary.

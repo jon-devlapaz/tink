@@ -17,7 +17,7 @@ Replace that parser with `semver = "1.0"`.
 
 ## Requirements
 
-Per [`ZEN.md`](../ZEN.md): delete the custom parser; keep existing
+Delete the custom parser; keep existing
 user-facing error strings and the current `update_binary` comparison
 shape (equal → already latest, less → refuse downgrade, greater →
 download).

@@ -114,8 +114,9 @@ manifest/lock pairs.
 
 `tink destroy` preflights catalog cleanup before deleting project state. It removes
 only `.agents/skills/`, removes `.agents/` if that directory is then empty, and drops
-the owned by-project catalog entry. It preserves `AGENTS.md`, `ZEN.md`, unrelated
-`.agents/` siblings, the library, and other projects' catalog entries.
+the owned by-project catalog entry. It preserves files outside `.agents/`
+(including `AGENTS.md`), unrelated `.agents/` siblings, the library, and other
+projects' catalog entries.
 
 ## Explicit operating boundary
 

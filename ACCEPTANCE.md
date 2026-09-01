@@ -39,7 +39,7 @@ top-level `add` / `check` / `refresh` aliases. CLI binary updates use top-level
 
 | Command | Meaning |
 |---|---|
-| `tink init` | Create `.agents/skills/`; install `manage-tink` by default; optional ZEN + tink-skills; ensure `~/.tink` |
+| `tink init` | Create `.agents/skills/`; write `AGENTS.md` if missing; install `manage-tink` by default; optional tink-skills; ensure `~/.tink` |
 | `tink skill add <source> [--skill <name-or-path>]` | Install one local path, public GitHub skill, GitHub skill tree URL, or library skill by name; remote selectors may be unique names or repository-relative paths |
 | `tink skill list` | List project skills under `.agents/skills/` (read-only) |
 | `tink skill list --catalog` | List offline by-project catalog (`project`, `root`, `skill` TSV) |
@@ -60,7 +60,7 @@ top-level `add` / `check` / `refresh` aliases. CLI binary updates use top-level
 | `tink skillset remove <name>-skillset` | Delete only the installed project skillset; preserve its definition and library copy |
 | `tink inspect <GITHUB_URL>` | Inspect skills and source-defined skillsets in a public GitHub URL without writing project or home state |
 | `tink update` | Replace this binary with a newer verified public GitHub Release (requires `curl` + `tar`) |
-| `tink destroy [--yes]` | Remove `.agents/skills/` and an empty `.agents/`; preserve `AGENTS.md`, `ZEN.md`, unrelated `.agents/` siblings, and the library; drop this project's catalog entry |
+| `tink destroy [--yes]` | Remove `.agents/skills/` and an empty `.agents/`; preserve files outside `.agents/` (including `AGENTS.md`), unrelated `.agents/` siblings, and the library; drop this project's catalog entry |
 
 ## On-disk contracts
 
@@ -87,9 +87,9 @@ Ids are stable. Tests must name or comment the id they prove.
 |---|---|---|
 | I1 | `init` in empty project | Creates `.agents/skills/` as real directories (not symlinks) |
 | I2 | `init` when `.agents` is a symlink | Exit ≠ 0; mentions symlink; creates nothing unsafe |
-| I3 | `init` (non-interactive / `--no-zen --no-tink-skills`) | Does **not** write `AGENTS.md`, `ZEN.md`, or `.github/workflows/*` (may still install `manage-tink`) |
+| I3 | `init` (non-interactive / `--no-tink-skills`) | Does **not** write `ZEN.md` or `.github/workflows/*` (may still install `manage-tink` and `AGENTS.md`) |
 | I4 | `init` with `TINK_HOME` set | Creates home root + `layout.json` + `catalog/by-project/` + `skills/` |
-| I5 | `init --with-zen` | Writes `ZEN.md` and an `AGENTS.md` that references it |
+| I5 | `init` when `AGENTS.md` is absent | Writes `AGENTS.md` stating that Tink manages skills under `.agents/skills/`; a later `init` leaves an existing `AGENTS.md` byte-identical |
 | I6 | `init` (default) | Installs `.agents/skills/manage-tink/`; catalogs `manage-tink`; copies tree into library at `skills/manage-tink/` |
 | I7 | `init --no-manage-tink` | Does **not** install `manage-tink` |
 | I8 | `init` with relative `TINK_HOME` (e.g. `../home`) from project cwd | Exit 0; home is the absolutized sibling path (not nested under the project); stdout shows an absolute home path |
@@ -218,7 +218,6 @@ Ids are stable. Tests must name or comment the id they prove.
 | L1 | `skill list` after `init` | Exit 0; stdout includes `manage-tink` |
 | L2 | `skill list` without `.agents/skills` | Exit ≠ 0 |
 | L3 | `skill list --catalog` after init+add | Exit 0; header `project\\troot\\tskill` plus three-column TSV rows for cataloged skills |
-| L4 | `skill list` when `ZEN.md` exists without `AGENTS.md` reference | Exit 0; lists skills; warns on stderr about ZEN/AGENTS; `skill check` still fails |
 | L5 | `skill list --stash` or `skill list --home` | Exit ≠ 0; stderr mentions the flag or unexpected argument (removed in 0.3.0; use `--library` / `--catalog`) |
 | L6 | `skill list --catalog` with valid and malformed project metadata | Exit 0; lists valid rows and omits malformed entries |
 | L7 | Insert a nested symlink into an installed standalone skill, then run `skill list` and `skill check` | Both exit ≠ 0 and mention the symlink; the installed tree is untouched |
@@ -315,7 +314,7 @@ Ids are stable. Tests must name or comment the id they prove.
 
 | Id | Action | Expect |
 |---|---|---|
-| D1 | `destroy --yes` after `init --with-zen` (extra skill allowed) | Removes `.agents/skills/` and the now-empty `.agents/`; preserves `ZEN.md` and `AGENTS.md` byte-for-byte; leaves library + `layout.json` intact; drops this project's catalog entry |
+| D1 | `destroy --yes` after `init` (extra skill allowed) | Removes `.agents/skills/` and the now-empty `.agents/`; preserves `AGENTS.md` byte-for-byte; leaves library + `layout.json` intact; drops this project's catalog entry |
 | D2 | `destroy` without `--yes` (non-TTY) | Exit ≠ 0; refuses without confirmation; project files unchanged |
 | D3 | `destroy --yes` when `.agents` is a symlink | Exit ≠ 0; mentions symlink |
 | D4 | `destroy --yes` when `$TINK_HOME/catalog` is a symlink | Exit ≠ 0; mentions the symlink; project scaffolding and external catalog target remain byte-identical |

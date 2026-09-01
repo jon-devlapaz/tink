@@ -19,7 +19,7 @@ exit codes, and messages do not change.
 
 ## Authority and constraints
 
-- Follow [`ZEN.md`](../ZEN.md): smallest complete change; do not add a
+- Keep the change small and complete; do not add a
   `Home` context type, thread-local, or extra env var.
 - Reuse the existing house pattern: `_at(home: Option<&Path>, …)` for
   helpers that touch inventory. Keep a thin `foo()` → `foo_at(None, …)`

@@ -44,7 +44,7 @@ impl Workspace {
         let bootstrap = self.root.join("inventory-bootstrap");
         fs::create_dir_all(&bootstrap).expect("inventory bootstrap project");
         self.cmd(&bootstrap)
-            .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+            .args(["init", "--no-tink-skills", "--no-manage-tink"])
             .assert()
             .success();
     }
@@ -297,10 +297,9 @@ fn i3_init_does_not_write_product_bundles() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills"])
+        .args(["init", "--no-tink-skills"])
         .assert()
         .success();
-    assert!(!project.join("AGENTS.md").exists());
     assert!(!project.join("ZEN.md").exists());
     assert!(!project.join(".github").exists());
 }
@@ -320,17 +319,28 @@ fn i4_init_ensures_inventory_root() {
 }
 
 #[test]
-fn i5_init_with_zen_writes_agents_reference() {
+fn i5_init_writes_agents_md_create_only() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--with-zen", "--no-tink-skills"])
+        .args(["init", "--no-tink-skills"])
         .assert()
-        .success();
-    assert!(project.join("ZEN.md").is_file());
-    let agents = fs::read_to_string(project.join("AGENTS.md")).unwrap();
-    assert!(agents.contains("[ZEN.md](ZEN.md)"));
-    ws.cmd(&project).args(["skill", "check"]).assert().success();
+        .success()
+        .stdout(predicate::str::contains("Created AGENTS.md"));
+    let agents = project.join("AGENTS.md");
+    let body = fs::read_to_string(&agents).unwrap();
+    assert!(body.contains("Tink"), "{body}");
+    assert!(body.contains(".agents/skills/"), "{body}");
+    assert_eq!(body.lines().filter(|line| !line.is_empty()).count(), 1);
+
+    let existing = "# Keep this guidance\n";
+    fs::write(&agents, existing).unwrap();
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created AGENTS.md").not());
+    assert_eq!(fs::read_to_string(&agents).unwrap(), existing);
 }
 
 #[test]
@@ -372,7 +382,7 @@ fn i8_relative_tink_home_resolves_absolute_not_nested() {
         .current_dir(&project)
         .env("TINK_HOME", "../tink-home")
         .env("HOME", root.join("unused-unix-home"))
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -393,11 +403,12 @@ fn i8_relative_tink_home_resolves_absolute_not_nested() {
 fn i9_init_rerun_is_idempotent() {
     let ws = Workspace::new();
     let project = ws.project("app");
-    let args = ["init", "--no-zen", "--no-tink-skills"];
+    let args = ["init", "--no-tink-skills"];
 
     ws.cmd(&project).args(args).assert().success();
 
     let contract_files = [
+        project.join("AGENTS.md"),
         project.join(".agents").join("skills").join("README.md"),
         Workspace::skill_path(&project, "manage-tink").join("SKILL.md"),
         ws.catalog_meta("app"),
@@ -435,7 +446,7 @@ fn i10_init_bundle_failure_is_resumable() {
     commit_all(&remote, "add skill-scout");
 
     let redirect = github_redirect(&remote, "https://github.com/jon-devlapaz/tink-skills.git");
-    let args = ["init", "--no-zen", "--with-tink-skills"];
+    let args = ["init", "--with-tink-skills"];
 
     let mut first = ws.cmd(&project);
     first.args(args);
@@ -502,7 +513,7 @@ fn i11_init_refuses_unrelated_existing_tink_home_without_writes() {
         .unwrap()
         .current_dir(&project)
         .env("TINK_HOME", ".")
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("Tink home").and(predicate::str::contains("non-empty")));
@@ -524,7 +535,7 @@ fn i12_init_resumes_marker_only_partial_inventory() {
     .unwrap();
 
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -656,7 +667,7 @@ fn a7_add_refuses_reserved_by_project_name() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     let source = ws.root.join("by-project");
@@ -679,11 +690,11 @@ fn a6_add_repairs_divergent_library_and_installs_project() {
     let app = ws.project("app");
     let other = ws.project("other");
     ws.cmd(&app)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     ws.cmd(&other)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -728,7 +739,7 @@ fn a6b_closed_warning_pipe_does_not_interrupt_completed_add() {
     let other = ws.project("other");
     for project in [&app, &other] {
         ws.cmd(project)
-            .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+            .args(["init", "--no-tink-skills", "--no-manage-tink"])
             .assert()
             .success();
     }
@@ -767,11 +778,11 @@ fn a8_add_uses_library_when_remote_tip_matches() {
     let app = ws.project("app");
     let other = ws.project("other");
     ws.cmd(&app)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     ws.cmd(&other)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -819,7 +830,7 @@ fn a13_add_uses_library_for_non_root_skill_without_cloning() {
     let second_project = ws.project("second");
     for project in [&first_project, &second_project] {
         ws.cmd(project)
-            .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+            .args(["init", "--no-tink-skills", "--no-manage-tink"])
             .assert()
             .success();
     }
@@ -873,7 +884,7 @@ fn a9_add_catalog_failure_is_resumable() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills"])
+        .args(["init", "--no-tink-skills"])
         .assert()
         .success();
 
@@ -934,7 +945,7 @@ fn a10_add_refuses_symlinked_skill_roots() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -977,7 +988,7 @@ fn a11_add_refuses_matching_project_target_symlink() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -1033,7 +1044,7 @@ fn a14_add_preserves_executable_permissions_in_project_and_library() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     let source = ws.root.join("executable-skill");
@@ -1067,7 +1078,7 @@ fn a15_add_preserves_distinct_non_utf8_unix_filenames() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     let source = ws.root.join("opaque-name-skill");
@@ -1146,7 +1157,7 @@ fn k1_skillset_add_installs_explicit_members_and_checks_digest() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -1614,7 +1625,7 @@ fn r13_add_github_skill_tree_url_writes_receipt_and_refreshes() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -1678,7 +1689,7 @@ fn r14_add_github_group_tree_url_refuses_without_writes() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -1719,7 +1730,7 @@ fn r15_add_github_tree_url_refuses_slash_containing_ref() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -1778,7 +1789,7 @@ fn r5_add_root_level_skill_writes_dot_path_check_and_refresh() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-manage-tink"])
+        .args(["init", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -1835,7 +1846,7 @@ fn r6_add_finds_unique_nested_remote_skill_by_name() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -1886,7 +1897,7 @@ fn r7_add_refuses_ambiguous_nested_skill_name_without_writes() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -1931,7 +1942,7 @@ fn r8_add_selects_nested_remote_skill_by_repository_path_and_refreshes() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -2000,7 +2011,7 @@ fn r9_cached_duplicate_does_not_bypass_remote_name_ambiguity() {
     let second_project = ws.project("second");
     for project in [&first_project, &second_project] {
         ws.cmd(project)
-            .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+            .args(["init", "--no-tink-skills", "--no-manage-tink"])
             .assert()
             .success();
     }
@@ -2056,7 +2067,7 @@ fn r10_mismatched_directory_name_does_not_create_false_name_ambiguity() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -2097,7 +2108,7 @@ fn r11_dot_path_selects_root_skill_when_name_is_ambiguous() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -2365,7 +2376,7 @@ fn m1_skill_verify_accepts_empty_manifest_for_empty_project() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     fs::create_dir_all(project.join(".tink")).unwrap();
@@ -2391,7 +2402,7 @@ fn m2_skill_lock_generates_manifest_and_lockfile() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     let source = project.join("fixture").join("reviewer");
@@ -2418,7 +2429,7 @@ fn m3_skill_sync_restores_missing_local_skill() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     let source = project.join("fixture").join("reviewer");
@@ -2448,7 +2459,7 @@ fn m4_skill_sync_restores_embedded_manage_tink() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--with-manage-tink"])
+        .args(["init", "--no-tink-skills", "--with-manage-tink"])
         .assert()
         .success();
     ws.cmd(&project).args(["skill", "lock"]).assert().success();
@@ -2473,7 +2484,7 @@ fn m5_skill_sync_keeps_missing_local_source_local() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     let source = project.join("owner").join("repo-shape");
@@ -2503,7 +2514,7 @@ fn m6_skill_verify_requires_manifest() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     ws.cmd(&project)
@@ -2518,7 +2529,7 @@ fn m7_skill_sync_rejects_late_bad_hash_before_any_publication() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     for name in ["alpha", "beta"] {
@@ -2572,7 +2583,7 @@ fn m8_skill_sync_preflights_late_library_refusal_before_publication() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     for name in ["alpha", "beta"] {
@@ -2621,7 +2632,7 @@ fn m9_legacy_lock_requires_relock_and_migrates_to_v2() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     fs::create_dir_all(project.join(".tink")).unwrap();
@@ -2849,44 +2860,11 @@ fn l5_skill_list_rejects_removed_stash_and_home_flags() {
 }
 
 #[test]
-fn l4_skill_list_warns_on_zen_without_agents_still_lists() {
-    let ws = Workspace::new();
-    let project = ws.project("app");
-    ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-manage-tink"])
-        .assert()
-        .success();
-    let source = ws.root.join("demo-skill");
-    write_skill(&source, "demo-skill", "listed despite zen warning");
-    ws.cmd(&project)
-        .args(["skill", "add", source.to_str().unwrap()])
-        .assert()
-        .success();
-    fs::write(project.join("ZEN.md"), "# Zen\n").unwrap();
-
-    ws.cmd(&project)
-        .args(["skill", "list"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("demo-skill"))
-        .stderr(predicate::str::contains(
-            "ZEN.md is not referenced by a regular AGENTS.md",
-        ));
-    ws.cmd(&project)
-        .args(["skill", "check"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains(
-            "ZEN.md is not referenced by a regular AGENTS.md",
-        ));
-}
-
-#[test]
 fn l7_skill_list_and_check_reject_nested_symlink_drift() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     let source = ws.root.join("demo-skill");
@@ -2968,7 +2946,7 @@ fn l10_catalog_distinguishes_projects_with_the_same_basename() {
     fs::create_dir_all(&second).unwrap();
     for project in [&first, &second] {
         ws.cmd(project)
-            .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+            .args(["init", "--no-tink-skills", "--no-manage-tink"])
             .assert()
             .success();
     }
@@ -3024,7 +3002,7 @@ fn rd1_read_local_standalone_skill() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     add_local_skill(&ws, &project, "demo-skill");
@@ -3050,7 +3028,7 @@ fn rd2_read_raw_prints_only_description() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     add_local_skill(&ws, &project, "demo-skill");
@@ -3079,7 +3057,7 @@ fn rd4_read_remote_receipt_fields() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     add_local_skill(&ws, &project, "remote-skill");
@@ -3110,7 +3088,7 @@ fn rd5_read_library_uses_library_path() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     add_local_skill(&ws, &project, "demo-skill");
@@ -3133,11 +3111,11 @@ fn rd6_read_missing_is_actionable_and_hints_library() {
     let donor = ws.project("donor");
     let app = ws.project("app");
     ws.cmd(&donor)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     ws.cmd(&app)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     ws.cmd(&app)
@@ -3162,7 +3140,7 @@ fn rd7_read_missing_frontmatter_fails() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     add_local_skill(&ws, &project, "demo-skill");
@@ -3184,7 +3162,7 @@ fn rd8_read_skillset_root_refuses() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     let root = Workspace::skill_path(&project, "review-skillset");
@@ -3211,7 +3189,7 @@ fn rd9_read_library_skillset_root_refuses() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     let root = ws.library_skill("bundle-skillset");
@@ -3237,7 +3215,7 @@ fn rd10_read_refuses_nested_symlink() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     add_local_skill(&ws, &project, "demo-skill");
@@ -3259,7 +3237,7 @@ fn rd11_read_preserves_project_and_home_trees_without_external_commands() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     add_local_skill(&ws, &project, "demo-skill");
@@ -3286,7 +3264,7 @@ fn rd12_closed_stdout_does_not_panic_or_exit_101() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     add_local_skill(&ws, &project, "demo-skill");
@@ -3330,7 +3308,7 @@ fn rd14_read_does_not_find_skillset_member_by_bare_name() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     let root = Workspace::skill_path(&project, "review-skillset");
@@ -3355,7 +3333,7 @@ fn h1_skill_list_library_includes_archived_names() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     let source = ws.root.join("demo-skill");
@@ -3405,7 +3383,7 @@ fn h2_skill_add_library_installs_into_project() {
     let donor = ws.project("donor");
     let app = ws.project("app");
     ws.cmd(&donor)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     let source = ws.root.join("stash-skill");
@@ -3417,7 +3395,7 @@ fn h2_skill_add_library_installs_into_project() {
     assert!(ws.library_skill("stash-skill").join("SKILL.md").is_file());
 
     ws.cmd(&app)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     ws.cmd(&app)
@@ -3440,7 +3418,7 @@ fn h3_skill_add_library_missing_refuses_without_github() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     ws.cmd(&project)
@@ -3459,7 +3437,7 @@ fn h4_skill_add_library_refuses_overwrite_when_diverged() {
     let donor = ws.project("donor");
     let app = ws.project("app");
     ws.cmd(&donor)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     let source = ws.root.join("demo-skill");
@@ -3470,7 +3448,7 @@ fn h4_skill_add_library_refuses_overwrite_when_diverged() {
         .success();
 
     ws.cmd(&app)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     write_skill(
@@ -3621,7 +3599,7 @@ fn h8_skill_harvest_skips_tink_home_and_unsafe_trees() {
 
     ws.cmd(&project)
         .env("HOME", &home)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     write_skill(
@@ -3704,7 +3682,7 @@ fn h15_skill_promote_creates_receipt_free_payload_and_installs_normally() {
     let project = ws.project("source");
     let target = ws.project("target");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     let source = Workspace::skill_path(&project, "demo-skill");
@@ -3744,7 +3722,7 @@ fn h15_skill_promote_creates_receipt_free_payload_and_installs_normally() {
         .stdout(predicate::str::contains("Unchanged"));
 
     ws.cmd(&target)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     ws.cmd(&target)
@@ -3763,7 +3741,7 @@ fn h16_skill_promote_refuses_divergence_until_replace() {
     let ws = Workspace::new();
     let project = ws.project("source");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     let source = Workspace::skill_path(&project, "demo-skill");
@@ -3809,7 +3787,7 @@ fn h17_skill_promote_rejects_malformed_receipt_before_library_write() {
     let ws = Workspace::new();
     let project = ws.project("source");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     let source = Workspace::skill_path(&project, "demo-skill");
@@ -3904,7 +3882,7 @@ fn h11_receipt_bearing_library_root_is_not_a_standalone_skill() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -3937,7 +3915,7 @@ fn h12_standalone_add_preserves_receipt_bearing_library_root() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -3979,7 +3957,7 @@ fn h13_exact_cache_match_does_not_publish_skillset_as_standalone() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -4443,7 +4421,7 @@ fn p9_refresh_manage_tink_installs_missing_embedded_copy() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -4516,7 +4494,7 @@ fn p12_refresh_manage_tink_refuses_remote_provenance_collision() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -4548,7 +4526,7 @@ fn p13_refresh_manage_tink_refuses_remote_library_collision_when_project_is_miss
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -4603,7 +4581,7 @@ fn p14_refresh_manage_tink_preserves_remote_library_collision_for_existing_proje
 
     let remote_project = ws.project("remote");
     ws.cmd(&remote_project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     let remote = ws.root.join("remote-existing-manage-tink");
@@ -4653,7 +4631,7 @@ fn d1_destroy_yes_removes_agents_and_preserves_guidance() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--with-zen", "--no-tink-skills"])
+        .args(["init", "--no-tink-skills"])
         .assert()
         .success();
     let source = ws.root.join("extra-skill");
@@ -4663,9 +4641,6 @@ fn d1_destroy_yes_removes_agents_and_preserves_guidance() {
         .assert()
         .success();
     assert!(project.join(".agents").is_dir());
-    assert!(project.join("ZEN.md").is_file());
-    assert!(project.join("AGENTS.md").is_file());
-    let zen_before = fs::read(project.join("ZEN.md")).unwrap();
     let agents_before = fs::read(project.join("AGENTS.md")).unwrap();
     assert!(ws.inventory.join("layout.json").is_file());
     ws.assert_cataloged("app", "manage-tink");
@@ -4677,7 +4652,6 @@ fn d1_destroy_yes_removes_agents_and_preserves_guidance() {
         .success();
 
     assert!(!project.join(".agents").exists());
-    assert_eq!(fs::read(project.join("ZEN.md")).unwrap(), zen_before);
     assert_eq!(fs::read(project.join("AGENTS.md")).unwrap(), agents_before);
     assert!(ws.inventory.join("layout.json").is_file());
     assert!(
@@ -4763,7 +4737,7 @@ fn d5_destroy_preserves_unrelated_agents_siblings() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills"])
+        .args(["init", "--no-tink-skills"])
         .assert()
         .success();
     let foreign = project.join(".agents/foreign-config.json");
@@ -5080,7 +5054,7 @@ fn x7_remove_refuses_symlinked_catalog_without_external_or_project_writes() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     let source = ws.root.join("demo-skill");
@@ -5145,14 +5119,14 @@ fn s2_library_skill_is_not_project_live_until_explicitly_added() {
     let ws = Workspace::new();
     let bootstrap = ws.project("bootstrap");
     ws.cmd(&bootstrap)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     write_skill(&ws.library_skill("library-only"), "library-only", "body");
 
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
     ws.cmd(&project)
@@ -5408,7 +5382,7 @@ fn v4_closed_stdout_does_not_panic_or_exit_101() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 
@@ -5442,7 +5416,7 @@ fn v7_failure_paths_escape_terminal_controls() {
     let inventory = ws.root.join("inventory-\u{1b}\nunsafe");
     ws.cmd(&project)
         .env("TINK_HOME", &inventory)
-        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
         .assert()
         .success();
 

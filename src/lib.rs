@@ -26,7 +26,6 @@ mod skills;
 mod skillsets;
 mod sources;
 mod style;
-mod templates;
 mod update;
 
 use clap::{Parser, Subcommand};
@@ -76,12 +75,6 @@ pub struct Cli {
 pub enum Command {
     /// Create `.agents/skills/` and ensure the home inventory root exists
     Init {
-        /// Add ZEN.md and reference it from AGENTS.md
-        #[arg(long, group = "zen")]
-        with_zen: bool,
-        /// Skip ZEN.md
-        #[arg(long, group = "zen")]
-        no_zen: bool,
         /// Add skill-scout and triangulate-me from GitHub (tink-skills)
         #[arg(long = "with-tink-skills", group = "tink_skills")]
         with_tink_skills: bool,
@@ -298,15 +291,12 @@ pub fn run(cli: Cli, cwd: PathBuf) -> ExitCode {
 fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
     match cli.command {
         Command::Init {
-            with_zen,
-            no_zen,
             with_tink_skills,
             no_tink_skills,
             with_manage_tink,
             no_manage_tink,
         } => dispatch_init(
             &cwd,
-            flag_tri(with_zen, no_zen),
             flag_tri(with_tink_skills, no_tink_skills),
             flag_tri(with_manage_tink, no_manage_tink),
         ),
@@ -539,7 +529,6 @@ fn dispatch_skillset(cwd: &Path, command: SkillsetCommand) -> Result<(), Error> 
 
 fn dispatch_init(
     cwd: &Path,
-    with_zen: Option<bool>,
     with_tink_skills: Option<bool>,
     with_manage_tink: Option<bool>,
 ) -> Result<(), Error> {
@@ -547,7 +536,6 @@ fn dispatch_init(
     let report = init::init_project(
         cwd,
         InitOptions {
-            with_zen,
             with_tink_skills,
             with_manage_tink,
         },
@@ -565,13 +553,8 @@ fn dispatch_init(
             style.accent(report.skills_path.display())
         );
     }
-    if report.zen_written {
-        println!(
-            "{} {} {}",
-            style.success("Added"),
-            style.rainbow("ZEN.md"),
-            style.accent("maintainability principles")
-        );
+    if report.agents_written {
+        println!("{} {}", style.success("Created"), style.accent("AGENTS.md"));
     }
     if let Some(skill) = &report.manage_tink_added {
         print_init_skill(&style, skill)?;
@@ -674,11 +657,7 @@ fn dispatch_skill_read(cwd: &Path, name: &str, library: bool, raw: bool) -> Resu
 
 fn dispatch_skill_list(cwd: &Path) -> Result<(), Error> {
     let out = CliStyle::auto_stdout();
-    let err = CliStyle::auto_stderr();
     let skills = check::load_project_skills(cwd)?;
-    if let Err(zen_err) = check::check_zen_coupling(cwd) {
-        eprintln!("{}", err.warn(zen_err.to_string()));
-    }
     if skills.is_empty() {
         let (skillsets, _) = skillsets::project_counts(cwd)?;
         if skillsets > 0 {

@@ -4,7 +4,6 @@ use std::path::Path;
 
 use crate::add;
 use crate::catalog;
-use crate::check;
 use crate::error::Error;
 use crate::library;
 use crate::paths::{map_io, refuse_symlink};
@@ -85,7 +84,6 @@ pub(crate) fn refresh_manage_tink_at(
     home: Option<&Path>,
     project_root: &Path,
 ) -> Result<RefreshOutcome, Error> {
-    check::check_zen_coupling(project_root)?;
     let agents = crate::home::project_agents_path(project_root);
     let skills_root = crate::home::project_skills_path(project_root);
     let target = skills_root.join("manage-tink");
@@ -184,7 +182,6 @@ mod tests {
             Some(&home.home),
             &project,
             crate::init::InitOptions {
-                with_zen: Some(false),
                 with_tink_skills: Some(false),
                 with_manage_tink: Some(false),
             },

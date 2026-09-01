@@ -93,7 +93,7 @@ the stated number of fixed-size files (`x` bytes for breadth, `y` bytes for dept
 depth fans out 64 files into each of 64 directories). Run:
 
 ```console
-tink init --with-zen --no-manage-tink --no-tink-skills
+tink init --no-manage-tink --no-tink-skills
 tink skill add SOURCE                    # repeat once per source
 tink skill check
 tink skill lock --source NAME=SOURCE     # repeat --source for every skill

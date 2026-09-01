@@ -140,7 +140,7 @@ publication.
 ### Step 7: Prove the Post-state
 
 - After `init`, run `tink skill check`, project/catalog/library listings, and
-  verify the requested optional guidance or bundle state.
+  verify `AGENTS.md` plus the requested optional bundle state.
 - After add, promotion, refresh, or sync, run `tink skill check` and verify the
   affected project, catalog, and library entries. After sync, also run
   `tink skill verify`.
@@ -156,7 +156,7 @@ publication.
   refreshing embedded `manage-tink`, run project/catalog/library listings plus
   `tink skill check`; check compares the live payload with the active binary.
 - After `destroy`, confirm `.agents/skills/` is gone, `.agents/` is gone only if
-  it became empty, `ZEN.md` and `AGENTS.md` are preserved, unrelated `.agents/`
+  it became empty, files outside `.agents/` (including `AGENTS.md`) are preserved, unrelated `.agents/`
   siblings remain, and the project has no catalog rows; do not run `skill check`.
 
 **Expected:** The proof matching the mutation is reported to the user.
@@ -193,8 +193,8 @@ from the mutation command alone.
 
 | User said… | Authorizes… |
 |---|---|
-| Set up / init Tink (no extras) | `tink init --no-zen --no-tink-skills` (embeds `manage-tink`) |
-| …and ZEN / tink-skills / skip manage-tink | Only the matching `--with-*` / `--no-*` flags |
+| Set up / init Tink (no extras) | `tink init --no-tink-skills` (embeds `manage-tink`) |
+| …and tink-skills / skip manage-tink | Only the matching `--with-*` / `--no-*` flags |
 | Add / list / read / check / refresh / remove … | The matching `tink skill …` command |
 | List catalog | `tink skill list --catalog` |
 | List library / promote from library | `tink library list` (`tink skill list --library` compatibility alias) / `tink skill add NAME` |
@@ -211,7 +211,7 @@ from the mutation command alone.
 | Update the Tink binary | `tink update` only; refreshing embedded `manage-tink` requires separate authority |
 | Remove managed project skills / destroy Tink setup | `tink destroy` (TTY) or `tink destroy --yes` (scripts); guidance and unrelated `.agents/` siblings are preserved |
 
-"Set up Tink" does **not** authorize ZEN, tink-skills, refreshing embedded
+"Set up Tink" does **not** authorize tink-skills, refreshing embedded
 `manage-tink`, or destroy.
 
 ## Ownership (always)
@@ -229,8 +229,8 @@ from the mutation command alone.
   - `tink skillset remove NAME-skillset` → only the receipt-backed project
     skillset tree; preserves its catalog definition and library copy
   - `tink destroy` → `.agents/skills/`, then `.agents/` only if empty, and
-    drops this project's by-project catalog entry; preserves `ZEN.md`,
-    `AGENTS.md`, and unrelated `.agents/` siblings
+    drops this project's by-project catalog entry; preserves files outside
+    `.agents/` (including `AGENTS.md`) and unrelated `.agents/` siblings
 - Treat local skills as non-refreshable unless they carry a valid receipt.
 - Never execute code from a skill while Tink manages it.
 - Library (`~/.tink/skills/`) is **not** an agent discovery root; use

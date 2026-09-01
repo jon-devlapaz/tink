@@ -15,8 +15,6 @@ const BLUE: Ansi = Color::Ansi(AnsiColor::Blue);
 const MAGENTA: Ansi = Color::Ansi(AnsiColor::Magenta);
 const WHITE: Ansi = Color::Ansi(AnsiColor::White);
 
-const RAINBOW: [Ansi; 6] = [RED, YELLOW, GREEN, CYAN, BLUE, MAGENTA];
-
 /// Clap help/error styles.
 pub const CLAP_STYLES: Styles = Styles::styled()
     .header(Style::new().fg_color(Some(CYAN)).effects(Effects::BOLD))
@@ -116,28 +114,6 @@ impl CliStyle {
         )
     }
 
-    /// Per-character rainbow (init ZEN tease). Plain text when styling is off.
-    pub fn rainbow(self, text: impl std::fmt::Display) -> String {
-        let text = text.to_string();
-        if !self.enabled {
-            return text;
-        }
-        let mut out = String::with_capacity(text.len() * 12);
-        let mut color_i = 0usize;
-        for ch in text.chars() {
-            if ch.is_whitespace() {
-                out.push(ch);
-                continue;
-            }
-            let style = Style::new()
-                .fg_color(Some(RAINBOW[color_i % RAINBOW.len()]))
-                .effects(Effects::BOLD);
-            out.push_str(&format!("{}{}{}", style.render(), ch, style.render_reset()));
-            color_i += 1;
-        }
-        out
-    }
-
     /// Clickable terminal hyperlink (OSC 8). Plain label when styling is off.
     pub fn link(self, url: &str, text: impl std::fmt::Display) -> String {
         let label = text.to_string();
@@ -173,7 +149,6 @@ mod tests {
             style.skillset("engineering-skillset"),
             "engineering-skillset"
         );
-        assert_eq!(style.rainbow("ZEN.md"), "ZEN.md");
         assert_eq!(
             style.link("https://github.com/jon-devlapaz/tink-skills", "tink-skills"),
             "tink-skills"
@@ -196,10 +171,6 @@ mod tests {
         assert!(skillset.contains('\u{1b}'), "{skillset}");
         assert!(skill.contains("\u{1b}[35m"), "{skill}");
         assert!(skillset.contains("\u{1b}[34m"), "{skillset}");
-        let rainbow = style.rainbow("ZEN.md");
-        assert!(rainbow.contains('Z') && rainbow.contains('N'), "{rainbow}");
-        assert!(rainbow.contains('\u{1b}'), "{rainbow}");
-        assert_ne!(rainbow, "ZEN.md");
         let link = style.link("https://github.com/jon-devlapaz/tink-skills", "tink-skills");
         assert!(link.contains("tink-skills"), "{link}");
         assert!(

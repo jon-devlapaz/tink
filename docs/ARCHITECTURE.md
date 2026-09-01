@@ -37,7 +37,7 @@ owners and should not carry architectural decisions.
 | Project workflows | `init.rs`, `add.rs`, `check.rs`, `read.rs`, `refresh.rs`, `remove.rs`, `harvest.rs` | Bootstrap, standalone skill lifecycle, and read-only local skill inspection. |
 | Skillset workflow | `skillsets.rs` | Canonical names, definition validation, staged install/refresh, receipt validation, grouped listing, removal, and project-to-library mirroring. |
 | Read-only source inspection | `inspect.rs` | GitHub structure inspection and source-defined skillset inference; no project or home writes. |
-| Supporting workflows | `destroy.rs`, `update.rs`, `manage_tink.rs`, `templates.rs` | Project teardown, binary update, embedded `manage-tink`, and init templates/defaults. |
+| Supporting workflows | `destroy.rs`, `update.rs`, `manage_tink.rs` | Project teardown, binary update, and embedded `manage-tink`. |
 
 `lib.rs` owns the public command vocabulary. There is no `skillset check` or
 `skillset status`: `skill check` validates both standalone and receipt-backed

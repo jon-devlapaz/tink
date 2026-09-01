@@ -16,13 +16,10 @@ pub struct DestroyReport {
 
 /// Remove this project's `.agents/skills/`, then drop its by-project catalog
 /// entry. An empty `.agents/` directory is removed, but unrelated siblings are
-/// preserved.
-/// `ZEN.md` and `AGENTS.md` are preserved because the current
-/// project layout has no durable proof that Tink created either file. Does not
-/// touch the home library. Catalog cleanup is preflighted before disk deletes;
-/// expected catalog refusals leave project files intact. Refuses symlinks.
-/// Requires `--yes` or an
-/// interactive `y` confirmation (default no).
+/// preserved. Files outside `.agents/` (including `AGENTS.md`) are untouched.
+/// Does not touch the home library. Catalog cleanup is preflighted before disk
+/// deletes; expected catalog refusals leave project files intact. Refuses
+/// symlinks. Requires `--yes` or an interactive `y` confirmation (default no).
 pub fn destroy_project(project_root: &Path, yes: bool) -> Result<DestroyReport, Error> {
     destroy_project_at(project_root, yes, None)
 }
@@ -126,9 +123,7 @@ mod tests {
         let home = temp.path().join("home");
         fs::create_dir_all(crate::home::project_skills_path(&project)).unwrap();
         let agents_body = "# Existing agent guidance\n";
-        let zen_body = "# Existing maintainability guidance\n";
         fs::write(project.join("AGENTS.md"), agents_body).unwrap();
-        fs::write(project.join("ZEN.md"), zen_body).unwrap();
         catalog::deposit_skill_at(Some(&home), &project, "alpha").unwrap();
 
         let report = destroy_project_at(&project, true, Some(&home)).unwrap();
@@ -138,17 +133,9 @@ mod tests {
             project.join("AGENTS.md").is_file(),
             "destroy removed pre-existing AGENTS.md"
         );
-        assert!(
-            project.join("ZEN.md").is_file(),
-            "destroy removed pre-existing ZEN.md"
-        );
         assert_eq!(
             fs::read_to_string(project.join("AGENTS.md")).unwrap(),
             agents_body
-        );
-        assert_eq!(
-            fs::read_to_string(project.join("ZEN.md")).unwrap(),
-            zen_body
         );
         assert_eq!(
             report.removed,

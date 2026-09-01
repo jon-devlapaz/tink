@@ -94,8 +94,9 @@ Non-interactive runs skip the optional bundle unless you pass
 Defaults after `init`:
 
 1. Creates `.agents/skills/`.
-2. Ensures `~/.tink` exists.
-3. Installs the embedded `manage-tink` skill.
+2. Writes `AGENTS.md` if it is missing, so agents know Tink manages skills here.
+3. Ensures `~/.tink` exists.
+4. Installs the embedded `manage-tink` skill.
 
 **Agents:** follow [`skills/manage-tink/SKILL.md`](skills/manage-tink/SKILL.md).
 The v1 command contract is [`ACCEPTANCE.md`](ACCEPTANCE.md).
@@ -230,8 +231,8 @@ tink skill add skill-name
 tink skill harvest
 tink skill list --catalog
 
-tink init --with-zen --with-tink-skills
-tink init --no-zen --no-tink-skills --no-manage-tink
+tink init --with-tink-skills
+tink init --no-tink-skills --no-manage-tink
 
 tink destroy --yes
 tink update
@@ -256,7 +257,7 @@ the library into the project. `skill remove` deletes the project skill
 directory and drops that name from the by-project catalog; it does not delete
 library trees. `destroy` removes `.agents/skills/`, removes `.agents/` only when
 it is then empty, and drops this project's catalog entry. It preserves
-`AGENTS.md`, `ZEN.md`, unrelated `.agents/` siblings, and all library trees.
+files outside `.agents/` (including `AGENTS.md`), unrelated `.agents/` siblings, and all library trees.
 
 Successful output goes to stdout; warnings and failures go to stderr. A closed
 stdout is normal pipeline termination (exit 0), while command and usage failures
@@ -275,7 +276,7 @@ cargo uninstall tink
 ```text
 .
 ├── ACCEPTANCE.md
-├── ZEN.md
+├── AGENTS.md
 ├── assets/
 ├── skills/           # embedded manage-tink (shipped with the binary)
 ├── src/
@@ -294,7 +295,7 @@ cargo test
 `~/.local/bin/tink`). It forces `TINK_HOME` to `~/.tink-test` (override with
 `TINK_TEST_HOME`) so dogfood does not touch `~/.tink`.
 
-See [ZEN.md](ZEN.md). Flag-level detail also lives in `tink --help` and
+Flag-level detail lives in `tink --help` and
 `ACCEPTANCE.md`.
 
 ## License

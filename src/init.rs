@@ -1,4 +1,4 @@
-//! Minimal project skill home: `.agents/skills/` (+ optional ZEN / tink-skills / manage-tink).
+//! Minimal project skill home: `.agents/skills/` (+ optional tink-skills / manage-tink).
 
 use std::io::{self, BufRead, IsTerminal};
 use std::path::{Path, PathBuf};
@@ -10,9 +10,14 @@ use crate::manage_tink;
 use crate::output;
 use crate::paths::{map_io, mkdir_p, require_directory, require_file};
 use crate::style::CliStyle;
-use crate::templates::{
-    self, TINK_SKILLS, TINK_SKILLS_SOURCE, ZEN, ZEN_REFERENCE, ZEN_REFERENCE_MARKER,
-};
+
+const TINK_SKILLS_SOURCE: &str = "jon-devlapaz/tink-skills";
+const TINK_SKILLS: &[&str] = &["skill-scout", "triangulate-me"];
+
+const AGENTS_FILENAME: &str = "AGENTS.md";
+const AGENTS_MD: &str = "\
+This project uses Tink to manage Agent Skills under `.agents/skills/`.
+";
 
 const SKILLS_README: &str = "\
 # Project skills
@@ -24,7 +29,6 @@ directory containing a `SKILL.md` file and any resources it needs.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct InitOptions {
     /// `None` = ask when interactive; default no when non-interactive.
-    pub with_zen: Option<bool>,
     pub with_tink_skills: Option<bool>,
     /// `None` = install manage-tink (default on).
     pub with_manage_tink: Option<bool>,
@@ -42,7 +46,7 @@ pub struct InitReport {
     pub skills_created: bool,
     pub inventory_home: PathBuf,
     pub inventory_created: bool,
-    pub zen_written: bool,
+    pub agents_written: bool,
     pub tink_skills_added: Vec<InstalledSkill>,
     pub manage_tink_added: Option<InstalledSkill>,
 }
@@ -74,80 +78,17 @@ pub fn opt_in(explicit: Option<bool>, question: &str, hint: Option<&str>) -> Res
     Ok(answer == "y" || answer == "yes")
 }
 
-/// Like [`opt_in`], but offers `r` to print embedded `ZEN.md` before deciding.
-fn opt_in_zen(explicit: Option<bool>) -> Result<bool, Error> {
-    if let Some(value) = explicit {
-        return Ok(value);
-    }
-    if !io::stdin().is_terminal() {
+fn write_agents_md(project_root: &Path) -> Result<bool, Error> {
+    let agents_file = project_root.join(AGENTS_FILENAME);
+    require_file(&agents_file)?;
+    if agents_file.exists() {
         return Ok(false);
     }
-    let style = CliStyle::auto_stdout();
-    let zen = style.rainbow("ZEN.md");
-    let r = style.rainbow("r");
-    let question = format!(
-        "{} ({})?",
-        style.warn("Add tink's maintainability principles"),
-        zen
-    );
-    let hint = format!("{r} = print {zen} without adding it");
-    let choices = format!("[{}/{}/{}] ", style.accent("y"), style.accent("N"), r);
-    loop {
-        output::stdout_line(format_args!("{hint}"))?;
-        output::stdout(format_args!("{question} {choices}"))?;
-        output::flush_stdout()?;
-        let mut line = String::new();
-        io::stdin()
-            .lock()
-            .read_line(&mut line)
-            .map_err(|e| Error::msg(format!("prompt: {e}")))?;
-        let answer = line.trim().to_ascii_lowercase();
-        match answer.as_str() {
-            "y" | "yes" => return Ok(true),
-            "r" | "read" => {
-                output::stdout_line(format_args!(""))?;
-                output::stdout_line(format_args!("{}", style.muted(ZEN.trim_end())))?;
-                output::stdout_line(format_args!(""))?;
-            }
-            _ => return Ok(false),
-        }
-    }
+    std::fs::write(&agents_file, AGENTS_MD).map_err(|e| map_io(&agents_file, e))?;
+    Ok(true)
 }
 
-fn write_zen(project_root: &Path) -> Result<bool, Error> {
-    let zen = project_root.join(templates::ZEN_FILENAME);
-    let agents_file = project_root.join("AGENTS.md");
-    require_file(&zen)?;
-    require_file(&agents_file)?;
-
-    let mut wrote = false;
-    if !zen.exists() {
-        std::fs::write(&zen, ZEN).map_err(|e| map_io(&zen, e))?;
-        wrote = true;
-    }
-    if !agents_file.exists() {
-        let body = format!("# Agent instructions\n\n{ZEN_REFERENCE}");
-        std::fs::write(&agents_file, body).map_err(|e| map_io(&agents_file, e))?;
-        wrote = true;
-    } else {
-        let current = std::fs::read_to_string(&agents_file).map_err(|e| map_io(&agents_file, e))?;
-        if !current.contains(ZEN_REFERENCE_MARKER) {
-            let separator = if current.is_empty() || current.ends_with("\n\n") {
-                ""
-            } else if current.ends_with('\n') {
-                "\n"
-            } else {
-                "\n\n"
-            };
-            let body = format!("{current}{separator}{ZEN_REFERENCE}");
-            std::fs::write(&agents_file, body).map_err(|e| map_io(&agents_file, e))?;
-            wrote = true;
-        }
-    }
-    Ok(wrote)
-}
-
-/// Create `.agents/skills/`, optionally ZEN/tink-skills/manage-tink, and ensure home root.
+/// Create `.agents/skills/`, optionally tink-skills/manage-tink, and ensure home root.
 pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitReport, Error> {
     init_project_at(None, project_root, options)
 }
@@ -166,7 +107,6 @@ pub(crate) fn init_project_at(
     require_file(&readme)?;
 
     let style = CliStyle::auto_stdout();
-    let with_zen = opt_in_zen(options.with_zen)?;
     let with_tink_skills = opt_in(
         options.with_tink_skills,
         &format!(
@@ -184,10 +124,6 @@ pub(crate) fn init_project_at(
     )?;
     let with_manage_tink = options.with_manage_tink.unwrap_or(true);
 
-    if with_zen {
-        require_file(&project_root.join(templates::ZEN_FILENAME))?;
-        require_file(&project_root.join("AGENTS.md"))?;
-    }
     let (inventory_home, home_created) = home::ensure_inventory_root(home)?;
 
     let skills_created = !skills.is_dir();
@@ -197,11 +133,7 @@ pub(crate) fn init_project_at(
         std::fs::write(&readme, SKILLS_README).map_err(|e| map_io(&readme, e))?;
     }
 
-    let zen_written = if with_zen {
-        write_zen(project_root)?
-    } else {
-        false
-    };
+    let agents_written = write_agents_md(project_root)?;
 
     let manage_tink_added = if with_manage_tink {
         let outcome = manage_tink::install_manage_tink_at(home, project_root)?;
@@ -230,7 +162,7 @@ pub(crate) fn init_project_at(
         skills_created,
         inventory_home,
         inventory_created: home_created,
-        zen_written,
+        agents_written,
         tink_skills_added,
         manage_tink_added,
     })
