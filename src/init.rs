@@ -149,6 +149,14 @@ fn write_zen(project_root: &Path) -> Result<bool, Error> {
 
 /// Create `.agents/skills/`, optionally ZEN/tink-skills/manage-tink, and ensure home root.
 pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitReport, Error> {
+    init_project_at(None, project_root, options)
+}
+
+pub(crate) fn init_project_at(
+    home: Option<&Path>,
+    project_root: &Path,
+    options: InitOptions,
+) -> Result<InitReport, Error> {
     let agents = crate::home::project_agents_path(project_root);
     let skills = crate::home::project_skills_path(project_root);
     let readme = skills.join("README.md");
@@ -180,7 +188,7 @@ pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitRep
         require_file(&project_root.join(templates::ZEN_FILENAME))?;
         require_file(&project_root.join("AGENTS.md"))?;
     }
-    let (home, home_created) = home::ensure_inventory_root(None)?;
+    let (inventory_home, home_created) = home::ensure_inventory_root(home)?;
 
     let skills_created = !skills.is_dir();
     mkdir_p(&agents)?;
@@ -196,7 +204,7 @@ pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitRep
     };
 
     let manage_tink_added = if with_manage_tink {
-        let outcome = manage_tink::install_manage_tink(project_root)?;
+        let outcome = manage_tink::install_manage_tink_at(home, project_root)?;
         Some(InstalledSkill {
             name: outcome.name,
             created: outcome.created,
@@ -208,7 +216,8 @@ pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitRep
     let mut tink_skills_added = Vec::new();
     if with_tink_skills {
         for name in TINK_SKILLS {
-            let outcome = add::add_skill_quiet(project_root, TINK_SKILLS_SOURCE, Some(name))?;
+            let outcome =
+                add::add_skill_quiet_at(home, project_root, TINK_SKILLS_SOURCE, Some(name))?;
             tink_skills_added.push(InstalledSkill {
                 name: outcome.name,
                 created: outcome.created,
@@ -219,7 +228,7 @@ pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitRep
     Ok(InitReport {
         skills_path: skills,
         skills_created,
-        inventory_home: home,
+        inventory_home,
         inventory_created: home_created,
         zen_written,
         tink_skills_added,
@@ -228,7 +237,10 @@ pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitRep
 }
 
 /// Bootstrap used by `add` — skills dir + home only, no prompts or bundled skills.
-pub fn ensure_project_layout(project_root: &Path) -> Result<(), Error> {
+pub(crate) fn ensure_project_layout_at(
+    home: Option<&Path>,
+    project_root: &Path,
+) -> Result<(), Error> {
     let agents = crate::home::project_agents_path(project_root);
     let skills = crate::home::project_skills_path(project_root);
     let readme = skills.join("README.md");
@@ -236,7 +248,7 @@ pub fn ensure_project_layout(project_root: &Path) -> Result<(), Error> {
     require_directory(&agents)?;
     require_directory(&skills)?;
     require_file(&readme)?;
-    let _ = home::ensure_inventory_root(None)?;
+    let _ = home::ensure_inventory_root(home)?;
 
     mkdir_p(&agents)?;
     mkdir_p(&skills)?;

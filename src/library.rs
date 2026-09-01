@@ -228,13 +228,6 @@ fn iter_library_skills(library: &Path) -> Result<Vec<Skill>, Error> {
 /// Identical → noop; missing → create; divergent → replace (caller should warn).
 /// Project installs still refuse overwrites separately.
 /// Receipt-backed skillset roots are never replaced by standalone skills.
-pub fn deposit(
-    skill: &Skill,
-    provenance: Option<&Provenance>,
-) -> Result<(PathBuf, LibraryWrite), Error> {
-    deposit_at(None, skill, provenance)
-}
-
 pub(crate) fn deposit_at(
     home: Option<&Path>,
     skill: &Skill,
@@ -267,16 +260,9 @@ pub(crate) fn deposit_at(
     }
 }
 
-/// Validate every existing library boundary a later [`deposit`] will touch.
+/// Validate every existing library boundary a later [`deposit_at`] will touch.
 /// Divergent ordinary standalone entries are acceptable because deposit repairs
 /// them; symlinks, unsafe trees, and skillset ownership collisions are not.
-pub(crate) fn preflight_deposit(
-    skill: &Skill,
-    provenance: Option<&Provenance>,
-) -> Result<(), Error> {
-    preflight_deposit_at(None, skill, provenance)
-}
-
 pub(crate) fn preflight_deposit_at(
     home: Option<&Path>,
     skill: &Skill,
@@ -300,11 +286,7 @@ pub(crate) fn preflight_deposit_at(
 /// Divergent trees are skipped (no repair). Unreadable/unsafe trees surface as
 /// [`CreateOnlyWrite::Skipped`] with the error detail — same create-only
 /// contract harvest used before this lived in `library`.
-pub fn deposit_create_only(skill: &Skill) -> Result<(PathBuf, CreateOnlyWrite), Error> {
-    deposit_create_only_at(None, skill)
-}
-
-fn deposit_create_only_at(
+pub(crate) fn deposit_create_only_at(
     home: Option<&Path>,
     skill: &Skill,
 ) -> Result<(PathBuf, CreateOnlyWrite), Error> {
@@ -337,9 +319,13 @@ fn deposit_create_only_at(
 
 /// When the library already holds the exact standalone tree we would install, return it.
 /// Receipt-backed roots remain owned by the skillset lifecycle and are never cache hits.
-pub fn matching(skill: &Skill, provenance: Option<&Provenance>) -> Result<Option<Skill>, Error> {
+pub(crate) fn matching_at(
+    home: Option<&Path>,
+    skill: &Skill,
+    provenance: Option<&Provenance>,
+) -> Result<Option<Skill>, Error> {
     crate::skillsets::ensure_standalone_source(&skill.path, &skill.name)?;
-    let library = library_root(None)?;
+    let library = library_root(home)?;
     let target = library.join(&skill.name);
     if !target.is_dir() || crate::skillsets::has_receipt_entry(&target) {
         return Ok(None);
@@ -369,8 +355,8 @@ pub fn list_names(home: Option<&Path>) -> Result<Vec<String>, Error> {
 
 /// Load one standalone skill from the library by directory name.
 /// Receipt-backed roots remain owned by the skillset lifecycle.
-pub fn load(name: &str) -> Result<Skill, Error> {
-    let library = library_root(None)?;
+pub(crate) fn load_at(home: Option<&Path>, name: &str) -> Result<Skill, Error> {
+    let library = library_root(home)?;
     let path = library.join(name);
     if path.is_symlink() {
         return Err(Error::msg(format!(
@@ -390,12 +376,13 @@ pub fn load(name: &str) -> Result<Skill, Error> {
 }
 
 /// Find a library skill whose receipt matches this remote URL + revision tip.
-pub fn for_remote_tip(
+pub(crate) fn for_remote_tip_at(
+    home: Option<&Path>,
     source_url: &str,
     revision: &str,
     selected_name: Option<&str>,
 ) -> Result<Option<Skill>, Error> {
-    let (home, _) = ensure_inventory_root(None)?;
+    let (home, _) = ensure_inventory_root(home)?;
     let library = skills_library_path(&home);
     if !library.is_dir() {
         return Ok(None);
@@ -443,13 +430,14 @@ fn tracks_project(library_skill: &Path, project_skill: &Path) -> Result<bool, Er
 
 /// Before refreshing a project skill, ensure the library can accept `new`
 /// (missing, already new, or still equal to the current project install).
-pub fn preflight_refresh(
+pub(crate) fn preflight_refresh_at(
+    home: Option<&Path>,
     project_installed: &Path,
     new_skill: &Skill,
     new_provenance: &Provenance,
 ) -> Result<(), Error> {
     crate::skillsets::ensure_standalone_source(&new_skill.path, &new_skill.name)?;
-    let library = library_root(None)?;
+    let library = library_root(home)?;
     match skills::preflight_install(new_skill, &library, Some(new_provenance))? {
         PreflightOutcome::Ready
         | PreflightOutcome::Identical
@@ -469,14 +457,18 @@ pub fn preflight_refresh(
 }
 
 /// Keep `$TINK_HOME/skills/<name>/` aligned with the installed project skill.
-pub fn sync_from_installed(installed: &Skill) -> Result<(), Error> {
-    deposit(installed, None).map(|_| ())
+pub(crate) fn sync_from_installed_at(home: Option<&Path>, installed: &Skill) -> Result<(), Error> {
+    deposit_at(home, installed, None).map(|_| ())
 }
 
-/// After a project refresh passed [`preflight_refresh`], write the new tree
-/// into the library (create, noop, or repair — same rules as [`deposit`]).
-pub fn deposit_refresh(new_skill: &Skill, new_provenance: &Provenance) -> Result<(), Error> {
-    deposit(new_skill, Some(new_provenance)).map(|_| ())
+/// After a project refresh passed [`preflight_refresh_at`], write the new tree
+/// into the library (create, noop, or repair — same rules as [`deposit_at`]).
+pub(crate) fn deposit_refresh_at(
+    home: Option<&Path>,
+    new_skill: &Skill,
+    new_provenance: &Provenance,
+) -> Result<(), Error> {
+    deposit_at(home, new_skill, Some(new_provenance)).map(|_| ())
 }
 
 #[cfg(test)]
@@ -666,5 +658,21 @@ mod tests {
         assert_eq!(write, CreateOnlyWrite::Unchanged);
         assert_eq!(skill_md(&path), before);
         assert!(path.join(".tink-source.json").is_file());
+    }
+
+    #[test]
+    fn load_at_sees_only_the_given_home() {
+        let home = TempHome::new();
+        let other = TempHome::new();
+        let src = home.root.join("src").join("demo-skill");
+        let skill = write_skill(&src, "demo-skill", "isolated body");
+        deposit_at(Some(&home.home), &skill, None).unwrap();
+
+        let loaded = load_at(Some(&home.home), "demo-skill").unwrap();
+        assert_eq!(loaded.name, "demo-skill");
+        assert!(skill_md(&loaded.path).contains("isolated body"));
+
+        let err = load_at(Some(&other.home), "demo-skill").unwrap_err();
+        assert!(err.to_string().contains("Library skill not found"), "{err}");
     }
 }

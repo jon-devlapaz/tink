@@ -288,19 +288,8 @@ fn existing_project_catalog(
     Ok(meta.catalog_owned_by(project_root).then_some(legacy))
 }
 
-/// Record that `skill_name` is installed in `project_root`.
-///
-/// Failure fails the caller.
-pub fn deposit_skill(project_root: &Path, skill_name: &str) -> Result<PathBuf, Error> {
-    deposit_skill_at(None, project_root, skill_name)
-}
-
 /// Validate every catalog boundary that a later deposit will traverse.
 /// Inventory creation may occur, but no project entry or skill name is written.
-pub(crate) fn preflight_deposit_skill(project_root: &Path) -> Result<(), Error> {
-    preflight_deposit_skill_at(None, project_root)
-}
-
 pub(crate) fn preflight_deposit_skill_at(
     home: Option<&Path>,
     project_root: &Path,
@@ -339,7 +328,9 @@ pub(crate) fn preflight_deposit_skill_at(
     Ok(())
 }
 
-/// Like [`deposit_skill`], with an optional home root (tests).
+/// Record that `skill_name` is installed in `project_root`.
+///
+/// Failure fails the caller.
 pub(crate) fn deposit_skill_at(
     home: Option<&Path>,
     project_root: &Path,

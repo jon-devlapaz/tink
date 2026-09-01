@@ -46,10 +46,6 @@ impl PreparedLockedSkill {
         self.provenance.as_ref()
     }
 
-    pub(crate) fn publish(self, project_root: &Path) -> Result<AddOutcome, Error> {
-        self.publish_at(project_root, None)
-    }
-
     pub(crate) fn publish_at(
         self,
         project_root: &Path,
@@ -68,6 +64,7 @@ impl PreparedLockedSkill {
 }
 
 fn place_skill(
+    home: Option<&Path>,
     project_root: &Path,
     skill: &Skill,
     destination_root: &Path,
@@ -75,7 +72,7 @@ fn place_skill(
 ) -> Result<AddOutcome, Error> {
     place_skill_inner(
         project_root,
-        None,
+        home,
         skill,
         destination_root,
         provenance,
@@ -92,7 +89,7 @@ fn place_skill_inner(
     report_library_repair: bool,
 ) -> Result<AddOutcome, Error> {
     crate::skillsets::ensure_standalone_source(&skill.path, &skill.name)?;
-    init::ensure_project_layout(project_root)?;
+    init::ensure_project_layout_at(home, project_root)?;
     // Protect the project tree first. Library is a rebuildable collection: repair on
     // diverge, then install project (re-add recovers if that fails).
     skills::preflight_install(skill, destination_root, provenance)?
@@ -214,16 +211,17 @@ pub(crate) fn prepare_locked_skill(
 
 /// Install into the project from an already-complete library tree (receipt included).
 fn place_from_library(
+    home: Option<&Path>,
     project_root: &Path,
     skill: &Skill,
     destination_root: &Path,
 ) -> Result<AddOutcome, Error> {
     crate::skillsets::ensure_standalone_source(&skill.path, &skill.name)?;
-    init::ensure_project_layout(project_root)?;
+    init::ensure_project_layout_at(home, project_root)?;
     skills::preflight_install(skill, destination_root, None)?
         .require_compatible(&skill.name, destination_root)?;
     let (installed, created) = skills::install_local(skill, destination_root, None)?;
-    catalog::deposit_skill(project_root, &skill.name)?;
+    catalog::deposit_skill_at(home, project_root, &skill.name)?;
     Ok(AddOutcome {
         name: skill.name.clone(),
         created,
@@ -327,6 +325,7 @@ struct CheckoutInstallOptions<'a> {
 }
 
 fn install_from_checkout(
+    home: Option<&Path>,
     project_root: &Path,
     source_root: &Path,
     destination_root: &Path,
@@ -385,10 +384,16 @@ fn install_from_checkout(
         }
         _ => None,
     };
-    if let Some(cached) = library::matching(&skill, provenance.as_ref())? {
-        return place_from_library(project_root, &cached, destination_root);
+    if let Some(cached) = library::matching_at(home, &skill, provenance.as_ref())? {
+        return place_from_library(home, project_root, &cached, destination_root);
     }
-    place_skill(project_root, &skill, destination_root, provenance.as_ref())
+    place_skill(
+        home,
+        project_root,
+        &skill,
+        destination_root,
+        provenance.as_ref(),
+    )
 }
 
 pub fn add_skill(
@@ -396,19 +401,29 @@ pub fn add_skill(
     source_value: &str,
     selected_name: Option<&str>,
 ) -> Result<AddOutcome, Error> {
-    add_skill_inner(project_root, source_value, selected_name, true)
+    add_skill_at(None, project_root, source_value, selected_name)
 }
 
-/// Like [`add_skill`] but skips per-skill stdout (caller owns the narrative).
-pub(crate) fn add_skill_quiet(
+pub(crate) fn add_skill_at(
+    home: Option<&Path>,
     project_root: &Path,
     source_value: &str,
     selected_name: Option<&str>,
 ) -> Result<AddOutcome, Error> {
-    add_skill_inner(project_root, source_value, selected_name, false)
+    add_skill_inner(home, project_root, source_value, selected_name, true)
+}
+
+pub(crate) fn add_skill_quiet_at(
+    home: Option<&Path>,
+    project_root: &Path,
+    source_value: &str,
+    selected_name: Option<&str>,
+) -> Result<AddOutcome, Error> {
+    add_skill_inner(home, project_root, source_value, selected_name, false)
 }
 
 fn add_skill_inner(
+    home: Option<&Path>,
     project_root: &Path,
     source_value: &str,
     selected_name: Option<&str>,
@@ -422,6 +437,7 @@ fn add_skill_inner(
                 .canonicalize()
                 .map_err(|e| crate::paths::map_io(&local_source, e))?;
             let outcome = install_from_checkout(
+                home,
                 project_root,
                 &source_root,
                 &destination_root,
@@ -439,7 +455,13 @@ fn add_skill_inner(
             Ok(outcome)
         }
         AddSource::Github(source) => {
-            let outcome = add_from_remote(project_root, &destination_root, &source, selected_name)?;
+            let outcome = add_from_remote(
+                home,
+                project_root,
+                &destination_root,
+                &source,
+                selected_name,
+            )?;
             if report {
                 report_add(&outcome)?;
             }
@@ -451,8 +473,8 @@ fn add_skill_inner(
                     "Do not combine --skill with a library skill name; pass only the library name",
                 ));
             }
-            let skill = library::load(&name)?;
-            let outcome = place_from_library(project_root, &skill, &destination_root)?;
+            let skill = library::load_at(home, &name)?;
+            let outcome = place_from_library(home, project_root, &skill, &destination_root)?;
             if report {
                 report_add(&outcome)?;
             }
@@ -486,6 +508,7 @@ fn report_add(outcome: &AddOutcome) -> Result<(), Error> {
 }
 
 fn add_from_remote(
+    home: Option<&Path>,
     project_root: &Path,
     destination_root: &Path,
     source: &sources::GithubAddSource,
@@ -505,8 +528,8 @@ fn add_from_remote(
     // before the library can be trusted. Preserve the root-skill no-clone path.
     if selected_name.is_none() && source.skill_path.is_none() {
         let tip = git::remote_head(&source.remote)?;
-        if let Some(cached) = library::for_remote_tip(&source.remote.url, &tip, None)? {
-            return place_from_library(project_root, &cached, destination_root);
+        if let Some(cached) = library::for_remote_tip_at(home, &source.remote.url, &tip, None)? {
+            return place_from_library(home, project_root, &cached, destination_root);
         }
     }
     let (_temp, source_root, revision) = git::checkout(&source.remote)?;
@@ -524,6 +547,7 @@ fn add_from_remote(
             .transpose()?
     };
     install_from_checkout(
+        home,
         project_root,
         &source_root,
         destination_root,
@@ -702,5 +726,48 @@ mod tests {
             .expect_err("ancestor symlink must be refused");
 
         assert!(error.to_string().contains("symlink"), "{error}");
+    }
+
+    #[test]
+    fn add_skill_at_installs_from_isolated_library() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("tink-home");
+        let other = temp.path().join("other-home");
+        let project = temp.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+
+        let src = temp.path().join("src").join("demo-skill");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(
+            src.join("SKILL.md"),
+            "---\nname: demo-skill\ndescription: Isolation fixture.\n---\n\n# demo-skill\n\nbody\n",
+        )
+        .unwrap();
+        let skill = skills::read_skill(&src, true).unwrap();
+        library::deposit_at(Some(&home), &skill, None).unwrap();
+        crate::home::ensure_inventory_root(Some(&other)).unwrap();
+
+        let outcome = add_skill_quiet_at(Some(&home), &project, "demo-skill", None).unwrap();
+        assert_eq!(outcome.name, "demo-skill");
+        assert!(
+            crate::home::project_skills_path(&project)
+                .join("demo-skill/SKILL.md")
+                .is_file()
+        );
+
+        let catalog = crate::catalog::list_catalog(Some(&home)).unwrap();
+        assert!(
+            catalog.iter().any(|entry| entry.skill == "demo-skill"),
+            "catalog skills: {:?}",
+            catalog
+                .iter()
+                .map(|entry| entry.skill.as_str())
+                .collect::<Vec<_>>(),
+        );
+        assert!(
+            crate::catalog::list_catalog(Some(&other))
+                .unwrap()
+                .is_empty()
+        );
     }
 }

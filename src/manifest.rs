@@ -426,25 +426,12 @@ fn sync_at(root: &Path, home: Option<&Path>) -> Result<usize, Error> {
     // such as ENOSPC can still interrupt sequential publication and are
     // recoverable by rerunning sync.
     for candidate in &prepared {
-        match home {
-            Some(home) => crate::library::preflight_deposit_at(
-                Some(home),
-                candidate.skill(),
-                candidate.provenance(),
-            )?,
-            None => crate::library::preflight_deposit(candidate.skill(), candidate.provenance())?,
-        }
+        crate::library::preflight_deposit_at(home, candidate.skill(), candidate.provenance())?;
     }
-    match home {
-        Some(home) => crate::catalog::preflight_deposit_skill_at(Some(home), root)?,
-        None => crate::catalog::preflight_deposit_skill(root)?,
-    }
+    crate::catalog::preflight_deposit_skill_at(home, root)?;
 
     for candidate in prepared {
-        match home {
-            Some(home) => candidate.publish_at(root, Some(home))?,
-            None => candidate.publish(root)?,
-        };
+        candidate.publish_at(root, home)?;
     }
     verify(root)
 }

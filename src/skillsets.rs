@@ -278,9 +278,12 @@ fn validate_legacy_tree_for_refresh(path: &Path, receipt: &SkillsetReceipt) -> R
     Ok(())
 }
 
-fn read_catalog(name: &str) -> Result<SkillsetMeta, Error> {
+fn read_catalog(home: Option<&Path>, name: &str) -> Result<SkillsetMeta, Error> {
     validate_skillset_name(name)?;
-    let home = home::resolve_home()?;
+    let home = match home {
+        Some(home) => home.to_path_buf(),
+        None => home::resolve_home()?,
+    };
     let catalog = home::by_skillset_path(&home).join(name);
     refuse_symlink(&catalog)?;
     let meta: SkillsetMeta = read_json(&catalog.join("meta.json"), "skillset catalog meta")?;
@@ -370,9 +373,17 @@ pub fn add_skillset(
     project_root: &Path,
     name: &str,
 ) -> Result<(PathBuf, bool, LibraryWrite), Error> {
+    add_skillset_at(None, project_root, name)
+}
+
+pub(crate) fn add_skillset_at(
+    home: Option<&Path>,
+    project_root: &Path,
+    name: &str,
+) -> Result<(PathBuf, bool, LibraryWrite), Error> {
     validate_skillset_name(name)?;
-    let meta = read_catalog(name)?;
-    preflight_library_target(name)?;
+    let meta = read_catalog(home, name)?;
+    preflight_library_target(home, name)?;
     let target = home::project_skills_path(project_root).join(name);
     if target.exists() || target.is_symlink() {
         refuse_symlink(&target)?;
@@ -398,11 +409,11 @@ pub fn add_skillset(
                 "Skillset catalog changed for {name}; run `tink skillset refresh {name}`"
             )));
         }
-        let library_write = sync_library_from_project(&target)?;
+        let library_write = sync_library_from_project(home, &target)?;
         return Ok((target, false, library_write));
     }
 
-    init::ensure_project_layout(project_root)?;
+    init::ensure_project_layout_at(home, project_root)?;
     let remote = validate_meta(&meta)?;
     let (_clone, repository, tip) = git::checkout(&remote)?;
     let (_old_checkout, checkout) = if tip == meta.revision {
@@ -417,13 +428,21 @@ pub fn add_skillset(
         &home::project_skills_path(project_root),
         name,
     )?;
-    let library_write = sync_library_from_project(&installed)?;
+    let library_write = sync_library_from_project(home, &installed)?;
     Ok((installed, created, library_write))
 }
 
 pub fn refresh_skillset(project_root: &Path, name: &str) -> Result<bool, Error> {
+    refresh_skillset_at(None, project_root, name)
+}
+
+pub(crate) fn refresh_skillset_at(
+    home: Option<&Path>,
+    project_root: &Path,
+    name: &str,
+) -> Result<bool, Error> {
     validate_skillset_name(name)?;
-    let meta = read_catalog(name)?;
+    let meta = read_catalog(home, name)?;
     let skills_root = home::project_skills_path(project_root);
     let target = skills_root.join(name);
     refuse_symlink(&target)?;
@@ -442,9 +461,9 @@ pub fn refresh_skillset(project_root: &Path, name: &str) -> Result<bool, Error> 
             "Refusing to refresh {name}: local modifications are present"
         )));
     }
-    preflight_library_target(name)?;
+    preflight_library_target(home, name)?;
     if !legacy_receipt && receipt_meta(&receipt) == meta {
-        sync_library_from_project(&target)?;
+        sync_library_from_project(home, &target)?;
         return Ok(false);
     }
 
@@ -457,7 +476,7 @@ pub fn refresh_skillset(project_root: &Path, name: &str) -> Result<bool, Error> 
         (Some(temp), checkout)
     };
     let installed = replace_from_checkout(&checkout, &meta, &skills_root, name)?;
-    sync_library_from_project(&installed)?;
+    sync_library_from_project(home, &installed)?;
     Ok(true)
 }
 
@@ -565,13 +584,13 @@ fn validate_library_receipt(path: &Path) -> Result<(), Error> {
     read_owned_receipt(path, "library skillset receipt").map(|_| ())
 }
 
-fn library_root() -> Result<PathBuf, Error> {
-    let (home, _) = home::ensure_inventory_root(None)?;
+fn library_root(home: Option<&Path>) -> Result<PathBuf, Error> {
+    let (home, _) = home::ensure_inventory_root(home)?;
     Ok(home::skills_library_path(&home))
 }
 
-fn preflight_library_target(name: &str) -> Result<(), Error> {
-    let target = library_root()?.join(name);
+fn preflight_library_target(home: Option<&Path>, name: &str) -> Result<(), Error> {
+    let target = library_root(home)?.join(name);
     if !target.exists() && !target.is_symlink() {
         return Ok(());
     }
@@ -612,15 +631,15 @@ fn copy_project_tree(
     skills::publish_staged_tree(staging, staged, &target).map(|_| ())
 }
 
-fn sync_library_from_project(project: &Path) -> Result<LibraryWrite, Error> {
+fn sync_library_from_project(home: Option<&Path>, project: &Path) -> Result<LibraryWrite, Error> {
     let name = read_installed(project)?.name;
-    let library = library_root()?;
+    let library = library_root(home)?;
     let target = library.join(&name);
     if !target.exists() && !target.is_symlink() {
         copy_project_tree(project, &library, &name, false)?;
         return Ok(LibraryWrite::Created);
     }
-    preflight_library_target(&name)?;
+    preflight_library_target(home, &name)?;
     if skills::skill_contents_equal(project, &target)? {
         return Ok(LibraryWrite::Unchanged);
     }

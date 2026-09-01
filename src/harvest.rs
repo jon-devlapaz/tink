@@ -229,7 +229,11 @@ fn map_create_only(write: CreateOnlyWrite) -> (HarvestAction, Option<String>) {
 
 /// Scan harness skill locations and create missing trees in the library.
 pub fn harvest(cwd: &Path) -> Result<HarvestReport, Error> {
-    let (tink_home, _) = ensure_inventory_root(None)?;
+    harvest_at(None, cwd)
+}
+
+pub(crate) fn harvest_at(home: Option<&Path>, cwd: &Path) -> Result<HarvestReport, Error> {
+    let (tink_home, _) = ensure_inventory_root(home)?;
     let library = skills_library_path(&tink_home);
     let library_canon = library.canonicalize().unwrap_or_else(|_| library.clone());
 
@@ -303,7 +307,7 @@ pub fn harvest(cwd: &Path) -> Result<HarvestReport, Error> {
             continue;
         }
 
-        let (_, write) = library::deposit_create_only(&skill)?;
+        let (_, write) = library::deposit_create_only_at(home, &skill)?;
         let (action, detail) = map_create_only(write);
         match action {
             HarvestAction::Created => {

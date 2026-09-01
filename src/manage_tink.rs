@@ -59,8 +59,8 @@ pub(crate) fn require_current(installed: &Skill) -> Result<(), Error> {
     ))
 }
 
-fn refuse_remote_library_collision() -> Result<(), Error> {
-    let Some(home) = crate::home::existing_inventory_root(None)? else {
+fn refuse_remote_library_collision(home: Option<&Path>) -> Result<(), Error> {
+    let Some(home) = crate::home::existing_inventory_root(home)? else {
         return Ok(());
     };
     let target = crate::home::skills_library_path(&home).join("manage-tink");
@@ -78,6 +78,13 @@ fn refuse_remote_library_collision() -> Result<(), Error> {
 }
 
 pub(crate) fn refresh_manage_tink(project_root: &Path) -> Result<RefreshOutcome, Error> {
+    refresh_manage_tink_at(None, project_root)
+}
+
+pub(crate) fn refresh_manage_tink_at(
+    home: Option<&Path>,
+    project_root: &Path,
+) -> Result<RefreshOutcome, Error> {
     check::check_zen_coupling(project_root)?;
     let agents = crate::home::project_agents_path(project_root);
     let skills_root = crate::home::project_skills_path(project_root);
@@ -85,10 +92,10 @@ pub(crate) fn refresh_manage_tink(project_root: &Path) -> Result<RefreshOutcome,
     refuse_symlink(&agents)?;
     refuse_symlink(&skills_root)?;
     refuse_symlink(&target)?;
-    refuse_remote_library_collision()?;
+    refuse_remote_library_collision(home)?;
 
     if !target.exists() {
-        install_manage_tink(project_root)?;
+        install_manage_tink_at(home, project_root)?;
         return Ok(RefreshOutcome::Installed);
     }
     if !target.is_dir() {
@@ -104,21 +111,21 @@ pub(crate) fn refresh_manage_tink(project_root: &Path) -> Result<RefreshOutcome,
     }
     let (_staging, embedded) = prepare_manage_tink()?;
     if !skills::skill_contents_equal(&installed.path, &embedded.path)? {
-        library::preflight_deposit(&embedded, None)?;
-        catalog::preflight_deposit_skill(project_root)?;
+        library::preflight_deposit_at(home, &embedded, None)?;
+        catalog::preflight_deposit_skill_at(home, project_root)?;
         skills::replace_embedded_verified(&embedded, &skills_root)?;
-        library::deposit(&embedded, None)?;
-        catalog::deposit_skill(project_root, "manage-tink")?;
+        library::deposit_at(home, &embedded, None)?;
+        catalog::deposit_skill_at(home, project_root, "manage-tink")?;
 
         let refreshed = skills::read_skill(&target, true)?;
         require_current(&refreshed)?;
         return Ok(RefreshOutcome::Refreshed);
     }
 
-    library::preflight_deposit(&installed, None)?;
-    catalog::preflight_deposit_skill(project_root)?;
-    library::sync_from_installed(&installed)?;
-    catalog::deposit_skill(project_root, "manage-tink")?;
+    library::preflight_deposit_at(home, &installed, None)?;
+    catalog::preflight_deposit_skill_at(home, project_root)?;
+    library::sync_from_installed_at(home, &installed)?;
+    catalog::deposit_skill_at(home, project_root, "manage-tink")?;
     Ok(RefreshOutcome::Unchanged)
 }
 
@@ -126,9 +133,13 @@ pub(crate) fn refresh_manage_tink(project_root: &Path) -> Result<RefreshOutcome,
 ///
 /// Uses the quiet add path so init can own the closing narrative.
 /// Returns the install outcome (name + whether the project tree was created).
-pub fn install_manage_tink(project_root: &Path) -> Result<add::AddOutcome, Error> {
+pub(crate) fn install_manage_tink_at(
+    home: Option<&Path>,
+    project_root: &Path,
+) -> Result<add::AddOutcome, Error> {
     let (_staging, skill) = prepare_manage_tink()?;
-    add::add_skill_quiet(
+    add::add_skill_quiet_at(
+        home,
         project_root,
         skill
             .path
@@ -136,4 +147,70 @@ pub fn install_manage_tink(project_root: &Path) -> Result<add::AddOutcome, Error
             .ok_or_else(|| Error::msg("manage-tink path is not UTF-8"))?,
         None,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    struct TempHome {
+        home: PathBuf,
+        root: PathBuf,
+        _temp: TempDir,
+    }
+
+    impl TempHome {
+        fn new() -> Self {
+            let temp = TempDir::new().unwrap();
+            let root = temp.path().to_path_buf();
+            let home = root.join("tink-home");
+            Self {
+                home,
+                root,
+                _temp: temp,
+            }
+        }
+    }
+
+    #[test]
+    fn refresh_manage_tink_at_deposits_into_given_home() {
+        let home = TempHome::new();
+        let project = home.root.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+
+        crate::init::init_project_at(
+            Some(&home.home),
+            &project,
+            crate::init::InitOptions {
+                with_zen: Some(false),
+                with_tink_skills: Some(false),
+                with_manage_tink: Some(false),
+            },
+        )
+        .unwrap();
+
+        let outcome = refresh_manage_tink_at(Some(&home.home), &project).unwrap();
+        assert_eq!(outcome, RefreshOutcome::Installed);
+        assert!(
+            crate::home::project_skills_path(&project)
+                .join("manage-tink/SKILL.md")
+                .is_file()
+        );
+        assert!(
+            crate::home::skills_library_path(&home.home)
+                .join("manage-tink/SKILL.md")
+                .is_file()
+        );
+        let catalog = crate::catalog::list_catalog(Some(&home.home)).unwrap();
+        assert!(
+            catalog.iter().any(|entry| entry.skill == "manage-tink"),
+            "catalog skills: {:?}",
+            catalog
+                .iter()
+                .map(|entry| entry.skill.as_str())
+                .collect::<Vec<_>>(),
+        );
+    }
 }
