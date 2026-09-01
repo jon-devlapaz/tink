@@ -1,6 +1,6 @@
 ---
 name: manage-tink
-description: "Tink CLI for repository-owned Agent Skills. Use when the user asks to initialize Tink; inspect GitHub skill sources; add, list, check, lock, verify, sync, refresh, or remove project skills; manage grouped skillsets; use the home library or catalog; harvest harness skills; configure shell completion; update Tink; refresh embedded manage-tink; or destroy project agent scaffolding."
+description: "Tink CLI for repository-owned Agent Skills. Use when the user asks to initialize Tink; inspect GitHub skill sources; add, list, read, check, lock, verify, sync, refresh, or remove project skills; manage grouped skillsets; use the home library or catalog; harvest harness skills; configure shell completion; update Tink; refresh embedded manage-tink; or destroy project agent scaffolding."
 ---
 
 # Manage Tink
@@ -29,6 +29,8 @@ If `tink` is missing, report the installation command and stop:
 Otherwise, run only the read command matching the request:
 
 - Project state or names: `tink skill check` or `tink skill list`.
+- One installed skill's description: `tink skill read NAME` (`--library` for the
+  home copy; `--raw` for the description line only).
 - Catalog or library: `tink skill list --catalog` or `tink library list`
   (`tink skill list --library` remains a compatibility alias).
 - Project or library skillsets: `tink skillset list` or
@@ -193,7 +195,7 @@ from the mutation command alone.
 |---|---|
 | Set up / init Tink (no extras) | `tink init --no-zen --no-tink-skills` (embeds `manage-tink`) |
 | …and ZEN / tink-skills / skip manage-tink | Only the matching `--with-*` / `--no-*` flags |
-| Add / list / check / refresh / remove … | The matching `tink skill …` command |
+| Add / list / read / check / refresh / remove … | The matching `tink skill …` command |
 | List catalog | `tink skill list --catalog` |
 | List library / promote from library | `tink library list` (`tink skill list --library` compatibility alias) / `tink skill add NAME` |
 | Harvest harness skills into library | `tink skill harvest` |

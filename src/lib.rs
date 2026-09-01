@@ -19,6 +19,7 @@ mod output;
 mod paths;
 mod process;
 mod provenance;
+mod read;
 mod refresh;
 mod remove;
 mod skills;
@@ -141,6 +142,18 @@ pub enum SkillCommand {
         #[arg(long, group = "list_source")]
         library: bool,
     },
+    /// Read a standalone skill's description and metadata
+    Read {
+        /// Canonical standalone skill name
+        #[arg(add = ArgValueCompleter::new(read_skill_candidates))]
+        name: String,
+        /// Read from the home library instead of the current project
+        #[arg(long, short = 'l')]
+        library: bool,
+        /// Output only the unstyled description text
+        #[arg(long, short = 'r')]
+        raw: bool,
+    },
     /// Validate project skills without changing anything
     Check,
     /// Verify project skills against `.tink/skills.toml` and `.tink/skills.lock`
@@ -195,6 +208,49 @@ pub enum SkillsetCommand {
     Refresh { name: String },
     /// Remove one installed skillset without deleting its shared catalog definition
     Remove { name: String },
+}
+
+fn read_skill_candidates(current: &OsStr) -> Vec<CompletionCandidate> {
+    let Some(prefix) = current.to_str() else {
+        return Vec::new();
+    };
+    let mut names = BTreeSet::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        names.extend(project_standalone_completion_names(&cwd));
+    }
+    names.extend(library::list_names(None).unwrap_or_default());
+    names
+        .into_iter()
+        .filter(|name| name.starts_with(prefix))
+        .map(CompletionCandidate::new)
+        .collect()
+}
+
+fn project_standalone_completion_names(cwd: &Path) -> Vec<String> {
+    let skills_root = home::project_skills_path(cwd);
+    let Ok(entries) = std::fs::read_dir(&skills_root) else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if name == "README.md" || name.starts_with('.') {
+            continue;
+        }
+        if path.is_symlink() || !path.is_dir() {
+            continue;
+        }
+        if skillsets::has_receipt_entry(&path) {
+            continue;
+        }
+        if skills::valid_skill_name(&name) {
+            names.push(name);
+        }
+    }
+    names
 }
 
 fn add_source_candidates(current: &OsStr) -> Vec<CompletionCandidate> {
@@ -391,6 +447,7 @@ fn dispatch_skill(cwd: &Path, command: SkillCommand) -> Result<(), Error> {
                 dispatch_skill_list(cwd)
             }
         }
+        SkillCommand::Read { name, library, raw } => dispatch_skill_read(cwd, &name, library, raw),
         SkillCommand::Check => dispatch_skill_check(cwd),
         SkillCommand::Verify => dispatch_skill_verify(cwd),
         SkillCommand::Lock { source } => dispatch_skill_lock(cwd, &source),
@@ -608,6 +665,11 @@ fn dispatch_skill_check(cwd: &Path) -> Result<(), Error> {
         );
     }
     Ok(())
+}
+
+fn dispatch_skill_read(cwd: &Path, name: &str, library: bool, raw: bool) -> Result<(), Error> {
+    let report = read::read_skill_report(cwd, name, library)?;
+    read::print_report(&report, raw, CliStyle::auto_stdout())
 }
 
 fn dispatch_skill_list(cwd: &Path) -> Result<(), Error> {

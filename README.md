@@ -144,6 +144,7 @@ tink skillset remove common-skillset
 tink inspect https://github.com/mattpocock/skills
 tink library list
 tink skill list
+tink skill read skill-name
 tink skill check
 tink skill refresh
 tink skill refresh skill-name

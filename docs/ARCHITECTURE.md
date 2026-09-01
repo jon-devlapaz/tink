@@ -34,7 +34,7 @@ owners and should not carry architectural decisions.
 | Process edge | `main.rs`, `lib.rs`, `output.rs`, `style.rs`, `error.rs`, `process.rs` | Completion and argument parsing, command dispatch, fallible and control-safe output, user-facing failure/exit shape, and bounded subprocess-group supervision. |
 | Layout and persisted state | `home.rs`, `catalog.rs`, `manifest.rs`, `provenance.rs` | Project/home paths, project-name index, standalone manifest/lock, and source receipts. |
 | Skill mechanisms | `skills.rs`, `sources.rs`, `git.rs`, `paths.rs`, `library.rs` | Skill discovery/validation/copy/digest, typed source classification, supervised Git checkout, filesystem refusals, and standalone library policy. |
-| Project workflows | `init.rs`, `add.rs`, `check.rs`, `refresh.rs`, `remove.rs`, `harvest.rs` | Bootstrap and the standalone skill lifecycle. |
+| Project workflows | `init.rs`, `add.rs`, `check.rs`, `read.rs`, `refresh.rs`, `remove.rs`, `harvest.rs` | Bootstrap, standalone skill lifecycle, and read-only local skill inspection. |
 | Skillset workflow | `skillsets.rs` | Canonical names, definition validation, staged install/refresh, receipt validation, grouped listing, removal, and project-to-library mirroring. |
 | Read-only source inspection | `inspect.rs` | GitHub structure inspection and source-defined skillset inference; no project or home writes. |
 | Supporting workflows | `destroy.rs`, `update.rs`, `manage_tink.rs`, `templates.rs` | Project teardown, binary update, embedded `manage-tink`, and init templates/defaults. |
@@ -131,6 +131,7 @@ remove` requires a valid owned receipt and deletes only the project tree.
 | Command family | Owner and effect |
 |---|---|
 | `skill list` / `skill check` | `check.rs` reads project entries, `skillsets.rs` validates receipt roots, and `lib.rs` owns grouped counts/output. Standalone listing excludes skillset roots; check validates both lifecycles. |
+| `skill read` | `read.rs` loads one standalone project or library tree, classifies its lifecycle, and prints description plus metadata. It does not glob skillset members. |
 | `skill refresh` | `refresh.rs` uses the source receipt to prove the project clean. At an unchanged upstream revision it repairs the library directly from the project; after an upstream move it preflights the library, replaces the project, then updates the library and project-name index. |
 | `skill remove` | `remove.rs` refuses skillset roots, withdraws the project-name index first, deletes the project tree, and preserves the library. |
 | `skill harvest` | `harvest.rs` validates known harness trees and calls the create-only library path; it never writes a project. |

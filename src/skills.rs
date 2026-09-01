@@ -81,6 +81,13 @@ fn frontmatter_value(lines: &[&str], key: &str) -> Option<String> {
 }
 
 pub fn read_skill(path: &Path, require_directory_name: bool) -> Result<Skill, Error> {
+    Ok(read_skill_and_description(path, require_directory_name)?.0)
+}
+
+pub(crate) fn read_skill_and_description(
+    path: &Path,
+    require_directory_name: bool,
+) -> Result<(Skill, String), Error> {
     refuse_symlink(path)?;
     let skill_file = path.join("SKILL.md");
     refuse_symlink(&skill_file)?;
@@ -132,10 +139,13 @@ pub fn read_skill(path: &Path, require_directory_name: bool) -> Result<Skill, Er
             output::display_path(&skill_file)
         )));
     }
-    Ok(Skill {
-        name,
-        path: path.to_path_buf(),
-    })
+    Ok((
+        Skill {
+            name,
+            path: path.to_path_buf(),
+        },
+        description,
+    ))
 }
 
 pub fn discover(source: &Path) -> Result<Vec<Skill>, Error> {

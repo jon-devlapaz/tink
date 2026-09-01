@@ -43,6 +43,7 @@ top-level `add` / `check` / `refresh` aliases. CLI binary updates use top-level
 | `tink skill add <source> [--skill <name-or-path>]` | Install one local path, public GitHub skill, GitHub skill tree URL, or library skill by name; remote selectors may be unique names or repository-relative paths |
 | `tink skill list` | List project skills under `.agents/skills/` (read-only) |
 | `tink skill list --catalog` | List offline by-project catalog (`project`, `root`, `skill` TSV) |
+| `tink skill read <name> [--library] [--raw]` | Print one standalone skill's description and lifecycle metadata (read-only) |
 | `tink library list` | List standalone skill names in the library; receipt-backed skillset roots are excluded |
 | `tink skill list --library` | Compatibility alias for `tink library list` |
 | `tink skill harvest` | Copy complete skill trees from known harness roots into the library (create-only; no project writes) |
@@ -228,6 +229,25 @@ Ids are stable. Tests must name or comment the id they prove.
 | L12 | A cataloged project name or root contains tab, CR, LF, backslash, or another terminal control | `skill list --catalog` emits visible backslash escapes (including `\\t`, `\\r`, `\\n`, `\\\\`, and `\\x1b`); every data row remains exactly three TSV columns and contains no raw terminal controls |
 | L13 | `skill list --catalog` with no catalog entries | Exit 0; emits the TSV header and no data rows |
 | L14 | Compare `library list` with `skill list --library` | Both exit 0 with identical stdout and stderr |
+
+### Read
+
+| Id | Action | Expect |
+|---|---|---|
+| RD1 | `skill read <name>` after adding a local standalone skill | Exit 0; stdout includes the name, description, project-relative path `.agents/skills/<name>`, and `Kind: standalone (local)` |
+| RD2 | `skill read <name> --raw` after adding a local standalone skill | Exit 0; stdout is exactly the description line and a newline, with no labels |
+| RD3 | `skill read manage-tink` after `init` | Exit 0; `Kind: embedded` |
+| RD4 | `skill read <name>` when that installed standalone skill has a valid `.tink-source.json` | Exit 0; `Kind: standalone (remote)` plus `Source`, `Revision`, and `Source Path` |
+| RD5 | `skill read <name> --library` after a local add | Exit 0; description matches; path is the library tree, not the project tree |
+| RD6 | `skill read <missing>` in a project that has `.agents/skills` | Exit ≠ 0; mentions not found; when the name exists only in the library, mentions `--library` |
+| RD7 | `skill read <name>` after the installed `SKILL.md` loses YAML frontmatter | Exit ≠ 0; reports that YAML frontmatter is required |
+| RD8 | `skill read <name>-skillset` when that project directory has a skillset receipt entry | Exit ≠ 0; mentions skillset and `tink skillset list`; does not print a member description |
+| RD9 | `skill read <name> --library` when `$TINK_HOME/skills/<name>/` has a skillset receipt entry | Exit ≠ 0; directs the user to `tink skillset add <name>` |
+| RD10 | Insert a nested symlink into an installed standalone skill, then `skill read <name>` | Exit ≠ 0; mentions the symlink; the installed tree is untouched |
+| RD11 | `skill read <name>` | Leaves the project and Tink home trees byte-for-byte and mode-for-mode unchanged; succeeds without external commands on `PATH` |
+| RD12 | Close stdout before a successful `skill read` writes | Exit 0; no panic and no exit 101 |
+| RD13 | `skill read <name>` without `.agents/skills` | Exit ≠ 0 |
+| RD14 | `skill read <member>` when that name exists only nested under a receipt-backed skillset | Exit ≠ 0; mentions not found |
 
 ### Library
 

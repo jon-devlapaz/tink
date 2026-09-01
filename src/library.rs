@@ -353,10 +353,7 @@ pub fn list_names(home: Option<&Path>) -> Result<Vec<String>, Error> {
         .collect())
 }
 
-/// Load one standalone skill from the library by directory name.
-/// Receipt-backed roots remain owned by the skillset lifecycle.
-pub(crate) fn load_at(home: Option<&Path>, name: &str) -> Result<Skill, Error> {
-    let library = library_root(home)?;
+fn load_library_skill(library: &Path, name: &str) -> Result<Skill, Error> {
     let path = library.join(name);
     if path.is_symlink() {
         return Err(Error::msg(format!(
@@ -373,6 +370,32 @@ pub(crate) fn load_at(home: Option<&Path>, name: &str) -> Result<Skill, Error> {
         )));
     }
     skills::read_skill(&path, true)
+}
+
+/// Load one standalone skill from the library by directory name.
+/// Receipt-backed roots remain owned by the skillset lifecycle.
+pub(crate) fn load_at(home: Option<&Path>, name: &str) -> Result<Skill, Error> {
+    let library = library_root(home)?;
+    load_library_skill(&library, name)
+}
+
+/// Load one standalone library skill without creating home or library state.
+pub(crate) fn load_existing_at(home: Option<&Path>, name: &str) -> Result<Skill, Error> {
+    let Some(home) = existing_inventory_root(home)? else {
+        return Err(Error::msg(format!("Library skill not found: {name}")));
+    };
+    let library = skills_library_path(&home);
+    refuse_symlink(&library)?;
+    if !library.exists() {
+        return Err(Error::msg(format!("Library skill not found: {name}")));
+    }
+    if !library.is_dir() {
+        return Err(Error::msg(format!(
+            "Refusing to read non-directory library: {}",
+            library.display()
+        )));
+    }
+    load_library_skill(&library, name)
 }
 
 /// Find a library skill whose receipt matches this remote URL + revision tip.
@@ -546,8 +569,25 @@ mod tests {
 
         let unmarked = temp.path().join("unmarked");
         fs::create_dir_all(unmarked.join("skills")).unwrap();
-        let err = list_names(Some(&unmarked)).unwrap_err();
-        assert!(err.to_string().contains("Not a Tink home"), "{err}");
+        assert!(
+            list_names(Some(&unmarked))
+                .unwrap_err()
+                .to_string()
+                .contains("Not a Tink home")
+        );
+    }
+
+    #[test]
+    fn load_existing_at_does_not_create_missing_home() {
+        let temp = TempDir::new().unwrap();
+        let missing = temp.path().join("missing");
+        let err = load_existing_at(Some(&missing), "demo-skill").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Library skill not found: demo-skill"),
+            "{err}"
+        );
+        assert!(!missing.exists());
     }
 
     #[test]

@@ -1,7 +1,7 @@
 # Tink commands
 
 Load when choosing or running a mutation (step 2). Use the `tink skill …`
-form for add, list, check, refresh, and remove.
+form for add, list, read, check, refresh, and remove.
 
 | Intent | Command |
 |---|---|
@@ -19,6 +19,9 @@ form for add, list, check, refresh, and remove.
 | List (this project) | `tink skill list` |
 | List (catalog) | `tink skill list --catalog` |
 | List (library) | `tink library list` (`tink skill list --library` compatibility alias) |
+| Read one standalone skill | `tink skill read NAME` |
+| Read from the library | `tink skill read NAME --library` |
+| Raw description | `tink skill read NAME --raw` |
 | Check | `tink skill check` |
 | Generate project manifest and lockfile | `tink skill lock --source NAME=PATH` for each local skill; every path must resolve inside the project |
 | Verify manifest, lockfile, and installed trees | `tink skill verify` |
@@ -46,7 +49,9 @@ form for add, list, check, refresh, and remove.
   library trees at `skills/<name>/`. List the library with
   `tink library list` (`tink skill list --library` remains a compatibility
   alias); promote into a project with
-  `tink skill add NAME` (bare standalone library skill name). Receipt-backed
+  `tink skill add NAME` (bare standalone library skill name). `tink skill read
+  NAME` prints one standalone skill's description (`--library` for the home
+  copy; `--raw` for the description line). Receipt-backed
   roots and receipt-bearing sources (including dangling receipt links) are excluded
   from standalone operations. `tink skill harvest` copies complete trees
   from CLI-owned supported harness roots into the library create-only (never

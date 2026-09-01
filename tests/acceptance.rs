@@ -3008,6 +3008,346 @@ fn l10_catalog_distinguishes_projects_with_the_same_basename() {
     );
 }
 
+// --- RD*: skill read ---
+
+fn add_local_skill(ws: &Workspace, project: &Path, name: &str) {
+    let source = ws.root.join(name);
+    write_skill(&source, name, "ok");
+    ws.cmd(project)
+        .args(["skill", "add", source.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[test]
+fn rd1_read_local_standalone_skill() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    add_local_skill(&ws, &project, "demo-skill");
+
+    ws.cmd(&project)
+        .args(["skill", "read", "demo-skill"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("demo-skill")
+                .and(predicate::str::contains(
+                    "Valid skill fixture named demo-skill.",
+                ))
+                .and(predicate::str::contains(
+                    "Path:        .agents/skills/demo-skill",
+                ))
+                .and(predicate::str::contains("Kind:        standalone (local)")),
+        );
+}
+
+#[test]
+fn rd2_read_raw_prints_only_description() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    add_local_skill(&ws, &project, "demo-skill");
+
+    ws.cmd(&project)
+        .args(["skill", "read", "demo-skill", "--raw"])
+        .assert()
+        .success()
+        .stdout(predicate::eq("Valid skill fixture named demo-skill.\n"));
+}
+
+#[test]
+fn rd3_read_manage_tink_is_embedded() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+    ws.cmd(&project)
+        .args(["skill", "read", "manage-tink"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Kind:        embedded"));
+}
+
+#[test]
+fn rd4_read_remote_receipt_fields() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    add_local_skill(&ws, &project, "remote-skill");
+    fs::write(
+        Workspace::skill_path(&project, "remote-skill").join(".tink-source.json"),
+        "{\n  \"source\": \"https://github.com/example/repo.git\",\n  \"revision\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n  \"path\": \"skills/remote-skill\"\n}\n",
+    )
+    .unwrap();
+
+    ws.cmd(&project)
+        .args(["skill", "read", "remote-skill"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Kind:        standalone (remote)")
+                .and(predicate::str::contains(
+                    "Source:      https://github.com/example/repo.git",
+                ))
+                .and(predicate::str::contains(
+                    "Revision:    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                ))
+                .and(predicate::str::contains("Source Path: skills/remote-skill")),
+        );
+}
+
+#[test]
+fn rd5_read_library_uses_library_path() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    add_local_skill(&ws, &project, "demo-skill");
+
+    let library = ws.library_skill("demo-skill");
+    ws.cmd(&project)
+        .args(["skill", "read", "demo-skill", "--library"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Valid skill fixture named demo-skill.")
+                .and(predicate::str::contains(library.to_string_lossy().as_ref()))
+                .and(predicate::str::contains(".agents/skills/demo-skill").not()),
+        );
+}
+
+#[test]
+fn rd6_read_missing_is_actionable_and_hints_library() {
+    let ws = Workspace::new();
+    let donor = ws.project("donor");
+    let app = ws.project("app");
+    ws.cmd(&donor)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    ws.cmd(&app)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    ws.cmd(&app)
+        .args(["skill", "read", "missing-skill"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Skill not found: missing-skill"))
+        .stderr(predicate::str::contains("--library").not());
+
+    add_local_skill(&ws, &donor, "stash-skill");
+    ws.cmd(&app)
+        .args(["skill", "read", "stash-skill"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Skill not found: stash-skill (present in library; use --library)",
+        ));
+}
+
+#[test]
+fn rd7_read_missing_frontmatter_fails() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    add_local_skill(&ws, &project, "demo-skill");
+    fs::write(
+        Workspace::skill_path(&project, "demo-skill").join("SKILL.md"),
+        "no frontmatter\n",
+    )
+    .unwrap();
+
+    ws.cmd(&project)
+        .args(["skill", "read", "demo-skill"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("YAML frontmatter"));
+}
+
+#[test]
+fn rd8_read_skillset_root_refuses() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    let root = Workspace::skill_path(&project, "review-skillset");
+    write_skill(
+        &root.join("code-review"),
+        "code-review",
+        "must not leak through glob",
+    );
+    fs::write(root.join(".tink-skillset.json"), "{}\n").unwrap();
+
+    ws.cmd(&project)
+        .args(["skill", "read", "review-skillset"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("must not leak through glob").not())
+        .stderr(
+            predicate::str::contains("Skillset root detected")
+                .and(predicate::str::contains("tink skillset list")),
+        );
+}
+
+#[test]
+fn rd9_read_library_skillset_root_refuses() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    let root = ws.library_skill("bundle-skillset");
+    write_skill(
+        &root,
+        "bundle-skillset",
+        "root skill must not override skillset ownership",
+    );
+    fs::write(root.join(".tink-skillset.json"), "{}\n").unwrap();
+
+    ws.cmd(&project)
+        .args(["skill", "read", "bundle-skillset", "--library"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Library entry is a skillset").and(
+            predicate::str::contains("tink skillset add bundle-skillset"),
+        ));
+}
+
+#[cfg(unix)]
+#[test]
+fn rd10_read_refuses_nested_symlink() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    add_local_skill(&ws, &project, "demo-skill");
+    let skill = Workspace::skill_path(&project, "demo-skill");
+    std::os::unix::fs::symlink("/tmp", skill.join("nested-link")).unwrap();
+    let before = snapshot_tree(&skill);
+
+    ws.cmd(&project)
+        .args(["skill", "read", "demo-skill"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("symlink"));
+
+    assert_eq!(snapshot_tree(&skill), before);
+}
+
+#[test]
+fn rd11_read_preserves_project_and_home_trees_without_external_commands() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    add_local_skill(&ws, &project, "demo-skill");
+    let project_before = snapshot_tree(&project);
+    let home_before = snapshot_tree(&ws.inventory);
+
+    ws.cmd(&project)
+        .env("PATH", "")
+        .args(["skill", "read", "demo-skill"])
+        .assert()
+        .success();
+
+    assert_eq!(snapshot_tree(&project), project_before);
+    assert_eq!(snapshot_tree(&ws.inventory), home_before);
+}
+
+#[cfg(unix)]
+#[test]
+fn rd12_closed_stdout_does_not_panic_or_exit_101() {
+    use std::os::fd::OwnedFd;
+    use std::os::unix::net::UnixStream;
+    use std::process::Stdio;
+
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    add_local_skill(&ws, &project, "demo-skill");
+
+    let (read_end, write_end) = UnixStream::pair().expect("stdout pipe");
+    drop(read_end);
+    let write_end: OwnedFd = write_end.into();
+    let output = StdCommand::new(assert_cmd::cargo::cargo_bin!("tink"))
+        .current_dir(&project)
+        .env("TINK_HOME", &ws.inventory)
+        .args(["skill", "read", "demo-skill"])
+        .stdout(Stdio::from(write_end))
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn tink with closed stdout")
+        .wait_with_output()
+        .expect("wait for tink");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "closed stdout must exit cleanly: stderr={stderr:?}"
+    );
+    assert!(!stderr.contains("panicked at"));
+}
+
+#[test]
+fn rd13_read_fails_without_skills_dir() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["skill", "read", "demo-skill"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(".agents/skills"));
+}
+
+#[test]
+fn rd14_read_does_not_find_skillset_member_by_bare_name() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-zen", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    let root = Workspace::skill_path(&project, "review-skillset");
+    write_skill(
+        &root.join("code-review"),
+        "code-review",
+        "must not leak through glob",
+    );
+    fs::write(root.join(".tink-skillset.json"), "{}\n").unwrap();
+
+    ws.cmd(&project)
+        .args(["skill", "read", "code-review"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Skill not found: code-review"));
+}
+
 // --- H*: library ---
 
 #[test]
