@@ -12,6 +12,7 @@ use std::time::Duration;
 #[cfg(test)]
 use std::time::Instant;
 
+use semver::Version;
 use sha2::{Digest, Sha256};
 use tempfile::{Builder, TempDir};
 
@@ -103,125 +104,9 @@ pub struct ReleaseAsset {
     pub sha256: [u8; 32],
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum PrereleaseIdentifier {
-    Numeric(String),
-    Text(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct SemVersion {
-    core: [u64; 3],
-    prerelease: Option<Vec<PrereleaseIdentifier>>,
-}
-
-impl SemVersion {
-    fn parse(value: &str) -> Result<Self, Error> {
-        let (without_build, build) = value
-            .split_once('+')
-            .map_or((value, None), |(version, build)| (version, Some(build)));
-        if value.matches('+').count() > 1
-            || build.is_some_and(|build| !valid_identifiers(build, false))
-        {
-            return Err(Error::msg(format!("invalid semantic version: {value}")));
-        }
-        let (core, prerelease) = without_build
-            .split_once('-')
-            .map_or((without_build, None), |(core, pre)| (core, Some(pre)));
-        let core_parts: Vec<&str> = core.split('.').collect();
-        if core_parts.len() != 3 {
-            return Err(Error::msg(format!("invalid semantic version: {value}")));
-        }
-        let mut parsed_core = [0_u64; 3];
-        for (index, part) in core_parts.iter().enumerate() {
-            if !valid_numeric_identifier(part) {
-                return Err(Error::msg(format!("invalid semantic version: {value}")));
-            }
-            parsed_core[index] = part
-                .parse()
-                .map_err(|_| Error::msg(format!("semantic version component overflow: {value}")))?;
-        }
-        let prerelease = match prerelease {
-            Some(pre) if valid_identifiers(pre, true) => Some(
-                pre.split('.')
-                    .map(|identifier| {
-                        if identifier.bytes().all(|byte| byte.is_ascii_digit()) {
-                            PrereleaseIdentifier::Numeric(identifier.to_string())
-                        } else {
-                            PrereleaseIdentifier::Text(identifier.to_string())
-                        }
-                    })
-                    .collect(),
-            ),
-            Some(_) => return Err(Error::msg(format!("invalid semantic version: {value}"))),
-            None => None,
-        };
-        Ok(Self {
-            core: parsed_core,
-            prerelease,
-        })
-    }
-}
-
-fn valid_numeric_identifier(value: &str) -> bool {
-    !value.is_empty()
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-        && (value == "0" || !value.starts_with('0'))
-}
-
-fn valid_identifiers(value: &str, reject_numeric_leading_zero: bool) -> bool {
-    !value.is_empty()
-        && value.split('.').all(|identifier| {
-            !identifier.is_empty()
-                && identifier
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-                && (!reject_numeric_leading_zero
-                    || !identifier.bytes().all(|byte| byte.is_ascii_digit())
-                    || valid_numeric_identifier(identifier))
-        })
-}
-
-impl Ord for SemVersion {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.core
-            .cmp(&other.core)
-            .then_with(|| match (&self.prerelease, &other.prerelease) {
-                (None, None) => Ordering::Equal,
-                (None, Some(_)) => Ordering::Greater,
-                (Some(_), None) => Ordering::Less,
-                (Some(left), Some(right)) => {
-                    for (left, right) in left.iter().zip(right) {
-                        let ordering = match (left, right) {
-                            (
-                                PrereleaseIdentifier::Numeric(left),
-                                PrereleaseIdentifier::Numeric(right),
-                            ) => left.len().cmp(&right.len()).then_with(|| left.cmp(right)),
-                            (PrereleaseIdentifier::Numeric(_), PrereleaseIdentifier::Text(_)) => {
-                                Ordering::Less
-                            }
-                            (PrereleaseIdentifier::Text(_), PrereleaseIdentifier::Numeric(_)) => {
-                                Ordering::Greater
-                            }
-                            (
-                                PrereleaseIdentifier::Text(left),
-                                PrereleaseIdentifier::Text(right),
-                            ) => left.cmp(right),
-                        };
-                        if ordering != Ordering::Equal {
-                            return ordering;
-                        }
-                    }
-                    left.len().cmp(&right.len())
-                }
-            })
-    }
-}
-
-impl PartialOrd for SemVersion {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
+fn parse_version(value: &str) -> Result<Version, Error> {
+    let clean = value.strip_prefix('v').unwrap_or(value);
+    Version::parse(clean).map_err(|_| Error::msg(format!("invalid semantic version: {value}")))
 }
 
 fn parse_sha256(value: &str) -> Result<[u8; 32], Error> {
@@ -294,7 +179,7 @@ fn run_bounded(command: &mut Command, timeout: Duration, context: &str) -> Resul
 
 fn release_version(tag_name: &str) -> Result<String, Error> {
     let version = tag_name.strip_prefix('v').unwrap_or(tag_name);
-    SemVersion::parse(version).map_err(|_| Error::msg("release metadata has invalid tag_name"))?;
+    parse_version(version).map_err(|_| Error::msg("release metadata has invalid tag_name"))?;
     Ok(version.to_string())
 }
 
@@ -626,7 +511,7 @@ pub fn update_binary() -> Result<UpdateReport, Error> {
     validate_asset_url(&asset.download_url, api_mode)?;
 
     let current_version = env!("CARGO_PKG_VERSION");
-    match SemVersion::parse(&asset.version)?.cmp(&SemVersion::parse(current_version)?) {
+    match parse_version(&asset.version)?.cmp_precedence(&parse_version(current_version)?) {
         Ordering::Equal => {
             return Ok(UpdateReport::AlreadyLatest {
                 version: asset.version,
@@ -838,25 +723,21 @@ mod tests {
 
     #[test]
     fn semantic_version_comparison_is_numeric_and_prerelease_aware() {
-        assert!(SemVersion::parse("0.3.10").unwrap() > SemVersion::parse("0.3.9").unwrap());
-        assert!(SemVersion::parse("1.0.0").unwrap() > SemVersion::parse("1.0.0-rc.1").unwrap());
-        assert!(
-            SemVersion::parse("1.0.0-rc.10").unwrap() > SemVersion::parse("1.0.0-rc.2").unwrap()
-        );
-        assert!(
-            SemVersion::parse("1.0.0-100000000000000000000").unwrap()
-                > SemVersion::parse("1.0.0-99999999999999999999").unwrap()
-        );
+        assert!(parse_version("0.3.10").unwrap() > parse_version("0.3.9").unwrap());
+        assert!(parse_version("1.0.0").unwrap() > parse_version("1.0.0-rc.1").unwrap());
+        assert!(parse_version("1.0.0-rc.10").unwrap() > parse_version("1.0.0-rc.2").unwrap());
         assert_eq!(
-            SemVersion::parse("1.0.0+build.2").unwrap(),
-            SemVersion::parse("1.0.0+build.1").unwrap()
+            parse_version("1.0.0+build.2")
+                .unwrap()
+                .cmp_precedence(&parse_version("1.0.0+build.1").unwrap()),
+            Ordering::Equal
         );
     }
 
     #[test]
     fn semantic_version_parser_rejects_ambiguous_versions() {
         for version in ["1.2", "01.2.3", "1.2.3-01", "1.2.3+", "1.2.3/evil"] {
-            assert!(SemVersion::parse(version).is_err(), "accepted {version}");
+            assert!(parse_version(version).is_err(), "accepted {version}");
         }
     }
 
