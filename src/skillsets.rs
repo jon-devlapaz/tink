@@ -20,8 +20,12 @@ use crate::skills;
 use crate::sources;
 
 const RECEIPT_FILE: &str = ".tink-skillset.json";
+/// Agent-authored skillset router. Not part of the Git member pin; ignored by
+/// the receipt digest so manage-tink can write it without dirtying the tree.
+const ROUTER_FILE: &str = "SKILL.md";
 const NAME_SUFFIX: &str = "-skillset";
 const DIGEST_VERSION: u32 = 2;
+const DIGEST_ROOT_IGNORE: &[&str] = &[RECEIPT_FILE, ROUTER_FILE, ".DS_Store"];
 
 fn legacy_digest_version() -> u32 {
     1
@@ -256,7 +260,7 @@ fn validate_installed_tree(path: &Path, receipt: &SkillsetReceipt) -> Result<(),
                 .unwrap_or("NAME-skillset")
         )));
     }
-    let digest = skills::tree_digest(path, &[RECEIPT_FILE])?;
+    let digest = skills::tree_digest(path, DIGEST_ROOT_IGNORE)?;
     if digest != receipt.digest {
         return Err(Error::msg(format!(
             "Skillset tree digest mismatch: {}",
@@ -268,7 +272,7 @@ fn validate_installed_tree(path: &Path, receipt: &SkillsetReceipt) -> Result<(),
 
 fn validate_legacy_tree_for_refresh(path: &Path, receipt: &SkillsetReceipt) -> Result<(), Error> {
     validate_member_trees(path, receipt)?;
-    let digest = skills::tree_digest_legacy(path, &[RECEIPT_FILE])?;
+    let digest = skills::tree_digest_legacy(path, DIGEST_ROOT_IGNORE)?;
     if digest != receipt.digest {
         return Err(Error::msg(format!(
             "Skillset tree digest mismatch: {}",
@@ -347,7 +351,7 @@ fn stage_from_checkout(
         let source = source_member_root(checkout, meta, member)?;
         skills::copy_skill_tree(&source, &staged.join(member), &[".git"])?;
     }
-    let digest = skills::tree_digest(&staged, &[RECEIPT_FILE])?;
+    let digest = skills::tree_digest(&staged, DIGEST_ROOT_IGNORE)?;
     let receipt = receipt_for(meta, digest);
     let receipt_path = staged.join(RECEIPT_FILE);
     let receipt_text = serde_json::to_string_pretty(&receipt)
@@ -357,6 +361,36 @@ fn stage_from_checkout(
     Ok((staging, staged))
 }
 
+fn read_router_overlay(path: &Path) -> Result<Option<Vec<u8>>, Error> {
+    let router = path.join(ROUTER_FILE);
+    if !router.exists() && !router.is_symlink() {
+        return Ok(None);
+    }
+    refuse_symlink(&router)?;
+    if !router.is_file() {
+        return Err(Error::msg(format!(
+            "Skillset router must be a regular file: {}",
+            output::display_path(&router)
+        )));
+    }
+    Ok(Some(fs::read(&router).map_err(|e| map_io(&router, e))?))
+}
+
+fn write_router_overlay(path: &Path, bytes: &[u8]) -> Result<(), Error> {
+    let router = path.join(ROUTER_FILE);
+    if router.exists() || router.is_symlink() {
+        refuse_symlink(&router)?;
+    }
+    fs::write(&router, bytes).map_err(|e| map_io(&router, e))
+}
+
+fn restore_router_overlay(path: &Path, overlay: Option<Vec<u8>>) -> Result<(), Error> {
+    match overlay {
+        Some(bytes) => write_router_overlay(path, &bytes),
+        None => Ok(()),
+    }
+}
+
 fn replace_from_checkout(
     checkout: &Path,
     meta: &SkillsetMeta,
@@ -364,8 +398,9 @@ fn replace_from_checkout(
     name: &str,
 ) -> Result<PathBuf, Error> {
     let target = destination_root.join(name);
+    let overlay = read_router_overlay(&target)?;
     let (staging, staged) = stage_from_checkout(checkout, meta, destination_root, name)?;
-
+    restore_router_overlay(&staged, overlay)?;
     skills::publish_staged_tree(staging, staged, &target)
 }
 
@@ -615,12 +650,21 @@ fn copy_project_tree(
     name: &str,
     replace: bool,
 ) -> Result<(), Error> {
+    let existing_router = if replace {
+        read_router_overlay(&library.join(name))?
+    } else {
+        None
+    };
     let staging = tempfile::Builder::new()
         .prefix(".tink-skillset-library-")
         .tempdir_in(library)
         .map_err(|e| Error::msg(format!("skillset library staging: {e}")))?;
     let staged = staging.path().join(name);
-    skills::copy_skill_tree(project, &staged, &[])?;
+    skills::copy_skill_tree(project, &staged, &[".DS_Store"])?;
+    // Project router wins; otherwise keep the library router across member sync.
+    if read_router_overlay(&staged)?.is_none() {
+        restore_router_overlay(&staged, existing_router)?;
+    }
     read_installed(&staged)?;
     let target = library.join(name);
     if !replace {
@@ -640,8 +684,14 @@ fn sync_library_from_project(home: Option<&Path>, project: &Path) -> Result<Libr
         return Ok(LibraryWrite::Created);
     }
     preflight_library_target(home, &name)?;
-    if skills::skill_contents_equal(project, &target)? {
-        return Ok(LibraryWrite::Unchanged);
+    if skills::skill_contents_equal_except(project, &target, &[ROUTER_FILE, ".DS_Store"])? {
+        match (read_router_overlay(project)?, read_router_overlay(&target)?) {
+            (Some(bytes), library_router) if library_router.as_ref() != Some(&bytes) => {
+                write_router_overlay(&target, &bytes)?;
+                return Ok(LibraryWrite::Repaired);
+            }
+            _ => return Ok(LibraryWrite::Unchanged),
+        }
     }
     copy_project_tree(project, &library, &name, true)?;
     Ok(LibraryWrite::Repaired)
@@ -709,7 +759,7 @@ mod tests {
             "---\nname: demo\ndescription: Legacy receipt fixture.\n---\n",
         )
         .unwrap();
-        let digest = skills::tree_digest_legacy(&installed, &[RECEIPT_FILE]).unwrap();
+        let digest = skills::tree_digest_legacy(&installed, DIGEST_ROOT_IGNORE).unwrap();
         let receipt = SkillsetReceipt {
             source: "https://github.com/example/skills.git".into(),
             revision: "a".repeat(40),

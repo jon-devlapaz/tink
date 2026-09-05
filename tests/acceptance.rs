@@ -351,6 +351,8 @@ fn i6_init_installs_manage_tink_and_catalogs_name() {
     let skill = Workspace::skill_path(&project, "manage-tink");
     assert!(skill.join("SKILL.md").is_file());
     assert!(skill.join("references").join("commands.md").is_file());
+    assert!(skill.join("references").join("skillset-router.md").is_file());
+    assert!(skill.join("scripts").join("list-members.mjs").is_file());
     ws.assert_cataloged("app", "manage-tink");
 }
 
@@ -1276,6 +1278,97 @@ fn k1_skillset_add_installs_explicit_members_and_checks_digest() {
     assert!(!installed.exists());
     assert!(library.is_dir());
     assert!(ws.skillset_meta("common-skillset").is_file());
+}
+
+#[test]
+fn k1b_skillset_root_router_is_ignored_by_digest_and_preserved_on_refresh() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let repository = ws.root.join("skillset-repo");
+    init_repo(&repository);
+    write_skill(
+        &repository.join("bundles/common/alpha"),
+        "alpha",
+        "first member",
+    );
+    write_skill(
+        &repository.join("bundles/common/beta"),
+        "beta",
+        "second member",
+    );
+    let revision = commit_all(&repository, "skillset");
+    let source = "https://github.com/example/skillsets.git";
+    write_skillset_meta(
+        &ws.skillset_meta("common-skillset"),
+        source,
+        &revision,
+        "bundles/common",
+        &["alpha", "beta"],
+    );
+    let redirect = github_redirect(&repository, source);
+    ws.cmd(&project)
+        .args(["skillset", "add", "common-skillset"])
+        .envs(redirect.clone())
+        .assert()
+        .success();
+
+    let installed = Workspace::skill_path(&project, "common-skillset");
+    let library = ws.library_skillset("common-skillset");
+    let router = "---\nname: common-skillset\ndescription: Router for common-skillset.\n---\n\n# Common\n";
+    fs::write(installed.join("SKILL.md"), router).unwrap();
+
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
+    ws.cmd(&project)
+        .args(["skillset", "list", "--library"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("common-skillset"));
+
+    // Library still lacks the router; re-add syncs it without digest failure.
+    ws.cmd(&project)
+        .args(["skillset", "add", "common-skillset"])
+        .envs(redirect.clone())
+        .assert()
+        .success();
+    assert_eq!(
+        fs::read_to_string(library.join("SKILL.md")).unwrap(),
+        router
+    );
+
+    write_skill(
+        &repository.join("bundles/common/alpha"),
+        "alpha",
+        "first member refreshed",
+    );
+    let revision2 = commit_all(&repository, "refresh members");
+    write_skillset_meta(
+        &ws.skillset_meta("common-skillset"),
+        source,
+        &revision2,
+        "bundles/common",
+        &["alpha", "beta"],
+    );
+    ws.cmd(&project)
+        .args(["skillset", "refresh", "common-skillset"])
+        .envs(redirect)
+        .assert()
+        .success();
+    assert_eq!(
+        fs::read_to_string(installed.join("SKILL.md")).unwrap(),
+        router,
+        "refresh must preserve the skillset router"
+    );
+    assert!(
+        fs::read_to_string(installed.join("alpha/SKILL.md"))
+            .unwrap()
+            .contains("refreshed")
+    );
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
 }
 
 #[test]

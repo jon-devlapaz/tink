@@ -1,7 +1,7 @@
 # Tink commands
 
-Load when choosing or running a mutation (step 2). Use the `tink skill …`
-form for add, list, read, check, refresh, and remove.
+Load for Step 2 mutation selection. Prefer the `tink skill …` form for add,
+list, read, check, refresh, and remove.
 
 | Intent | Command |
 |---|---|
@@ -101,6 +101,8 @@ form for add, list, read, check, refresh, and remove.
   it may repair its library copy, while library state never overwrites a
   divergent project. Receipt presence owns the root even when it also contains
   `SKILL.md`; standalone skill commands never expose, promote, or replace it.
+  The receipt digest ignores root `SKILL.md` so manage-tink can author the
+  required router without dirtying the install; refresh preserves that router.
   `skillset remove` deletes only the project tree and keeps
   both the definition and library copy.
   New receipts use `digestVersion: 2`; a clean legacy receipt migrates only via

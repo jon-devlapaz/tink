@@ -13,6 +13,12 @@ use crate::skills::{self, Skill};
 const SKILL_MD: &str = include_str!("../skills/manage-tink/SKILL.md");
 const OPENAI_YAML: &str = include_str!("../skills/manage-tink/agents/openai.yaml");
 const COMMANDS_MD: &str = include_str!("../skills/manage-tink/references/commands.md");
+const SKILLSET_ROUTER_MD: &str =
+    include_str!("../skills/manage-tink/references/skillset-router.md");
+const ROUTER_CANONICAL_MD: &str =
+    include_str!("../skills/manage-tink/references/router-canonical.md");
+const LIST_MEMBERS_MJS: &str = include_str!("../skills/manage-tink/scripts/list-members.mjs");
+const VERIFY_ROUTER_MJS: &str = include_str!("../skills/manage-tink/scripts/verify-router.mjs");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RefreshOutcome {
@@ -31,14 +37,24 @@ pub(crate) fn prepare_manage_tink() -> Result<(tempfile::TempDir, Skill), Error>
     let skill_root = staging.path().join("manage-tink");
     let agents = skill_root.join("agents");
     let references = skill_root.join("references");
+    let scripts = skill_root.join("scripts");
     std::fs::create_dir_all(&agents).map_err(|e| map_io(&agents, e))?;
     std::fs::create_dir_all(&references).map_err(|e| map_io(&references, e))?;
+    std::fs::create_dir_all(&scripts).map_err(|e| map_io(&scripts, e))?;
     std::fs::write(skill_root.join("SKILL.md"), SKILL_MD)
         .map_err(|e| map_io(&skill_root.join("SKILL.md"), e))?;
     std::fs::write(agents.join("openai.yaml"), OPENAI_YAML)
         .map_err(|e| map_io(&agents.join("openai.yaml"), e))?;
     std::fs::write(references.join("commands.md"), COMMANDS_MD)
         .map_err(|e| map_io(&references.join("commands.md"), e))?;
+    std::fs::write(references.join("skillset-router.md"), SKILLSET_ROUTER_MD)
+        .map_err(|e| map_io(&references.join("skillset-router.md"), e))?;
+    std::fs::write(references.join("router-canonical.md"), ROUTER_CANONICAL_MD)
+        .map_err(|e| map_io(&references.join("router-canonical.md"), e))?;
+    std::fs::write(scripts.join("list-members.mjs"), LIST_MEMBERS_MJS)
+        .map_err(|e| map_io(&scripts.join("list-members.mjs"), e))?;
+    std::fs::write(scripts.join("verify-router.mjs"), VERIFY_ROUTER_MJS)
+        .map_err(|e| map_io(&scripts.join("verify-router.mjs"), e))?;
     let skill = skills::read_skill(&skill_root, true)?;
     Ok((staging, skill))
 }
