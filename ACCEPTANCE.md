@@ -154,6 +154,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | Id | Action | Expect |
 |---|---|---|
 | K1 | `skillset add <name>-skillset` with `$TINK_HOME/catalog/by-skillset/<name>-skillset/meta.json` | Installs the pinned members under `.agents/skills/<name>-skillset/`, writes a mode-aware digest-version-2 receipt, validates the project, then mirrors that exact tree to `$TINK_HOME/skills/<name>-skillset/`; matching re-add is a no-op; library drift is repaired from the valid project |
+| K1B | Skillset root `SKILL.md` router added after `skillset add` | Root router is ignored by the receipt digest, `skill check` stays clean, re-add mirrors the router to the library, and `skillset refresh` preserves the router while updating members |
 | K2 | `skillset remove <name>-skillset` after K1 | Removes only the project skillset tree; preserves the shared catalog definition and home library copy; `skill remove` refuses the skillset root. Sensor: K1. |
 | K3 | `skillset list [--library]` after K1 | Groups each receipt-backed project or library skillset with its member skill names without network or writes. Sensor: K1. |
 | K4 | Any skillset command receives a name without `-skillset` | Exit ≠ 0; clear canonical-name error; no skillset tree written |
