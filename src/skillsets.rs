@@ -62,8 +62,6 @@ pub enum LibraryWrite {
 
 #[derive(Debug)]
 pub struct SkillsetAddOutcome {
-    #[allow(dead_code)]
-    pub path: PathBuf,
     pub name: String,
     pub created: bool,
     pub library_write: LibraryWrite,
@@ -781,7 +779,6 @@ fn add_skillset_url_at(
         }
         let library_write = sync_library_from_project(home, &target_dir)?;
         return Ok(SkillsetAddOutcome {
-            path: target_dir,
             name,
             created: false,
             library_write,
@@ -797,7 +794,6 @@ fn add_skillset_url_at(
     )?;
     let library_write = sync_library_from_project(home, &installed)?;
     Ok(SkillsetAddOutcome {
-        path: installed,
         name,
         created,
         library_write,
@@ -841,7 +837,6 @@ fn add_skillset_name_at(
         }
         let library_write = sync_library_from_project(home, &target)?;
         return Ok(SkillsetAddOutcome {
-            path: target,
             name: name.to_string(),
             created: false,
             library_write,
@@ -866,7 +861,6 @@ fn add_skillset_name_at(
     )?;
     let library_write = sync_library_from_project(home, &installed)?;
     Ok(SkillsetAddOutcome {
-        path: installed,
         name: name.to_string(),
         created,
         library_write,

@@ -66,7 +66,6 @@ fn place_skill(
     home: Option<&Path>,
     project_root: &Path,
     skill: &Skill,
-    _destination_root: &Path,
     provenance: Option<&Provenance>,
 ) -> Result<AddOutcome, Error> {
     crate::skillsets::ensure_standalone_source(&skill.path, &skill.name)?;
@@ -187,7 +186,6 @@ fn place_from_library(
     home: Option<&Path>,
     project_root: &Path,
     skill: &Skill,
-    _destination_root: &Path,
 ) -> Result<AddOutcome, Error> {
     crate::skillsets::ensure_standalone_source(&skill.path, &skill.name)?;
     let published = inventory::publish_from_library(home, project_root, skill)?;
@@ -297,7 +295,6 @@ fn install_from_checkout(
     home: Option<&Path>,
     project_root: &Path,
     source_root: &Path,
-    destination_root: &Path,
     options: CheckoutInstallOptions<'_>,
 ) -> Result<AddOutcome, Error> {
     let source_root = source_root
@@ -354,15 +351,9 @@ fn install_from_checkout(
         _ => None,
     };
     if let Some(cached) = library::matching_at(home, &skill, provenance.as_ref())? {
-        return place_from_library(home, project_root, &cached, destination_root);
+        return place_from_library(home, project_root, &cached);
     }
-    place_skill(
-        home,
-        project_root,
-        &skill,
-        destination_root,
-        provenance.as_ref(),
-    )
+    place_skill(home, project_root, &skill, provenance.as_ref())
 }
 
 pub fn add_skill(
@@ -398,7 +389,6 @@ fn add_skill_inner(
     selected_name: Option<&str>,
     report: bool,
 ) -> Result<AddOutcome, Error> {
-    let destination_root = crate::home::project_skills_path(project_root);
     match sources::classify_add_input(source_value)? {
         AddSource::LocalPath(local_source) => {
             crate::paths::refuse_symlink(&local_source)?;
@@ -409,7 +399,6 @@ fn add_skill_inner(
                 home,
                 project_root,
                 &source_root,
-                &destination_root,
                 CheckoutInstallOptions {
                     source_display: &output::display_path(&source_root),
                     selected_name,
@@ -424,13 +413,7 @@ fn add_skill_inner(
             Ok(outcome)
         }
         AddSource::Github(source) => {
-            let outcome = add_from_remote(
-                home,
-                project_root,
-                &destination_root,
-                &source,
-                selected_name,
-            )?;
+            let outcome = add_from_remote(home, project_root, &source, selected_name)?;
             if report {
                 report_add(&outcome)?;
             }
@@ -443,7 +426,7 @@ fn add_skill_inner(
                 ));
             }
             let skill = library::load_at(home, &name)?;
-            let outcome = place_from_library(home, project_root, &skill, &destination_root)?;
+            let outcome = place_from_library(home, project_root, &skill)?;
             if report {
                 report_add(&outcome)?;
             }
@@ -479,7 +462,6 @@ fn report_add(outcome: &AddOutcome) -> Result<(), Error> {
 fn add_from_remote(
     home: Option<&Path>,
     project_root: &Path,
-    destination_root: &Path,
     source: &sources::GithubAddSource,
     selected_name: Option<&str>,
 ) -> Result<AddOutcome, Error> {
@@ -498,7 +480,7 @@ fn add_from_remote(
     if selected_name.is_none() && source.skill_path.is_none() {
         let tip = git::remote_head(&source.remote)?;
         if let Some(cached) = library::for_remote_tip_at(home, &source.remote.url, &tip, None)? {
-            return place_from_library(home, project_root, &cached, destination_root);
+            return place_from_library(home, project_root, &cached);
         }
     }
     let (_temp, source_root, revision) = git::checkout(&source.remote)?;
@@ -519,7 +501,6 @@ fn add_from_remote(
         home,
         project_root,
         &source_root,
-        destination_root,
         CheckoutInstallOptions {
             source_display: &source.remote.display,
             selected_name,

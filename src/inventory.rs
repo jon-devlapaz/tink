@@ -2,7 +2,7 @@
 //! project install → catalog.
 //!
 //! Callers keep classification/selection and warn rendering. Skillset
-//! staging stays out (see `.agents/specs/inventory-publish-seam.md`).
+//! staging stays out of this seam.
 
 use std::path::{Path, PathBuf};
 
