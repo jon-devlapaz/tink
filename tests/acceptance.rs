@@ -351,7 +351,12 @@ fn i6_init_installs_manage_tink_and_catalogs_name() {
     let skill = Workspace::skill_path(&project, "manage-tink");
     assert!(skill.join("SKILL.md").is_file());
     assert!(skill.join("references").join("commands.md").is_file());
-    assert!(skill.join("references").join("skillset-router.md").is_file());
+    assert!(
+        skill
+            .join("references")
+            .join("skillset-router.md")
+            .is_file()
+    );
     assert!(skill.join("scripts").join("list-members.mjs").is_file());
     ws.assert_cataloged("app", "manage-tink");
 }
@@ -1319,7 +1324,8 @@ fn k1b_skillset_root_router_is_ignored_by_digest_and_preserved_on_refresh() {
 
     let installed = Workspace::skill_path(&project, "common-skillset");
     let library = ws.library_skillset("common-skillset");
-    let router = "---\nname: common-skillset\ndescription: Router for common-skillset.\n---\n\n# Common\n";
+    let router =
+        "---\nname: common-skillset\ndescription: Router for common-skillset.\n---\n\n# Common\n";
     fs::write(installed.join("SKILL.md"), router).unwrap();
 
     ws.cmd(&project).args(["skill", "check"]).assert().success();
