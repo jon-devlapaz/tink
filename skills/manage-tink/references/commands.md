@@ -32,8 +32,8 @@ list, read, check, refresh, and remove.
 | Add a pinned catalog skillset | `tink skillset add NAME-skillset` |
 | List project skillsets | `tink skillset list` |
 | List library skillsets | `tink skillset list --library` |
-| Refresh a clean pinned skillset | `tink skillset refresh NAME[-skillset]` |
-| Remove one project skillset | `tink skillset remove NAME[-skillset]` |
+| Refresh a clean pinned skillset | `tink skillset refresh NAME-skillset` (or `NAME`) |
+| Remove one project skillset | `tink skillset remove NAME-skillset` (or `NAME`) |
 | Update the tink CLI binary | `tink update` (newer host asset only; verifies release digest, archive shape, and exact candidate version before replacement) |
 | Destroy managed project skills | `tink destroy --yes` (non-TTY/scripts) or `tink destroy` (TTY, confirm `y`); preserves guidance and unrelated `.agents/` siblings |
 
