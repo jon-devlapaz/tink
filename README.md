@@ -141,6 +141,7 @@ tink skillset add common-skillset
 tink skillset list
 tink skillset list --library
 tink skillset refresh common-skillset
+tink skillset update common-skillset
 tink skillset remove common-skillset
 tink inspect https://github.com/mattpocock/skills
 tink library list

@@ -644,8 +644,15 @@ fn ensure_catalog_definition(
             if existing_meta.members != candidate_meta.members {
                 diffs.push("members");
             }
+            let hint = if !diffs.contains(&"source") && !diffs.contains(&"sourceRoot") {
+                format!(
+                    "\n\nHint: To update this skillset to the latest upstream commit, run:\n  tink skillset update {name}"
+                )
+            } else {
+                String::new()
+            };
             return Err(Error::msg(format!(
-                "Refusing to add {name}: catalog definition already exists with differing metadata ({}) at {}",
+                "Refusing to add {name}: catalog definition already exists with differing metadata ({}) at {}{hint}",
                 diffs.join(", "),
                 output::display_path(&meta_path)
             )));
@@ -913,6 +920,132 @@ pub(crate) fn refresh_skillset_at(
     let installed = replace_from_checkout(&checkout, &meta, &skills_root, name)?;
     sync_library_from_project(home, &installed)?;
     Ok(true)
+}
+
+#[derive(Debug, Clone)]
+pub struct SkillsetUpdateOutcome {
+    pub name: String,
+    pub updated: bool,
+    pub old_revision: String,
+    pub new_revision: String,
+    pub members: usize,
+}
+
+pub fn update_skillset(
+    project_root: &Path,
+    name: Option<&str>,
+) -> Result<Vec<SkillsetUpdateOutcome>, Error> {
+    update_skillset_at(None, project_root, name)
+}
+
+pub(crate) fn update_skillset_at(
+    home: Option<&Path>,
+    project_root: &Path,
+    name: Option<&str>,
+) -> Result<Vec<SkillsetUpdateOutcome>, Error> {
+    if let Some(name) = name {
+        let outcome = update_single_skillset_at(home, project_root, name)?;
+        Ok(vec![outcome])
+    } else {
+        let installed = list_installed(project_root)?;
+        if installed.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut outcomes = Vec::with_capacity(installed.len());
+        for item in installed {
+            let outcome = update_single_skillset_at(home, project_root, &item.name)?;
+            outcomes.push(outcome);
+        }
+        Ok(outcomes)
+    }
+}
+
+pub(crate) fn update_single_skillset_at(
+    home: Option<&Path>,
+    project_root: &Path,
+    name: &str,
+) -> Result<SkillsetUpdateOutcome, Error> {
+    let canonical = canonicalize_skillset_name(name)?;
+    let name = canonical.as_str();
+    let meta = read_catalog(home, name)?;
+    let skills_root = home::project_skills_path(project_root);
+    let target = skills_root.join(name);
+    refuse_symlink(&target)?;
+    if !target.is_dir() {
+        return Err(Error::msg(format!("Skillset not found: {name}")));
+    }
+    let receipt = read_owned_receipt(&target, "installed skillset receipt")?;
+    let legacy_receipt = receipt.digest_version != DIGEST_VERSION;
+    let validation = if legacy_receipt {
+        validate_legacy_tree_for_refresh(&target, &receipt)
+    } else {
+        validate_installed_tree(&target, &receipt)
+    };
+    if validation.is_err() {
+        return Err(Error::msg(format!(
+            "Refusing to update {name}: local modifications are present"
+        )));
+    }
+    preflight_library_target(home, name)?;
+
+    let remote = validate_meta(&meta)?;
+    let (_clone, repository, tip) = git::checkout(&remote)?;
+    if tip == meta.revision {
+        sync_library_from_project(home, &target)?;
+        return Ok(SkillsetUpdateOutcome {
+            name: name.to_string(),
+            updated: false,
+            old_revision: meta.revision.clone(),
+            new_revision: tip,
+            members: meta.members.len(),
+        });
+    }
+
+    validate_revision(&tip)?;
+    let boundary_str = &meta.source_root;
+    let boundary_dir = if boundary_str == "." || boundary_str.is_empty() {
+        repository.clone()
+    } else {
+        canonicalize_beneath(&repository, Path::new(boundary_str))?
+    };
+
+    let members = discover_skillset_members_in_boundary(&boundary_dir)?;
+    if members.is_empty() {
+        return Err(Error::msg(format!(
+            "Refusing to update {name}: no valid member skills found in boundary `{boundary_str}` at upstream revision {tip}"
+        )));
+    }
+    let member_names: Vec<String> = members.iter().map(|(n, _)| n.clone()).collect();
+    validate_members(&member_names)?;
+
+    let new_meta = SkillsetMeta {
+        source: meta.source.clone(),
+        revision: tip.clone(),
+        source_root: meta.source_root.clone(),
+        members: member_names,
+    };
+
+    let installed = replace_from_checkout(&repository, &new_meta, &skills_root, name)?;
+
+    let (resolved_home, _) = home::ensure_inventory_root(home)?;
+    let catalog_path = resolved_home
+        .join("catalog")
+        .join("by-skillset")
+        .join(name)
+        .join("meta.json");
+    let text = serde_json::to_string_pretty(&new_meta)
+        .map_err(|e| Error::msg(format!("serialize skillset catalog meta: {e}")))?;
+    fs::write(&catalog_path, format!("{text}\n")).map_err(|e| map_io(&catalog_path, e))?;
+
+    sync_library_from_project(home, &installed)?;
+
+    Ok(SkillsetUpdateOutcome {
+        name: name.to_string(),
+        updated: true,
+        old_revision: meta.revision,
+        new_revision: tip,
+        members: new_meta.members.len(),
+    })
 }
 
 pub fn remove_skillset(project_root: &Path, name: &str) -> Result<PathBuf, Error> {

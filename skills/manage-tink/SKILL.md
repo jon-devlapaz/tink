@@ -74,7 +74,7 @@ input and stop unless installation was separately authorized. Honor create-only
 and divergence refusals. Use `tink skill add NAME` to promote a bare library
 skill. Receipt-backed roots remain skillsets. Use `tink skill harvest` to fill
 the library from known harness roots, and only the matching
-`tink skillset add`, `refresh`, or `remove` command for a skillset mutation.
+`tink skillset add`, `refresh`, `update`, or `remove` command for a skillset mutation.
 
 **Expected:** The command finishes and its stdout, stderr, and exit status are
 known.
@@ -221,7 +221,7 @@ command success as incomplete until this proof lands.
 | Harvest harness skills into library | `tink skill harvest` |
 | Inspect a public GitHub skill source | `tink inspect GITHUB_URL` (read-only) |
 | List project / library skillsets | `tink skillset list` / `tink skillset list --library` |
-| Add / refresh / remove a canonical skillset | The matching `tink skillset …` command (`tink skillset add <url> [name]` or `tink skillset add <name>`) |
+| Add / refresh / update / remove a canonical skillset | The matching `tink skillset …` command (`tink skillset add <url> [name]`, `tink skillset update [name]`, or `tink skillset add <name>`) |
 | Elevate / regenerate a skillset router | Elevate via [references/skillset-router.md](references/skillset-router.md) |
 | Author a pinned skillset definition | Only the exact `catalog/by-skillset/NAME-skillset/meta.json` input; does not authorize install |
 | Configure shell completion | Only the matching shell command |

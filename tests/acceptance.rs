@@ -1908,6 +1908,145 @@ fn k12_skillset_add_url_inferred_and_custom_name_baseline_router() {
         !ws.library_skillset(corrupt_name).exists(),
         "library tree must not be written on corrupt member"
     );
+
+    // 5. Inspecting before installing (read-only probe without modifying project, catalog, or library)
+    let repo4 = ws.root.join("repo-preview");
+    init_repo(&repo4);
+    write_skill(
+        &repo4.join("skills/preview-one"),
+        "preview-one",
+        "First skill",
+    );
+    write_skill(
+        &repo4.join("skills/preview-two"),
+        "preview-two",
+        "Second skill",
+    );
+    commit_all(&repo4, "preview fixture");
+    let branch4 = current_branch(&repo4);
+    let public4 = "https://github.com/example-org/repo-preview.git";
+    let tree_url4 = format!("https://github.com/example-org/repo-preview/tree/{branch4}/skills");
+    let redirect4 = github_redirect(&repo4, public4);
+
+    let inspect_res = ws
+        .cmd(&project)
+        .args(["inspect", &tree_url4])
+        .envs(redirect4)
+        .assert()
+        .success();
+    let inspect_stdout = String::from_utf8(inspect_res.get_output().stdout.clone()).unwrap();
+    assert!(inspect_stdout.contains("Source"));
+    assert!(inspect_stdout.contains(public4));
+    assert!(inspect_stdout.contains("preview-one"));
+    assert!(inspect_stdout.contains("preview-two"));
+
+    // Ensure zero side effects: no catalog, project, or library entries created
+    let preview_name = "example-org-repo-preview-skillset";
+    assert!(!ws.skillset_meta(preview_name).exists());
+    assert!(!Workspace::skill_path(&project, preview_name).exists());
+    assert!(!ws.library_skillset(preview_name).exists());
+}
+
+#[test]
+fn k13_skillset_update_advances_catalog_and_project_safely() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project).arg("init").assert().success();
+
+    let repo = ws.root.join("repo-update");
+    init_repo(&repo);
+    write_skill(&repo.join("skills/member-a"), "member-a", "Alpha skill");
+    write_skill(&repo.join("skills/member-b"), "member-b", "Beta skill");
+    let rev1 = commit_all(&repo, "v1 skills");
+    let branch = current_branch(&repo);
+    let public = "https://github.com/example-org/repo-update.git";
+    let tree_url = format!("https://github.com/example-org/repo-update/tree/{branch}/skills");
+    let redirect = github_redirect(&repo, public);
+
+    let name = "example-org-repo-update-skillset";
+    ws.cmd(&project)
+        .args(["skillset", "add", &tree_url])
+        .envs(redirect.clone())
+        .assert()
+        .success();
+
+    let initial_meta: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(ws.skillset_meta(name)).unwrap()).unwrap();
+    assert_eq!(initial_meta["revision"], rev1);
+
+    // Commit a 3rd member skill upstream
+    write_skill(&repo.join("skills/member-c"), "member-c", "Gamma skill");
+    let rev2 = commit_all(&repo, "v2 skills with member-c");
+
+    // 1. Re-running add fails with collision and includes the actionable hint
+    ws.cmd(&project)
+        .args(["skillset", "add", &tree_url])
+        .envs(redirect.clone())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Hint: To update this skillset to the latest upstream commit, run:\n  tink skillset update example-org-repo-update-skillset"));
+
+    // 2. Refuses update if local edits exist
+    let installed_member_a = Workspace::skill_path(&project, name).join("member-a/SKILL.md");
+    fs::write(&installed_member_a, "corrupted local modification").unwrap();
+    ws.cmd(&project)
+        .args(["skillset", "update", "example-org-repo-update"])
+        .envs(redirect.clone())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("local modifications are present"));
+
+    // Restore member-a so the project is clean again
+    write_skill(
+        &Workspace::skill_path(&project, name).join("member-a"),
+        "member-a",
+        "Alpha skill",
+    );
+
+    // 3. Update succeeds with bare name, updates catalog, project tree, and library
+    let res = ws
+        .cmd(&project)
+        .args(["skillset", "update", "example-org-repo-update"])
+        .envs(redirect.clone())
+        .assert()
+        .success();
+    let stdout = String::from_utf8(res.get_output().stdout.clone()).unwrap();
+    assert!(stdout.contains("Updated"));
+    assert!(stdout.contains(name));
+    assert!(stdout.contains("3 members"));
+
+    // Catalog definition updated to rev2
+    let updated_meta: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(ws.skillset_meta(name)).unwrap()).unwrap();
+    assert_eq!(updated_meta["revision"], rev2);
+    assert_eq!(
+        updated_meta["members"],
+        serde_json::json!(["member-a", "member-b", "member-c"])
+    );
+
+    // Project tree updated with member-c
+    let project_skillset = Workspace::skill_path(&project, name);
+    assert!(project_skillset.join("member-c/SKILL.md").is_file());
+
+    // Library mirrored
+    let library_skillset = ws.library_skillset(name);
+    assert!(library_skillset.join("member-c/SKILL.md").is_file());
+
+    // 4. Repeated update is a no-op (Unchanged)
+    ws.cmd(&project)
+        .args(["skillset", "update", name])
+        .envs(redirect.clone())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Unchanged"));
+
+    // 5. Update without name updates all installed skillsets
+    ws.cmd(&project)
+        .args(["skillset", "update"])
+        .envs(redirect)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Unchanged"));
 }
 
 // --- R*: remote add ---

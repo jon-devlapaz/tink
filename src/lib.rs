@@ -207,6 +207,11 @@ pub enum SkillsetCommand {
         /// Skillset name (appends -skillset if omitted)
         name: String,
     },
+    /// Advance one or all clean installed skillsets to their latest upstream revision
+    Update {
+        /// Skillset name (appends -skillset if omitted; if omitted, updates all installed skillsets)
+        name: Option<String>,
+    },
     /// Remove one installed skillset without deleting its shared catalog definition
     Remove {
         /// Skillset name (appends -skillset if omitted)
@@ -560,6 +565,41 @@ fn dispatch_skillset(cwd: &Path, command: SkillsetCommand) -> Result<(), Error> 
                     style.muted("Unchanged"),
                     style.skillset(&canonical)
                 );
+            }
+            Ok(())
+        }
+        SkillsetCommand::Update { name } => {
+            let style = CliStyle::auto_stdout();
+            let outcomes = skillsets::update_skillset(cwd, name.as_deref())?;
+            if outcomes.is_empty() {
+                println!("{}", style.muted("Nothing to update"));
+            } else {
+                for outcome in outcomes {
+                    if outcome.updated {
+                        let short_old = &outcome.old_revision[..7.min(outcome.old_revision.len())];
+                        let short_new = &outcome.new_revision[..7.min(outcome.new_revision.len())];
+                        let noun = if outcome.members == 1 {
+                            "member"
+                        } else {
+                            "members"
+                        };
+                        println!(
+                            "{} {} ({} → {}, {} {})",
+                            style.success("Updated"),
+                            style.skillset(&outcome.name),
+                            style.accent(short_old),
+                            style.accent(short_new),
+                            outcome.members,
+                            noun,
+                        );
+                    } else {
+                        println!(
+                            "{} {}",
+                            style.muted("Unchanged"),
+                            style.skillset(&outcome.name)
+                        );
+                    }
+                }
             }
             Ok(())
         }

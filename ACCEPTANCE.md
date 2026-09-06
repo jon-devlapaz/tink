@@ -166,7 +166,8 @@ Ids are stable. Tests must name or comment the id they prove.
 | K9 | `skill check` / `skill list` with grouped members only | Check reports standalone, skillset, and member counts; list says there are no standalone skills and points to `skillset list` |
 | K10 | `skillset refresh <name>-skillset` after the pinned catalog definition changes | Stages and rename-replaces the clean project tree with best-effort rollback, then mirrors the validated result to the library; refuses local project modifications |
 | K11 | A declared member folder and its `SKILL.md` name differ | Exit ≠ 0 before project or library publication; explain the name mismatch |
-| K12 | `skillset add <url> [name-skillset]` with inferred or explicit name | Create-only authors catalog meta.json with resolved immutable Git SHA; direct-boundary discovers members skipping non-skills; aborts on corrupt member frontmatter; generates verify-clean baseline router SKILL.md; mirrors to library; idempotent re-add reports Unchanged |
+| K12 | `skillset add <url> [name-skillset]` with inferred or explicit name | Create-only authors catalog meta.json with resolved immutable Git SHA; direct-boundary discovers members skipping non-skills; aborts on corrupt member frontmatter; generates verify-clean baseline router SKILL.md; mirrors to library; idempotent re-add reports Unchanged; read-only preview via `inspect` leaves project, catalog, and library untouched |
+| K13 | `skillset update [name]` to advance pinned catalog revision | Queries upstream remote; advances catalog meta.json to new immutable tip SHA; discovers new members; preserves router; replaces project tree; mirrors to library; reports Unchanged if already at tip; refuses on local modifications |
 
 ### GitHub inspection
 
