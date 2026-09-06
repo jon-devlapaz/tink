@@ -5002,6 +5002,47 @@ fn p11_refresh_manage_tink_replaces_differing_reserved_copy() {
     );
     ws.cmd(&project).args(["skill", "check"]).assert().success();
     ws.assert_cataloged("app", "manage-tink");
+
+    // Simulate an existing pre-v1.0.9 workspace with legacy Step 4b instructions
+    let skill_md_path = installed.join("SKILL.md");
+    let current_skill_md = fs::read_to_string(&skill_md_path).expect("read SKILL.md");
+    assert!(
+        current_skill_md.contains("Step 4b: Elevate skillset router on ask"),
+        "embedded SKILL.md must contain v1.0.9+ Step 4b"
+    );
+
+    let legacy_skill_md = current_skill_md.replace(
+        "### Step 4b: Elevate skillset router on ask",
+        "### Step 4b: Create a skillset router after add",
+    );
+    fs::write(&skill_md_path, legacy_skill_md).expect("write legacy pre-v1.0.9 SKILL.md");
+
+    // Before refresh, skill check refuses the differing embedded skill
+    ws.cmd(&project)
+        .args(["skill", "check"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "manage-tink differs from this Tink binary; run `tink skill refresh manage-tink`",
+        ));
+
+    // Refreshing updates the project's local manage-tink to v1.0.9+ instructions
+    ws.cmd(&project)
+        .args(["skill", "refresh", "manage-tink"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Refreshed manage-tink"));
+
+    let refreshed_skill_md = fs::read_to_string(&skill_md_path).expect("read refreshed SKILL.md");
+    assert!(
+        refreshed_skill_md.contains("### Step 4b: Elevate skillset router on ask"),
+        "refreshed SKILL.md must contain Step 4b: Elevate skillset router on ask"
+    );
+    assert!(
+        !refreshed_skill_md.contains("### Step 4b: Create a skillset router after add"),
+        "refreshed SKILL.md must not contain legacy Step 4b"
+    );
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
 }
 
 #[test]

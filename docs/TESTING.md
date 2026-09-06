@@ -172,8 +172,7 @@ than copying every row here.
    callers.
 4. Run the focused sensor, then the complete local gate.
 5. When ownership or proof changes, update this map and
-   [`ARCHITECTURE.md`](ARCHITECTURE.md). Record experiment history in
-   [`DEEP-REFACTOR-LOG.md`](DEEP-REFACTOR-LOG.md).
+   [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Traceability and known sensor gaps
 
@@ -182,7 +181,6 @@ sensor IDs, missing named sensors, and executable sensors without a row. Most ro
 to the same-named `tests/acceptance.rs` function. An explicit `Sensor: <ID>` marker
 records deliberate bundled coverage; `Sensor: manual` records an unresolved proof gap.
 
-- C4 still needs no-network/no-write instrumentation.
 - S1 is automated only for `init` not creating a Git repository; its command-wide
   no-stage/commit/push claim remains partial.
 - S2 (home is never an agent discovery root) remains manual.

@@ -168,7 +168,8 @@ tink skill remove skill-name
   `tink skill refresh manage-tink` path instead owns the reserved embedded
   package: it installs a missing copy, leaves a current copy unchanged, or
   atomically replaces differing receipt-free contents. Remote provenance is
-  refused.
+  refused. When upgrading your binary to v1.0.9+, run this in existing project
+  workspaces to update local instructions to Step 4b ("Elevate skillset router on ask").
 - tink does not overwrite a project skill that differs from what it would
   install.
 - tink never inits Git, stages, commits, or pushes.

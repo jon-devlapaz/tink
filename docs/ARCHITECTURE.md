@@ -8,7 +8,6 @@ trees, project-name indexes, and pinned skillset definitions.
 This document is the current navigation map. [`ACCEPTANCE.md`](../ACCEPTANCE.md)
 records intended CLI and on-disk behavior, the workflow files own delivery automation,
 [`TESTING.md`](TESTING.md) maps their executable sensors and known drift, and
-[`DEEP-REFACTOR-LOG.md`](DEEP-REFACTOR-LOG.md) preserves experiment history.
 
 ## State and authority
 
@@ -19,7 +18,7 @@ records intended CLI and on-disk behavior, the workflow files own delivery autom
 | `$TINK_HOME/layout.json` and root directories | `home.rs` | Marks and migrates offline inventory; never an agent discovery root. |
 | `$TINK_HOME/skills/<name>/` | `library.rs`, `skillsets.rs` | Reusable standalone trees or derived skillset copies. A skillset receipt decides which lifecycle owns a root. |
 | `$TINK_HOME/catalog/by-project/<bounded-name>-<identity>/meta.json` | `catalog.rs` | Derived project-name index. `identity` is SHA-256 of the canonical project path (raw bytes on Unix), so same-basename projects do not collide. Add/refresh deposit names; remove/destroy withdraw them. It is not runtime state. |
-| `$TINK_HOME/catalog/by-skillset/<name>/meta.json` | `skillsets.rs` | Authored desired definition: HTTPS source, immutable revision, source root, and explicit members. Tink reads it but has no CLI writer for it. |
+| `$TINK_HOME/catalog/by-skillset/<name>/meta.json` | `skillsets.rs` | Pinned skillset definition: HTTPS source, immutable revision, source root, and explicit members. Authored externally or via create-only `tink skillset add <url>`, and advanced by `tink skillset update` (K12/K13). |
 | `.tink-source.json` | `provenance.rs` | Optional standalone remote provenance: source, revision, and path. It does not classify a root. |
 | `.tink-skillset.json` | `skillsets.rs` | Skillset ownership and digest evidence. Presence classifies; validated contents prove the installed tree. |
 

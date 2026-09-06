@@ -58,6 +58,7 @@ top-level `add` / `check` / `refresh` aliases. CLI binary updates use top-level
 | `tink skillset add <name>-skillset` | Install one catalog-defined, revision-pinned skillset definition as a nested project tree, generate a baseline root router if missing, and mirror it to the library |
 | `tink skillset list [--library]` | Group receipt-backed project or library skillsets with their member names (read-only) |
 | `tink skillset refresh <name>-skillset` | Replace one clean installed skillset from its current pinned definition; refuse local edits |
+| `tink skillset update [name]` | Advance pinned catalog revision to upstream default branch and update project and library trees; preserves router |
 | `tink skillset remove <name>-skillset` | Delete only the installed project skillset; preserve its definition and library copy |
 | `tink inspect <GITHUB_URL>` | Inspect skills and source-defined skillsets in a public GitHub URL without writing project or home state |
 | `tink update` | Replace this binary with a newer verified public GitHub Release (requires `curl` + `tar`) |
