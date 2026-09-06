@@ -745,9 +745,8 @@ mod tests {
             .path()
             .join(OsString::from_vec(b"project-\x80".to_vec()));
         if let Err(error) = fs::create_dir_all(&project) {
-            assert_eq!(
-                error.raw_os_error(),
-                Some(92),
+            assert!(
+                matches!(error.raw_os_error(), Some(1 | 92)),
                 "unexpected fixture error: {error}"
             );
             return;

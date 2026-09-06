@@ -195,8 +195,13 @@ pub enum SkillsetCommand {
         #[arg(long)]
         library: bool,
     },
-    /// Install the pinned skillset named in `$TINK_HOME/catalog/by-skillset/`
-    Add { name: String },
+    /// Install a skillset from a GitHub tree URL or pinned catalog name
+    Add {
+        /// GitHub tree URL or catalog skillset name
+        target: String,
+        /// Optional skillset name (appends -skillset if omitted; valid only with a URL)
+        name: Option<String>,
+    },
     /// Update one clean installed skillset to its pinned catalog definition
     Refresh { name: String },
     /// Remove one installed skillset without deleting its shared catalog definition
@@ -487,21 +492,50 @@ fn dispatch_skillset(cwd: &Path, command: SkillsetCommand) -> Result<(), Error> 
             }
             Ok(())
         }
-        SkillsetCommand::Add { name } => {
+        SkillsetCommand::Add { target, name } => {
             let style = CliStyle::auto_stdout();
-            let (path, created, library_write) = skillsets::add_skillset(cwd, &name)?;
-            if library_write == skillsets::LibraryWrite::Repaired {
+            let outcome = skillsets::add_skillset(cwd, &target, name.as_deref())?;
+            if outcome.library_write == skillsets::LibraryWrite::Repaired {
                 let err = CliStyle::auto_stderr();
-                eprintln!("{}", err.warn(format!("Updated home copy of {name}")));
+                eprintln!(
+                    "{}",
+                    err.warn(format!("Updated home copy of {}", outcome.name))
+                );
             }
-            if created {
+            if outcome.created {
+                let member_noun = if outcome.member_count == 1 {
+                    "member"
+                } else {
+                    "members"
+                };
+                let rel_location = format!(".agents/skills/{}/", outcome.name);
+                let rel_router = format!(".agents/skills/{}/SKILL.md", outcome.name);
                 println!(
-                    "{} {}",
-                    style.success("Installed"),
-                    style.accent(path.display())
+                    "  {} Installed skillset: {} ({} {})",
+                    style.success("✓"),
+                    style.skillset(&outcome.name),
+                    outcome.member_count,
+                    member_noun
+                );
+                println!("    Location: {}", style.accent(rel_location));
+                println!(
+                    "    Router:   {} (baseline generated)",
+                    style.accent(rel_router)
+                );
+                println!();
+                println!(
+                    "  To elevate this router with semantic coordinators and custom roles, prompt your agent:"
+                );
+                println!(
+                    "    \"Use manage-tink to create a skillset router for {}\"",
+                    outcome.name
                 );
             } else {
-                println!("{} {}", style.muted("Unchanged"), style.skillset(name));
+                println!(
+                    "{} {}",
+                    style.muted("Unchanged"),
+                    style.skillset(outcome.name)
+                );
             }
             Ok(())
         }

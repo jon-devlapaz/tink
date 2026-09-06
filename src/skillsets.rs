@@ -60,6 +60,16 @@ pub enum LibraryWrite {
     Repaired,
 }
 
+#[derive(Debug)]
+pub struct SkillsetAddOutcome {
+    #[allow(dead_code)]
+    pub path: PathBuf,
+    pub name: String,
+    pub created: bool,
+    pub library_write: LibraryWrite,
+    pub member_count: usize,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct SkillsetMeta {
@@ -124,6 +134,9 @@ fn validate_digest(digest: &str) -> Result<(), Error> {
 }
 
 fn normalized_source_root(source_root: &str) -> Result<PathBuf, Error> {
+    if source_root == "." {
+        return Ok(PathBuf::from("."));
+    }
     if source_root.is_empty() || source_root.starts_with('/') || source_root.contains('\\') {
         return Err(Error::msg(
             "Skillset sourceRoot must be a non-empty relative POSIX path",
@@ -299,8 +312,12 @@ fn source_member_root(
     checkout: &Path,
     meta: &SkillsetMeta,
     member: &str,
-) -> Result<PathBuf, Error> {
-    let source_root = canonicalize_beneath(checkout, &normalized_source_root(&meta.source_root)?)?;
+) -> Result<(PathBuf, String), Error> {
+    let source_root = if meta.source_root == "." {
+        checkout.to_path_buf()
+    } else {
+        canonicalize_beneath(checkout, &normalized_source_root(&meta.source_root)?)?
+    };
     if !source_root.is_dir() {
         return Err(Error::msg(format!(
             "Skillset sourceRoot is not a directory: {}",
@@ -311,8 +328,8 @@ fn source_member_root(
     if !member_root.is_dir() {
         return Err(Error::msg(format!("Skillset member not found: {member}")));
     }
-    skills::read_skill(&member_root, true)?;
-    Ok(member_root)
+    let (_skill, desc) = skills::read_skill_and_description(&member_root, true)?;
+    Ok((member_root, desc))
 }
 
 fn install_from_checkout(
@@ -347,9 +364,11 @@ fn stage_from_checkout(
         .map_err(|e| Error::msg(format!("skillset staging dir: {e}")))?;
     let staged = staging.path().join(name);
     fs::create_dir_all(&staged).map_err(|e| map_io(&staged, e))?;
+    let mut member_descriptions = Vec::with_capacity(meta.members.len());
     for member in &meta.members {
-        let source = source_member_root(checkout, meta, member)?;
+        let (source, desc) = source_member_root(checkout, meta, member)?;
         skills::copy_skill_tree(&source, &staged.join(member), &[".git"])?;
+        member_descriptions.push((member.clone(), desc));
     }
     let digest = skills::tree_digest(&staged, DIGEST_ROOT_IGNORE)?;
     let receipt = receipt_for(meta, digest);
@@ -357,6 +376,13 @@ fn stage_from_checkout(
     let receipt_text = serde_json::to_string_pretty(&receipt)
         .map_err(|e| Error::msg(format!("serialize skillset receipt: {e}")))?;
     fs::write(&receipt_path, format!("{receipt_text}\n")).map_err(|e| map_io(&receipt_path, e))?;
+
+    let router_path = staged.join(ROUTER_FILE);
+    if !router_path.exists() {
+        let router_text = generate_baseline_router(name, &member_descriptions);
+        fs::write(&router_path, router_text).map_err(|e| map_io(&router_path, e))?;
+    }
+
     read_installed(&staged)?;
     Ok((staging, staged))
 }
@@ -404,18 +430,375 @@ fn replace_from_checkout(
     skills::publish_staged_tree(staging, staged, &target)
 }
 
+fn human_title(name: &str) -> String {
+    name.split('-')
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn generate_baseline_router(name: &str, members: &[(String, String)]) -> String {
+    let member_names: Vec<&str> = members.iter().map(|(n, _)| n.as_str()).collect();
+    let members_joined = member_names.join(", ");
+    let title = human_title(name);
+
+    let mut out = String::new();
+    out.push_str("---\n");
+    out.push_str(&format!("name: {name}\n"));
+    out.push_str("description: >\n");
+    out.push_str(&format!(
+        "  Router for the {name} skillset. Use when work involves {members_joined}.\n"
+    ));
+    out.push_str("  Do not use when a single named member skill is already the clear owner.\n");
+    out.push_str("---\n\n");
+    out.push_str(&format!("# {title}\n\n"));
+    out.push_str(
+        "Route. Prefer members under this skillset tree over any sibling standalone\n\
+         skill with the same name.\n\n\
+         ## 1. Classify the request\n\n\
+         Pick the lightest owner that covers the ask:\n\n",
+    );
+
+    if members.len() >= 12 {
+        out.push_str("### Members\n\n");
+    }
+
+    out.push_str("| Ask | Load |\n");
+    out.push_str("| --- | --- |\n");
+    for (member, desc) in members {
+        let first_line = desc.lines().next().unwrap_or("").trim().replace('|', "\\|");
+        let ask = if first_line.is_empty() {
+            format!("Work involving {member}.")
+        } else {
+            first_line
+        };
+        out.push_str(&format!(
+            "| {ask} | [{member}/SKILL.md]({member}/SKILL.md) |\n"
+        ));
+    }
+    out.push('\n');
+
+    out.push_str(
+        "If the user names a member, load that member only.\n\n\
+         If several domains are in play and a coordinator owns that workflow, load it.\n\
+         Otherwise load only the owners needed for the change.\n\n\
+         ## 2. Hand off\n\n\
+         1. Read the chosen member `SKILL.md` in full.\n\
+         2. Follow that skill's procedure, references, and reporting format.\n\
+         3. Load sibling members only when the chosen skill names a handoff, or when a\n\
+            coordinator requires its workers.\n\n\
+         ## 3. Boundaries\n\n\
+         - Leave `.tink-skillset.json` untouched. It is ownership and digest evidence.\n\
+         - Skillset install, refresh, and remove stay with `manage-tink`.\n",
+    );
+
+    out
+}
+
+fn sanitize_for_skill_name(raw: &str) -> String {
+    let mut result = String::with_capacity(raw.len());
+    let mut last_was_hyphen = false;
+    for c in raw.chars() {
+        if c.is_ascii_alphanumeric() {
+            result.push(c.to_ascii_lowercase());
+            last_was_hyphen = false;
+        } else if !last_was_hyphen {
+            result.push('-');
+            last_was_hyphen = true;
+        }
+    }
+    result.trim_matches('-').to_string()
+}
+
+fn is_generic_folder(folder: &str) -> bool {
+    matches!(
+        folder,
+        "" | "." | "skills" | "agent-skills" | "agents" | ".agents"
+    )
+}
+
+fn derive_skillset_name(
+    owner: &str,
+    repo: &str,
+    boundary: &str,
+    custom_name: Option<&str>,
+) -> Result<String, Error> {
+    if let Some(custom) = custom_name {
+        let trimmed = custom.trim();
+        let candidate = if trimmed.ends_with(NAME_SUFFIX) {
+            trimmed.to_string()
+        } else {
+            format!("{trimmed}{NAME_SUFFIX}")
+        };
+        validate_skillset_name(&candidate)?;
+        return Ok(candidate);
+    }
+
+    let folder = boundary
+        .trim_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
+        .trim();
+
+    let base = if is_generic_folder(folder) {
+        let owner_clean = sanitize_for_skill_name(owner);
+        let repo_clean = sanitize_for_skill_name(repo);
+        format!("{owner_clean}-{repo_clean}")
+    } else {
+        sanitize_for_skill_name(folder)
+    };
+
+    let candidate = if base.ends_with(NAME_SUFFIX) {
+        base
+    } else {
+        format!("{base}{NAME_SUFFIX}")
+    };
+
+    validate_skillset_name(&candidate).map_err(|e| {
+        Error::msg(format!(
+            "Could not infer valid canonical skillset name from URL: {e}; please specify a name explicitly"
+        ))
+    })?;
+
+    Ok(candidate)
+}
+
+fn discover_skillset_members_in_boundary(
+    boundary_dir: &Path,
+) -> Result<Vec<(String, String)>, Error> {
+    refuse_symlink(boundary_dir)?;
+    if !boundary_dir.is_dir() {
+        return Err(Error::msg(format!(
+            "Skillset boundary is not a directory: {}",
+            output::display_path(boundary_dir)
+        )));
+    }
+
+    let mut entries: Vec<_> = fs::read_dir(boundary_dir)
+        .map_err(|e| map_io(boundary_dir, e))?
+        .collect::<Result<_, _>>()
+        .map_err(|e| map_io(boundary_dir, e))?;
+    entries.sort_by_key(|e| e.file_name());
+
+    let mut members = Vec::new();
+    for entry in entries {
+        let path = entry.path();
+        let name = path.file_name().and_then(|v| v.to_str()).unwrap_or("");
+        if name.starts_with('.') {
+            continue;
+        }
+        refuse_symlink(&path)?;
+        if !path.is_dir() {
+            continue;
+        }
+        let skill_file = path.join(ROUTER_FILE);
+        if skill_file.exists() || skill_file.is_symlink() {
+            let (skill, desc) = skills::read_skill_and_description(&path, true)?;
+            members.push((skill.name, desc));
+        }
+    }
+
+    if members.is_empty() {
+        return Err(Error::msg(format!(
+            "No member skills found in boundary: {}",
+            output::display_path(boundary_dir)
+        )));
+    }
+
+    members.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(members)
+}
+
+fn ensure_catalog_definition(
+    home: &Path,
+    name: &str,
+    candidate_meta: &SkillsetMeta,
+) -> Result<(), Error> {
+    let catalog_dir = home::by_skillset_path(home).join(name);
+    let meta_path = catalog_dir.join("meta.json");
+    if meta_path.exists() || meta_path.is_symlink() {
+        refuse_symlink(&meta_path)?;
+        let existing_meta: SkillsetMeta = read_json(&meta_path, "skillset catalog meta")?;
+        if &existing_meta != candidate_meta {
+            let mut diffs = Vec::new();
+            if existing_meta.source != candidate_meta.source {
+                diffs.push("source");
+            }
+            if existing_meta.revision != candidate_meta.revision {
+                diffs.push("revision");
+            }
+            if existing_meta.source_root != candidate_meta.source_root {
+                diffs.push("sourceRoot");
+            }
+            if existing_meta.members != candidate_meta.members {
+                diffs.push("members");
+            }
+            return Err(Error::msg(format!(
+                "Refusing to add {name}: catalog definition already exists with differing metadata ({}) at {}",
+                diffs.join(", "),
+                output::display_path(&meta_path)
+            )));
+        }
+        return Ok(());
+    }
+
+    fs::create_dir_all(&catalog_dir).map_err(|e| map_io(&catalog_dir, e))?;
+    let text = serde_json::to_string_pretty(candidate_meta)
+        .map_err(|e| Error::msg(format!("serialize skillset catalog meta: {e}")))?;
+    fs::write(&meta_path, format!("{text}\n")).map_err(|e| map_io(&meta_path, e))?;
+    Ok(())
+}
+
 pub fn add_skillset(
     project_root: &Path,
-    name: &str,
-) -> Result<(PathBuf, bool, LibraryWrite), Error> {
-    add_skillset_at(None, project_root, name)
+    target: &str,
+    custom_name: Option<&str>,
+) -> Result<SkillsetAddOutcome, Error> {
+    add_skillset_at(None, project_root, target, custom_name)
 }
 
 pub(crate) fn add_skillset_at(
     home: Option<&Path>,
     project_root: &Path,
+    target: &str,
+    custom_name: Option<&str>,
+) -> Result<SkillsetAddOutcome, Error> {
+    if target.starts_with("https://") {
+        add_skillset_url_at(home, project_root, target, custom_name)
+    } else {
+        if custom_name.is_some() {
+            return Err(Error::msg(
+                "Unexpected argument: custom name is only supported when adding by URL",
+            ));
+        }
+        add_skillset_name_at(home, project_root, target)
+    }
+}
+
+fn add_skillset_url_at(
+    home: Option<&Path>,
+    project_root: &Path,
+    target: &str,
+    custom_name: Option<&str>,
+) -> Result<SkillsetAddOutcome, Error> {
+    let github = sources::parse_github_add_source(target)?;
+    if let (Some(tree_ref), Some(skill_path)) =
+        (github.tree_ref.as_deref(), github.skill_path.as_deref())
+    {
+        git::reject_ambiguous_tree_ref(&github.remote, tree_ref, skill_path)?;
+    }
+
+    let (owner, repo) = {
+        let stripped = github
+            .remote
+            .url
+            .strip_prefix("https://github.com/")
+            .ok_or_else(|| Error::msg("Expected GitHub remote URL"))?
+            .trim_end_matches(".git");
+        let (o, r) = stripped
+            .split_once('/')
+            .ok_or_else(|| Error::msg("Expected owner/repo in remote URL"))?;
+        (o.to_string(), r.to_string())
+    };
+
+    let boundary_str = github.skill_path.clone().unwrap_or_else(|| ".".to_string());
+    let name = derive_skillset_name(&owner, &repo, &boundary_str, custom_name)?;
+
+    let (_clone, repository, revision) =
+        git::checkout_ref(&github.remote, github.tree_ref.as_deref())?;
+    validate_revision(&revision)?;
+
+    let boundary_dir = if boundary_str == "." || boundary_str.is_empty() {
+        repository.clone()
+    } else {
+        canonicalize_beneath(&repository, Path::new(&boundary_str))?
+    };
+
+    let members = discover_skillset_members_in_boundary(&boundary_dir)?;
+    let member_names: Vec<String> = members.iter().map(|(n, _)| n.clone()).collect();
+    validate_members(&member_names)?;
+
+    let source_root = if boundary_str.is_empty() {
+        ".".to_string()
+    } else {
+        boundary_str
+    };
+
+    let candidate_meta = SkillsetMeta {
+        source: github.remote.url.clone(),
+        revision: revision.clone(),
+        source_root,
+        members: member_names,
+    };
+
+    preflight_library_target(home, &name)?;
+    let (resolved_home, _) = home::ensure_inventory_root(home)?;
+    ensure_catalog_definition(&resolved_home, &name, &candidate_meta)?;
+
+    init::ensure_project_layout_at(home, project_root)?;
+    let target_dir = home::project_skills_path(project_root).join(&name);
+    if target_dir.exists() || target_dir.is_symlink() {
+        refuse_symlink(&target_dir)?;
+        if !target_dir.is_dir() {
+            return Err(Error::msg(format!(
+                "Refusing to overwrite non-directory skillset: {}",
+                output::display_path(&target_dir)
+            )));
+        }
+        let receipt = read_owned_receipt(&target_dir, "installed skillset receipt")?;
+        if receipt.digest_version != DIGEST_VERSION {
+            return Err(Error::msg(format!(
+                "Skillset receipt uses a legacy digest; run `tink skillset refresh {name}` to migrate it"
+            )));
+        }
+        if validate_installed_tree(&target_dir, &receipt).is_err() {
+            return Err(Error::msg(format!(
+                "Refusing to add {name}: local modifications are present; remove it first to discard them"
+            )));
+        }
+        if receipt_meta(&receipt) != candidate_meta {
+            return Err(Error::msg(format!(
+                "Skillset catalog changed for {name}; run `tink skillset refresh {name}`"
+            )));
+        }
+        let library_write = sync_library_from_project(home, &target_dir)?;
+        return Ok(SkillsetAddOutcome {
+            path: target_dir,
+            name,
+            created: false,
+            library_write,
+            member_count: candidate_meta.members.len(),
+        });
+    }
+
+    let (installed, created) = install_from_checkout(
+        &repository,
+        &candidate_meta,
+        &home::project_skills_path(project_root),
+        &name,
+    )?;
+    let library_write = sync_library_from_project(home, &installed)?;
+    Ok(SkillsetAddOutcome {
+        path: installed,
+        name,
+        created,
+        library_write,
+        member_count: candidate_meta.members.len(),
+    })
+}
+
+fn add_skillset_name_at(
+    home: Option<&Path>,
+    project_root: &Path,
     name: &str,
-) -> Result<(PathBuf, bool, LibraryWrite), Error> {
+) -> Result<SkillsetAddOutcome, Error> {
     validate_skillset_name(name)?;
     let meta = read_catalog(home, name)?;
     preflight_library_target(home, name)?;
@@ -445,7 +828,13 @@ pub(crate) fn add_skillset_at(
             )));
         }
         let library_write = sync_library_from_project(home, &target)?;
-        return Ok((target, false, library_write));
+        return Ok(SkillsetAddOutcome {
+            path: target,
+            name: name.to_string(),
+            created: false,
+            library_write,
+            member_count: meta.members.len(),
+        });
     }
 
     init::ensure_project_layout_at(home, project_root)?;
@@ -464,7 +853,13 @@ pub(crate) fn add_skillset_at(
         name,
     )?;
     let library_write = sync_library_from_project(home, &installed)?;
-    Ok((installed, created, library_write))
+    Ok(SkillsetAddOutcome {
+        path: installed,
+        name: name.to_string(),
+        created,
+        library_write,
+        member_count: meta.members.len(),
+    })
 }
 
 pub fn refresh_skillset(project_root: &Path, name: &str) -> Result<bool, Error> {
@@ -778,11 +1173,12 @@ mod tests {
     fn source_root_rejects_escape_and_empty_segments() {
         for value in [
             "",
-            ".",
             "skills/../other",
             "/skills",
             "skills//common",
             "skills\\common",
+            "./skills",
+            "skills/.",
         ] {
             assert!(normalized_source_root(value).is_err(), "{value}");
         }
@@ -790,6 +1186,7 @@ mod tests {
             normalized_source_root("skills/common").unwrap(),
             PathBuf::from("skills/common")
         );
+        assert_eq!(normalized_source_root(".").unwrap(), PathBuf::from("."));
     }
 
     #[cfg(unix)]

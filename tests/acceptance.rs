@@ -1101,7 +1101,10 @@ fn a15_add_preserves_distinct_non_utf8_unix_filenames() {
         if let Err(error) = fs::write(source.join(name), body) {
             #[cfg(target_os = "macos")]
             {
-                assert_eq!(error.raw_os_error(), Some(92), "unexpected fixture error");
+                assert!(
+                    matches!(error.raw_os_error(), Some(1 | 92)),
+                    "unexpected fixture error: {error:?}"
+                );
                 assert!(!Workspace::skill_path(&project, "opaque-name-skill").exists());
                 return;
             }
@@ -1656,6 +1659,235 @@ fn k11_skillset_rejects_member_directory_name_mismatch() {
         );
     assert!(!Workspace::skill_path(&project, "common-skillset").exists());
     assert!(!ws.library_skillset("common-skillset").exists());
+}
+
+#[test]
+fn k12_skillset_add_url_inferred_and_custom_name_baseline_router() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    // 1. Repo with generic folder "skills" + extra non-skill files/dirs
+    let repo1 = ws.root.join("repo-skills");
+    init_repo(&repo1);
+    write_skill(&repo1.join("skills/alpha"), "alpha", "Alpha member skill");
+    write_skill(&repo1.join("skills/beta"), "beta", "Beta member skill");
+    // Non-skill subfolder (no SKILL.md) and auxiliary file
+    fs::create_dir_all(repo1.join("skills/docs")).unwrap();
+    fs::write(repo1.join("skills/docs/guide.txt"), "documentation").unwrap();
+    fs::write(repo1.join("skills/README.md"), "# Skills readme").unwrap();
+
+    let rev1 = commit_all(&repo1, "initial skills");
+    let branch1 = current_branch(&repo1);
+    let public1 = "https://github.com/example-org/repo-skills.git";
+    let tree_url1 = format!("https://github.com/example-org/repo-skills/tree/{branch1}/skills");
+    let redirect1 = github_redirect(&repo1, public1);
+
+    // Inferred name should be example-org-repo-skills-skillset
+    let inferred_name = "example-org-repo-skills-skillset";
+    let res = ws
+        .cmd(&project)
+        .args(["skillset", "add", &tree_url1])
+        .envs(redirect1.clone())
+        .assert()
+        .success();
+    let stdout = String::from_utf8(res.get_output().stdout.clone()).unwrap();
+    assert!(stdout.contains(&format!(
+        "✓ Installed skillset: {inferred_name} (2 members)"
+    )));
+    assert!(stdout.contains(&format!("  Location: .agents/skills/{inferred_name}/")));
+    assert!(stdout.contains(&format!(
+        "  Router:   .agents/skills/{inferred_name}/SKILL.md (baseline generated)"
+    )));
+    assert!(stdout.contains(
+        "To elevate this router with semantic coordinators and custom roles, prompt your agent:"
+    ));
+    assert!(stdout.contains(&format!(
+        "  \"Use manage-tink to create a skillset router for {inferred_name}\""
+    )));
+
+    // Catalog definition authored create-only with immutable 40-char commit SHA
+    let meta_path = ws.skillset_meta(inferred_name);
+    assert!(meta_path.is_file());
+    let meta_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&meta_path).unwrap()).unwrap();
+    assert_eq!(meta_json["source"], public1);
+    assert_eq!(meta_json["revision"], rev1);
+    assert_eq!(meta_json["sourceRoot"], "skills");
+    assert_eq!(meta_json["members"], serde_json::json!(["alpha", "beta"]));
+
+    // Installed project files
+    let installed1 = Workspace::skill_path(&project, inferred_name);
+    assert!(installed1.join("alpha/SKILL.md").is_file());
+    assert!(installed1.join("beta/SKILL.md").is_file());
+    assert!(!installed1.join("docs").exists());
+    assert!(!installed1.join("README.md").exists());
+    assert!(installed1.join(".tink-skillset.json").is_file());
+    let router1 = installed1.join("SKILL.md");
+    assert!(router1.is_file());
+    let router_content = fs::read_to_string(&router1).unwrap();
+    assert!(router_content.starts_with(&format!("---\nname: {inferred_name}\n")));
+    assert!(
+        router_content
+            .contains("Do not use when a single named member skill is already the clear owner.")
+    );
+
+    // Library mirrored
+    let library1 = ws.library_skillset(inferred_name);
+    assert!(library1.join("alpha/SKILL.md").is_file());
+    assert!(library1.join("beta/SKILL.md").is_file());
+    assert!(library1.join("SKILL.md").is_file());
+
+    // Verify baseline router with verify-router.mjs if node is present
+    let node_status = std::process::Command::new("node")
+        .arg(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("skills/manage-tink/scripts/verify-router.mjs"),
+        )
+        .arg(&installed1)
+        .env("TINK_HOME", &ws.inventory)
+        .status();
+    if let Ok(status) = node_status {
+        assert!(
+            status.success(),
+            "verify-router.mjs failed on baseline router"
+        );
+    }
+
+    // skill check and skillset list
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
+    ws.cmd(&project)
+        .args(["skillset", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "{inferred_name} (2 skills)\n  alpha\n  beta"
+        )));
+
+    // Re-add idempotency: outputs Unchanged
+    ws.cmd(&project)
+        .args(["skillset", "add", &tree_url1])
+        .envs(redirect1.clone())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Unchanged"));
+
+    // 2. Repo with non-generic folder: "bundles/analytics"
+    let repo2 = ws.root.join("repo-monorepo");
+    init_repo(&repo2);
+    write_skill(
+        &repo2.join("bundles/analytics/metrics"),
+        "metrics",
+        "Compute metric values",
+    );
+    write_skill(
+        &repo2.join("bundles/analytics/reports"),
+        "reports",
+        "Generate analytical reports",
+    );
+    let rev2 = commit_all(&repo2, "initial analytics");
+    let branch2 = current_branch(&repo2);
+    let public2 = "https://github.com/example-org/repo-monorepo.git";
+    let tree_url2 =
+        format!("https://github.com/example-org/repo-monorepo/tree/{branch2}/bundles/analytics");
+    let redirect2 = github_redirect(&repo2, public2);
+
+    // Reject truly invalid custom name (contains spaces/invalid characters)
+    ws.cmd(&project)
+        .args(["skillset", "add", &tree_url2, "invalid name"])
+        .envs(redirect2.clone())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Invalid skillset name"));
+
+    // Custom name without -skillset automatically appends -skillset
+    let custom_name = "custom-analytics-skillset";
+    ws.cmd(&project)
+        .args(["skillset", "add", &tree_url2, "custom-analytics"])
+        .envs(redirect2.clone())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "✓ Installed skillset: {custom_name} (2 members)"
+        )));
+    assert!(ws.skillset_meta(custom_name).is_file());
+    let custom_meta: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(ws.skillset_meta(custom_name)).unwrap()).unwrap();
+    assert_eq!(custom_meta["revision"], rev2);
+    assert!(
+        Workspace::skill_path(&project, custom_name)
+            .join("metrics/SKILL.md")
+            .is_file()
+    );
+
+    // Inferred non-generic name (bundles/analytics -> analytics-skillset)
+    let non_generic_inferred = "analytics-skillset";
+    ws.cmd(&project)
+        .args(["skillset", "add", &tree_url2])
+        .envs(redirect2.clone())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "✓ Installed skillset: {non_generic_inferred} (2 members)"
+        )));
+    assert!(ws.skillset_meta(non_generic_inferred).is_file());
+    assert!(
+        Workspace::skill_path(&project, non_generic_inferred)
+            .join("metrics/SKILL.md")
+            .is_file()
+    );
+
+    // 3. Refusal on catalog collision with differing metadata
+    // Try to add to existing custom_name with different URL or sourceRoot
+    ws.cmd(&project)
+        .args(["skillset", "add", &tree_url1, custom_name])
+        .envs(redirect1.clone())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("differing metadata"));
+
+    // 4. Refusal on corrupt member in remote tree (fail-fast abort, zero mutations)
+    let repo3 = ws.root.join("repo-corrupt");
+    init_repo(&repo3);
+    write_skill(&repo3.join("skills/good"), "good", "Valid member skill");
+    // Corrupt member skill (unclosed frontmatter)
+    let corrupt_skill_dir = repo3.join("skills/bad");
+    fs::create_dir_all(&corrupt_skill_dir).unwrap();
+    fs::write(
+        corrupt_skill_dir.join("SKILL.md"),
+        "---\nname: bad\ndescription: unclosed\n",
+    )
+    .unwrap();
+    commit_all(&repo3, "corrupt skill");
+    let branch3 = current_branch(&repo3);
+    let public3 = "https://github.com/example-org/repo-corrupt.git";
+    let tree_url3 = format!("https://github.com/example-org/repo-corrupt/tree/{branch3}/skills");
+    let redirect3 = github_redirect(&repo3, public3);
+
+    let corrupt_name = "example-org-repo-corrupt-skillset";
+    ws.cmd(&project)
+        .args(["skillset", "add", &tree_url3])
+        .envs(redirect3)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("frontmatter"));
+
+    // Assert zero mutations
+    assert!(
+        !ws.skillset_meta(corrupt_name).exists(),
+        "catalog definition must not be written on corrupt member"
+    );
+    assert!(
+        !Workspace::skill_path(&project, corrupt_name).exists(),
+        "project tree must not be written on corrupt member"
+    );
+    assert!(
+        !ws.library_skillset(corrupt_name).exists(),
+        "library tree must not be written on corrupt member"
+    );
 }
 
 // --- R*: remote add ---

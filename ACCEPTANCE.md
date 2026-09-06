@@ -54,7 +54,8 @@ top-level `add` / `check` / `refresh` aliases. CLI binary updates use top-level
 | `tink skill verify` | Verify installed project skills against the manifest and lockfile |
 | `tink skill refresh [name]` | Refresh clean GitHub imports; refuse local edits |
 | `tink skill remove <name>` | Delete one project skill under `.agents/skills/<name>/` and drop that name from the by-project catalog (not library) |
-| `tink skillset add <name>-skillset` | Install one externally authored, revision-pinned skillset definition as a nested project tree and mirror it to the library |
+| `tink skillset add <url> [name-skillset]` | Install a skillset from a GitHub tree URL (with inferred or explicit name), create-only author its catalog definition, generate a baseline root router, and mirror to the library |
+| `tink skillset add <name>-skillset` | Install one catalog-defined, revision-pinned skillset definition as a nested project tree, generate a baseline root router if missing, and mirror it to the library |
 | `tink skillset list [--library]` | Group receipt-backed project or library skillsets with their member names (read-only) |
 | `tink skillset refresh <name>-skillset` | Replace one clean installed skillset from its current pinned definition; refuse local edits |
 | `tink skillset remove <name>-skillset` | Delete only the installed project skillset; preserve its definition and library copy |
@@ -72,7 +73,7 @@ top-level `add` / `check` / `refresh` aliases. CLI binary updates use top-level
 | Home root | `$TINK_HOME` or `~/.tink` (relative `$TINK_HOME` absolutized against cwd), with `layout.json` (`kind`: `tink-skill-inventory`) |
 | Library | `skills/<name>/` skill trees copied on successful add (rebuildable collection; identical tip may install project from library; divergent → repair + warn; project overwrite still refused; not an agent discovery root) |
 | Offline catalog | `catalog/by-project/<bounded-name>-<sha256(raw-canonical-root)>/meta.json` with display `name`, `root`, raw-path `identity`, and `skills` name list; owned basename-only entries migrate on the next deposit |
-| Skillset definition | `catalog/by-skillset/<name>-skillset/meta.json` is externally authored desired state with `source`, immutable `revision`, repository-relative `sourceRoot`, and explicit `members`; Tink validates and consumes it but has no CLI writer |
+| Skillset definition | `catalog/by-skillset/<name>-skillset/meta.json` is create-only authored by `tink skillset add <url>` or externally authored desired state with `source`, immutable `revision`, repository-relative `sourceRoot`, and explicit `members` |
 | Project manifest | `.tink/skills.toml` version 1 declares each standalone skill's `name`, typed `source`, and optional repository-relative `path` |
 | Project lock | `.tink/skills.lock` version 2; a domain-separated, length-framed SHA-256 pins path bytes, entry kind, canonical executable/non-executable mode, and contents (receipt excluded). Version 1 must be regenerated with `skill lock`. |
 | Skillset receipt | `.tink-skillset.json` digest version 2 pins the same tree semantics; `skillset refresh` is the migration path for a legacy receipt. |
@@ -165,6 +166,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | K9 | `skill check` / `skill list` with grouped members only | Check reports standalone, skillset, and member counts; list says there are no standalone skills and points to `skillset list` |
 | K10 | `skillset refresh <name>-skillset` after the pinned catalog definition changes | Stages and rename-replaces the clean project tree with best-effort rollback, then mirrors the validated result to the library; refuses local project modifications |
 | K11 | A declared member folder and its `SKILL.md` name differ | Exit ≠ 0 before project or library publication; explain the name mismatch |
+| K12 | `skillset add <url> [name-skillset]` with inferred or explicit name | Create-only authors catalog meta.json with resolved immutable Git SHA; direct-boundary discovers members skipping non-skills; aborts on corrupt member frontmatter; generates verify-clean baseline router SKILL.md; mirrors to library; idempotent re-add reports Unchanged |
 
 ### GitHub inspection
 

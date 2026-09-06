@@ -867,9 +867,8 @@ mod tests {
             (&second, b"second".as_slice()),
         ] {
             if let Err(error) = fs::write(path, body) {
-                assert_eq!(
-                    error.raw_os_error(),
-                    Some(92),
+                assert!(
+                    matches!(error.raw_os_error(), Some(1 | 92)),
                     "unexpected fixture error: {error}"
                 );
                 assert!(

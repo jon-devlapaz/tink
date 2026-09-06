@@ -145,6 +145,26 @@ pub fn remote_ref_names(remote: &RemoteSource) -> Result<BTreeSet<String>, Error
     Ok(names)
 }
 
+/// Refuse GitHub URLs where requested ref could be an ambiguous prefix of a slash-containing ref.
+pub fn reject_ambiguous_tree_ref(
+    remote: &RemoteSource,
+    requested_ref: &str,
+    relative_path: &str,
+) -> Result<(), Error> {
+    let remote_refs = remote_ref_names(remote)?;
+    let mut candidate = requested_ref.to_string();
+    for segment in relative_path.split('/') {
+        candidate.push('/');
+        candidate.push_str(segment);
+        if remote_refs.contains(&candidate) {
+            return Err(Error::msg(format!(
+                "GitHub URL is ambiguous because Git ref `{candidate}` contains `/`; use a ref without `/`"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Clone `remote` into a temporary directory; return `(temp_keep_alive, repo_path, revision)`.
 pub fn checkout(remote: &RemoteSource) -> Result<(TempDir, PathBuf, String), Error> {
     checkout_ref(remote, None)

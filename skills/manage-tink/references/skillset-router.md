@@ -1,7 +1,7 @@
 # Skillset router
 
-Load after a successful `tink skillset add` when the skillset-root `SKILL.md`
-is missing, or when the user asks to create or overwrite a skillset-root router.
+Load when the user asks to elevate, customize, or overwrite a skillset-root router,
+or after a successful `tink skillset add` if the root `SKILL.md` is missing.
 
 Scripts and [router-canonical.md](router-canonical.md) ship in this skill.
 
@@ -9,11 +9,12 @@ Scripts and [router-canonical.md](router-canonical.md) ship in this skill.
 
 | User said… | Authorizes… |
 | --- | --- |
-| `tink skillset add NAME-skillset` succeeded and root `SKILL.md` is missing | **Create** the required root router |
-| Overwrite / replace / regenerate / update the router | **Overwrite** for the named skillset |
+| Elevate / customize / replace / regenerate the router | **Overwrite** for the named skillset |
+| `tink skillset add` succeeded and root `SKILL.md` is missing | **Create** the required root router |
 
-A root `SKILL.md` on a receipt-backed skillset is the agent router. Tink's
-receipt digest ignores it so authoring does not dirty the install. Leave
+A root `SKILL.md` on a receipt-backed skillset is the agent router. Tink
+automatically generates a verify-clean baseline router on add; Tink's receipt
+digest ignores it so elevating does not dirty the install. Leave
 `.tink-skillset.json` and member skills as Tink left them. Refresh preserves an
 existing router.
 

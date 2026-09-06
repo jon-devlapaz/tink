@@ -522,7 +522,7 @@ fn add_from_remote(
     if let (Some(tree_ref), Some(skill_path)) =
         (source.tree_ref.as_deref(), source.skill_path.as_deref())
     {
-        reject_ambiguous_tree_ref(&source.remote, tree_ref, skill_path)?;
+        git::reject_ambiguous_tree_ref(&source.remote, tree_ref, skill_path)?;
     }
     // A selected name may be ambiguous in the repository, so discovery must run
     // before the library can be trusted. Preserve the root-skill no-clone path.
@@ -559,25 +559,6 @@ fn add_from_remote(
             source_path: selected_path.as_deref(),
         },
     )
-}
-
-fn reject_ambiguous_tree_ref(
-    remote: &RemoteSource,
-    requested_ref: &str,
-    relative_path: &str,
-) -> Result<(), Error> {
-    let remote_refs = git::remote_ref_names(remote)?;
-    let mut candidate = requested_ref.to_string();
-    for segment in relative_path.split('/') {
-        candidate.push('/');
-        candidate.push_str(segment);
-        if remote_refs.contains(&candidate) {
-            return Err(Error::msg(format!(
-                "GitHub URL is ambiguous because Git ref `{candidate}` contains `/`; use a ref without `/`"
-            )));
-        }
-    }
-    Ok(())
 }
 
 fn explicit_remote_skill_path(
