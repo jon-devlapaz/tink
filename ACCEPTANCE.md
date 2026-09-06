@@ -158,7 +158,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | K1B | Skillset root `SKILL.md` router added after `skillset add` | Root router is ignored by the receipt digest, `skill check` stays clean, re-add mirrors the router to the library, and `skillset refresh` preserves the router while updating members |
 | K2 | `skillset remove <name>-skillset` after K1 | Removes only the project skillset tree; preserves the shared catalog definition and home library copy; `skill remove` refuses the skillset root. Sensor: K1. |
 | K3 | `skillset list [--library]` after K1 | Groups each receipt-backed project or library skillset with its member skill names without network or writes. Sensor: K1. |
-| K4 | Any skillset command receives a name without `-skillset` | Exit ≠ 0; clear canonical-name error; no skillset tree written |
+| K4 | Any skillset command receives an invalid skillset name | Exit ≠ 0; clear invalid-name error; no skillset tree written |
 | K5 | `skillset add` finds an ordinary or unowned library entry at the canonical name | Exit ≠ 0 before network/project publication; preserve the library entry |
 | K6 | `skillset remove` finds a missing or invalid receipt | Exit ≠ 0; preserve the complete project directory |
 | K7 | `skillset list` or `add` runs before project/catalog setup | List explains how to initialize; missing catalog leaves the project untouched |

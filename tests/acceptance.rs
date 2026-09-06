@@ -1410,11 +1410,11 @@ fn k4_skillset_commands_require_canonical_suffix() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["skillset", "add", "common"])
+        .args(["skillset", "add", "invalid name"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("must end in -skillset"));
-    assert!(!Workspace::skill_path(&project, "common").exists());
+        .stderr(predicate::str::contains("Invalid skillset name"));
+    assert!(!Workspace::skill_path(&project, "invalid name").exists());
 }
 
 #[test]
