@@ -810,7 +810,8 @@ fn add_skillset_name_at(
     project_root: &Path,
     name: &str,
 ) -> Result<SkillsetAddOutcome, Error> {
-    validate_skillset_name(name)?;
+    let canonical = canonicalize_skillset_name(name)?;
+    let name = canonical.as_str();
     let meta = read_catalog(home, name)?;
     preflight_library_target(home, name)?;
     let target = home::project_skills_path(project_root).join(name);

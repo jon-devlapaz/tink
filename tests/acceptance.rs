@@ -1219,6 +1219,31 @@ fn k1_skillset_add_installs_explicit_members_and_checks_digest() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Unchanged"));
+    // Bare name re-add is also idempotent
+    ws.cmd(&project)
+        .args(["skillset", "add", "common"])
+        .envs(redirect.clone())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Unchanged"));
+
+    // Bare name add in a fresh project installs canonical common-skillset
+    let project_bare = ws.project("app-bare");
+    ws.cmd(&project_bare)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+    ws.cmd(&project_bare)
+        .args(["skillset", "add", "common"])
+        .envs(redirect.clone())
+        .assert()
+        .success();
+    assert!(
+        Workspace::skill_path(&project_bare, "common-skillset")
+            .join("alpha/SKILL.md")
+            .is_file()
+    );
+
     ws.cmd(&project).args(["skill", "check"]).assert().success();
     ws.cmd(&project)
         .args(["skillset", "list"])

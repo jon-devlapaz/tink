@@ -197,7 +197,7 @@ pub enum SkillsetCommand {
     },
     /// Install a skillset from a GitHub tree URL or pinned catalog name
     Add {
-        /// GitHub tree URL or catalog skillset name
+        /// GitHub tree URL or catalog skillset name (appends -skillset if omitted)
         target: String,
         /// Optional skillset name (appends -skillset if omitted; valid only with a URL)
         name: Option<String>,
