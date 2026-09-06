@@ -12,6 +12,7 @@ mod harvest;
 mod home;
 mod init;
 mod inspect;
+mod inventory;
 mod library;
 mod manage_tink;
 mod manifest;

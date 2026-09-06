@@ -2,10 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::catalog;
 use crate::error::Error;
 use crate::git;
-use crate::init;
+use crate::inventory;
 use crate::library::{self, LibraryWrite};
 use crate::output;
 use crate::provenance::Provenance;
@@ -51,15 +50,15 @@ impl PreparedLockedSkill {
         project_root: &Path,
         home: Option<&Path>,
     ) -> Result<AddOutcome, Error> {
-        let destination_root = crate::home::project_skills_path(project_root);
-        place_skill_inner(
-            project_root,
-            home,
-            &self.skill,
-            &destination_root,
-            self.provenance.as_ref(),
-            false,
-        )
+        crate::skillsets::ensure_standalone_source(&self.skill.path, &self.skill.name)?;
+        let published =
+            inventory::publish(home, project_root, &self.skill, self.provenance.as_ref())?;
+        Ok(AddOutcome {
+            name: published.name,
+            created: published.created,
+            project_path: published.project_path,
+            origin: AddOrigin::Source,
+        })
     }
 }
 
@@ -67,48 +66,22 @@ fn place_skill(
     home: Option<&Path>,
     project_root: &Path,
     skill: &Skill,
-    destination_root: &Path,
+    _destination_root: &Path,
     provenance: Option<&Provenance>,
-) -> Result<AddOutcome, Error> {
-    place_skill_inner(
-        project_root,
-        home,
-        skill,
-        destination_root,
-        provenance,
-        true,
-    )
-}
-
-fn place_skill_inner(
-    project_root: &Path,
-    home: Option<&Path>,
-    skill: &Skill,
-    destination_root: &Path,
-    provenance: Option<&Provenance>,
-    report_library_repair: bool,
 ) -> Result<AddOutcome, Error> {
     crate::skillsets::ensure_standalone_source(&skill.path, &skill.name)?;
-    init::ensure_project_layout_at(home, project_root)?;
-    // Protect the project tree first. Library is a rebuildable collection: repair on
-    // diverge, then install project (re-add recovers if that fails).
-    skills::preflight_install(skill, destination_root, provenance)?
-        .require_compatible(&skill.name, destination_root)?;
-    let (_, write) = library::deposit_at(home, skill, provenance)?;
-    let (installed, created) = skills::install_local(skill, destination_root, provenance)?;
-    // Catalog even on identical noop so the name index can catch up.
-    catalog::deposit_skill_at(home, project_root, &skill.name)?;
-    if write == LibraryWrite::Repaired && report_library_repair {
+    let published = inventory::publish(home, project_root, skill, provenance)?;
+    if published.library_write == LibraryWrite::Repaired {
         let err = CliStyle::auto_stderr();
         output::warning_line(format_args!(
             "{}",
-            err.warn(format!("Updated home copy of {}", skill.name))
+            err.warn(format!("Updated home copy of {}", published.name))
         ));
     }
     Ok(AddOutcome {
-        name: skill.name.clone(),
-        created,
-        project_path: installed,
+        name: published.name,
+        created: published.created,
+        project_path: published.project_path,
         origin: AddOrigin::Source,
     })
 }
@@ -214,18 +187,14 @@ fn place_from_library(
     home: Option<&Path>,
     project_root: &Path,
     skill: &Skill,
-    destination_root: &Path,
+    _destination_root: &Path,
 ) -> Result<AddOutcome, Error> {
     crate::skillsets::ensure_standalone_source(&skill.path, &skill.name)?;
-    init::ensure_project_layout_at(home, project_root)?;
-    skills::preflight_install(skill, destination_root, None)?
-        .require_compatible(&skill.name, destination_root)?;
-    let (installed, created) = skills::install_local(skill, destination_root, None)?;
-    catalog::deposit_skill_at(home, project_root, &skill.name)?;
+    let published = inventory::publish_from_library(home, project_root, skill)?;
     Ok(AddOutcome {
-        name: skill.name.clone(),
-        created,
-        project_path: installed,
+        name: published.name,
+        created: published.created,
+        project_path: published.project_path,
         origin: AddOrigin::Library,
     })
 }
