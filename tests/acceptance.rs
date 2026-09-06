@@ -1840,6 +1840,26 @@ fn k12_skillset_add_url_inferred_and_custom_name_baseline_router() {
             .is_file()
     );
 
+    // Refresh and remove with bare name without -skillset suffix
+    ws.cmd(&project)
+        .args(["skillset", "refresh", "analytics"])
+        .envs(redirect2.clone())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Unchanged analytics-skillset"));
+    ws.cmd(&project)
+        .args(["skillset", "remove", "analytics"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Removed"));
+    assert!(!Workspace::skill_path(&project, non_generic_inferred).exists());
+    // Re-add to restore state
+    ws.cmd(&project)
+        .args(["skillset", "add", &tree_url2])
+        .envs(redirect2.clone())
+        .assert()
+        .success();
+
     // 3. Refusal on catalog collision with differing metadata
     // Try to add to existing custom_name with different URL or sourceRoot
     ws.cmd(&project)

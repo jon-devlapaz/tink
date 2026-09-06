@@ -28,12 +28,12 @@ list, read, check, refresh, and remove.
 | Refresh one | `tink skill refresh NAME` |
 | Refresh the active binary's embedded manage-tink | `tink skill refresh manage-tink` (explicitly replaces a differing receipt-free reserved copy; refuses remote provenance) |
 | Remove one project skill | `tink skill remove NAME` |
-| Add a skillset from a GitHub tree URL | `tink skillset add <url> [optional-name-skillset]` |
+| Add a skillset from a GitHub tree URL | `tink skillset add <url> [optional-name]` |
 | Add a pinned catalog skillset | `tink skillset add NAME-skillset` |
 | List project skillsets | `tink skillset list` |
 | List library skillsets | `tink skillset list --library` |
-| Refresh a clean pinned skillset | `tink skillset refresh NAME-skillset` |
-| Remove one project skillset | `tink skillset remove NAME-skillset` |
+| Refresh a clean pinned skillset | `tink skillset refresh NAME[-skillset]` |
+| Remove one project skillset | `tink skillset remove NAME[-skillset]` |
 | Update the tink CLI binary | `tink update` (newer host asset only; verifies release digest, archive shape, and exact candidate version before replacement) |
 | Destroy managed project skills | `tink destroy --yes` (non-TTY/scripts) or `tink destroy` (TTY, confirm `y`); preserves guidance and unrelated `.agents/` siblings |
 
@@ -41,9 +41,8 @@ list, read, check, refresh, and remove.
 
 - Live skills: `<project>/.agents/skills/<name>/` with `SKILL.md`.
 - Live skillsets:
-  `<project>/.agents/skills/<name>-skillset/<member>/SKILL.md`. Names must be
-  typed canonically with `-skillset`; Tink does not infer the suffix on
-  mutating commands.
+  `<project>/.agents/skills/<name>-skillset/<member>/SKILL.md`. Skillset directories
+  end canonically with `-skillset`; CLI mutating commands auto-append `-skillset` if omitted.
 - Home (`$TINK_HOME` or `~/.tink`) is not an agent discovery root. Installs
   library trees at `skills/<name>/`. List the library with
   `tink library list` (`tink skill list --library` remains a compatibility

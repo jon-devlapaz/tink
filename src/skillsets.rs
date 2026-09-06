@@ -184,6 +184,17 @@ fn validate_skillset_name(name: &str) -> Result<(), Error> {
     Ok(())
 }
 
+pub fn canonicalize_skillset_name(name: &str) -> Result<String, Error> {
+    let trimmed = name.trim();
+    let candidate = if trimmed.ends_with(NAME_SUFFIX) {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}{NAME_SUFFIX}")
+    };
+    validate_skillset_name(&candidate)?;
+    Ok(candidate)
+}
+
 fn parse_source(source: &str) -> Result<sources::RemoteSource, Error> {
     let rest = source
         .strip_prefix("https://")
@@ -530,14 +541,7 @@ fn derive_skillset_name(
     custom_name: Option<&str>,
 ) -> Result<String, Error> {
     if let Some(custom) = custom_name {
-        let trimmed = custom.trim();
-        let candidate = if trimmed.ends_with(NAME_SUFFIX) {
-            trimmed.to_string()
-        } else {
-            format!("{trimmed}{NAME_SUFFIX}")
-        };
-        validate_skillset_name(&candidate)?;
-        return Ok(candidate);
+        return canonicalize_skillset_name(custom);
     }
 
     let folder = boundary
@@ -871,7 +875,8 @@ pub(crate) fn refresh_skillset_at(
     project_root: &Path,
     name: &str,
 ) -> Result<bool, Error> {
-    validate_skillset_name(name)?;
+    let canonical = canonicalize_skillset_name(name)?;
+    let name = canonical.as_str();
     let meta = read_catalog(home, name)?;
     let skills_root = home::project_skills_path(project_root);
     let target = skills_root.join(name);
@@ -911,7 +916,8 @@ pub(crate) fn refresh_skillset_at(
 }
 
 pub fn remove_skillset(project_root: &Path, name: &str) -> Result<PathBuf, Error> {
-    validate_skillset_name(name)?;
+    let canonical = canonicalize_skillset_name(name)?;
+    let name = canonical.as_str();
     let agents = home::project_agents_path(project_root);
     let skills_root = home::project_skills_path(project_root);
     refuse_symlink(&agents)?;
@@ -1243,5 +1249,19 @@ mod tests {
         fs::remove_file(&receipt).unwrap();
         std::os::unix::fs::symlink(root.path().join("missing"), &receipt).unwrap();
         assert!(has_receipt_entry(root.path()));
+    }
+
+    #[test]
+    fn canonicalize_skillset_name_appends_suffix_when_omitted() {
+        assert_eq!(
+            canonicalize_skillset_name("my-tools").unwrap(),
+            "my-tools-skillset"
+        );
+        assert_eq!(
+            canonicalize_skillset_name("my-tools-skillset").unwrap(),
+            "my-tools-skillset"
+        );
+        assert!(canonicalize_skillset_name("bad name").is_err());
+        assert!(canonicalize_skillset_name("").is_err());
     }
 }

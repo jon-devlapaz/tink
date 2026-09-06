@@ -203,9 +203,15 @@ pub enum SkillsetCommand {
         name: Option<String>,
     },
     /// Update one clean installed skillset to its pinned catalog definition
-    Refresh { name: String },
+    Refresh {
+        /// Skillset name (appends -skillset if omitted)
+        name: String,
+    },
     /// Remove one installed skillset without deleting its shared catalog definition
-    Remove { name: String },
+    Remove {
+        /// Skillset name (appends -skillset if omitted)
+        name: String,
+    },
 }
 
 fn read_skill_candidates(current: &OsStr) -> Vec<CompletionCandidate> {
@@ -541,10 +547,19 @@ fn dispatch_skillset(cwd: &Path, command: SkillsetCommand) -> Result<(), Error> 
         }
         SkillsetCommand::Refresh { name } => {
             let style = CliStyle::auto_stdout();
-            if skillsets::refresh_skillset(cwd, &name)? {
-                println!("{} {}", style.success("Refreshed"), style.skillset(name));
+            let canonical = skillsets::canonicalize_skillset_name(&name)?;
+            if skillsets::refresh_skillset(cwd, &canonical)? {
+                println!(
+                    "{} {}",
+                    style.success("Refreshed"),
+                    style.skillset(&canonical)
+                );
             } else {
-                println!("{} {}", style.muted("Unchanged"), style.skillset(name));
+                println!(
+                    "{} {}",
+                    style.muted("Unchanged"),
+                    style.skillset(&canonical)
+                );
             }
             Ok(())
         }
