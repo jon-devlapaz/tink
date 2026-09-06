@@ -33,7 +33,7 @@ owners and should not carry architectural decisions.
 | Process edge | `main.rs`, `lib.rs`, `output.rs`, `style.rs`, `error.rs`, `process.rs` | Completion and argument parsing, command dispatch, fallible and control-safe output, user-facing failure/exit shape, and bounded subprocess-group supervision. |
 | Layout and persisted state | `home.rs`, `catalog.rs`, `manifest.rs`, `provenance.rs` | Project/home paths, project-name index, standalone manifest/lock, and source receipts. |
 | Skill mechanisms | `skills.rs`, `sources.rs`, `git.rs`, `paths.rs`, `library.rs` | Skill discovery/validation/copy/digest, typed source classification, supervised Git checkout, filesystem refusals, and standalone library policy. |
-| Project workflows | `init.rs`, `add.rs`, `check.rs`, `read.rs`, `refresh.rs`, `remove.rs`, `harvest.rs` | Bootstrap, standalone skill lifecycle, and read-only local skill inspection. |
+| Project workflows | `init.rs`, `add.rs`, `inventory.rs`, `check.rs`, `read.rs`, `refresh.rs`, `remove.rs`, `harvest.rs` | Bootstrap, standalone skill lifecycle (publish seam in `inventory.rs`), and read-only local skill inspection. |
 | Skillset workflow | `skillsets.rs` | Canonical names, definition validation, staged install/refresh, receipt validation, grouped listing, removal, and project-to-library mirroring. |
 | Read-only source inspection | `inspect.rs` | GitHub structure inspection and source-defined skillset inference; no project or home writes. |
 | Supporting workflows | `destroy.rs`, `update.rs`, `manage_tink.rs` | Project teardown, binary update, and embedded `manage-tink`. |

@@ -36,6 +36,8 @@ fn read_skill_entry(path: &Path) -> Result<Option<Skill>, Error> {
 }
 
 /// Load and validate project skills under `.agents/skills/`.
+/// No writes. No network for local skills; provenance shape is checked
+/// without fetching.
 pub fn load_project_skills(root: &Path) -> Result<Vec<Skill>, Error> {
     let agents = crate::home::project_agents_path(root);
     let skills_root = crate::home::project_skills_path(root);
@@ -62,12 +64,6 @@ pub fn load_project_skills(root: &Path) -> Result<Vec<Skill>, Error> {
         }
     }
     Ok(skills)
-}
-
-/// Validate project skills. No writes. No network for local skills; provenance
-/// shape is checked without fetching.
-pub fn check_project(root: &Path) -> Result<Vec<Skill>, Error> {
-    load_project_skills(root)
 }
 
 #[cfg(test)]

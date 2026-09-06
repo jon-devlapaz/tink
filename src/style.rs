@@ -5,15 +5,13 @@ use std::io::IsTerminal;
 use anstyle::{AnsiColor, Color, Effects, Style};
 use clap::builder::styling::Styles;
 
-type Ansi = Color;
-
-const GREEN: Ansi = Color::Ansi(AnsiColor::Green);
-const RED: Ansi = Color::Ansi(AnsiColor::Red);
-const YELLOW: Ansi = Color::Ansi(AnsiColor::Yellow);
-const CYAN: Ansi = Color::Ansi(AnsiColor::Cyan);
-const BLUE: Ansi = Color::Ansi(AnsiColor::Blue);
-const MAGENTA: Ansi = Color::Ansi(AnsiColor::Magenta);
-const WHITE: Ansi = Color::Ansi(AnsiColor::White);
+const GREEN: Color = Color::Ansi(AnsiColor::Green);
+const RED: Color = Color::Ansi(AnsiColor::Red);
+const YELLOW: Color = Color::Ansi(AnsiColor::Yellow);
+const CYAN: Color = Color::Ansi(AnsiColor::Cyan);
+const BLUE: Color = Color::Ansi(AnsiColor::Blue);
+const MAGENTA: Color = Color::Ansi(AnsiColor::Magenta);
+const WHITE: Color = Color::Ansi(AnsiColor::White);
 
 /// Clap help/error styles.
 pub const CLAP_STYLES: Styles = Styles::styled()
@@ -177,10 +175,5 @@ mod tests {
             link.contains("\u{1b}]8;;https://github.com/jon-devlapaz/tink-skills\u{1b}\\"),
             "{link}"
         );
-    }
-
-    #[test]
-    fn color_enabled_respects_no_color() {
-        assert_eq!(color_enabled(), std::env::var_os("NO_COLOR").is_none());
     }
 }

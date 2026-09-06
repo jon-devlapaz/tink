@@ -720,7 +720,7 @@ fn dispatch_skill_verify(cwd: &Path) -> Result<(), Error> {
 
 fn dispatch_skill_check(cwd: &Path) -> Result<(), Error> {
     let style = CliStyle::auto_stdout();
-    let skills = check::check_project(cwd)?;
+    let skills = check::load_project_skills(cwd)?;
     let (skillsets, members) = skillsets::project_counts(cwd)?;
     if skillsets == 0 {
         println!(
@@ -779,16 +779,12 @@ fn dispatch_skill_list_catalog() -> Result<(), Error> {
     for entry in &entries {
         println!(
             "{}\t{}\t{}",
-            style.muted(tsv_field(&entry.project)),
-            style.muted(tsv_field(&entry.root)),
-            style.skill(tsv_field(&entry.skill))
+            style.muted(output::escape_untrusted(&entry.project)),
+            style.muted(output::escape_untrusted(&entry.root)),
+            style.skill(output::escape_untrusted(&entry.skill))
         );
     }
     Ok(())
-}
-
-fn tsv_field(value: &str) -> String {
-    output::escape_untrusted(value)
 }
 
 fn dispatch_skill_list_library() -> Result<(), Error> {

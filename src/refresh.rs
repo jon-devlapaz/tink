@@ -183,7 +183,7 @@ pub(crate) fn refresh_skill_at(
     root: &Path,
     name: &str,
 ) -> Result<bool, Error> {
-    let skills: BTreeMap<_, _> = check::check_project(root)?
+    let skills: BTreeMap<_, _> = check::load_project_skills(root)?
         .into_iter()
         .map(|s| (s.name.clone(), s))
         .collect();
@@ -206,7 +206,7 @@ pub fn refresh_all(root: &Path) -> Result<Vec<String>, Error> {
 }
 
 pub(crate) fn refresh_all_at(home: Option<&Path>, root: &Path) -> Result<Vec<String>, Error> {
-    let installed = check::check_project(root)?;
+    let installed = check::load_project_skills(root)?;
     let plans = installed
         .into_iter()
         .map(|skill| prepare_refresh(home, skill))
