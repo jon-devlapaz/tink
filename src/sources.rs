@@ -233,6 +233,22 @@ fn looks_like_filesystem_path(value: &str) -> bool {
         || value.contains('\\')
 }
 
+/// Shared gate: only public GitHub HTTPS URLs enter tree-URL parsing.
+/// Callers keep their own error messages.
+pub(crate) fn is_public_github_https(url: &url_lite::Url) -> bool {
+    url.scheme == "https"
+        && url.host.as_deref() == Some("github.com")
+        && url.userinfo.is_none()
+        && url.query.is_empty()
+        && url.fragment.is_none()
+}
+
+/// Shared tree-path segment rule: paths must stay inside the repository.
+/// Callers keep their own error messages.
+pub(crate) fn github_tree_segment_ok(part: &str) -> bool {
+    part != "." && part != ".." && !part.contains('\\')
+}
+
 pub(crate) fn github_part_ok(part: &str) -> bool {
     if part.is_empty() || part == "." || part == ".." {
         return false;
@@ -249,10 +265,7 @@ pub(crate) fn github_part_ok(part: &str) -> bool {
 pub fn parse_github_add_source(value: &str) -> Result<GithubAddSource, Error> {
     let err = || Error::msg("Remote sources must be public GitHub HTTPS URLs or owner/repository");
     let url = value.parse::<url_lite::Url>().map_err(|_| err())?;
-    if url.scheme != "https" || url.host.as_deref() != Some("github.com") {
-        return Err(err());
-    }
-    if url.userinfo.is_some() || !url.query.is_empty() || url.fragment.is_some() {
+    if !is_public_github_https(&url) {
         return Err(err());
     }
     let parts: Vec<&str> = url
@@ -293,7 +306,7 @@ pub fn parse_github_add_source(value: &str) -> Result<GithubAddSource, Error> {
     }
     let mut skill_path = PathBuf::new();
     for part in &parts[4..] {
-        if *part == "." || *part == ".." || part.contains('\\') {
+        if !github_tree_segment_ok(part) {
             return Err(Error::msg(
                 "GitHub tree path must stay inside the repository",
             ));
@@ -332,10 +345,7 @@ pub fn parse_remote(value: &str) -> Result<RemoteSource, Error> {
     let err = || Error::msg("Remote sources must be public GitHub HTTPS URLs or owner/repository");
 
     let url = value.parse::<url_lite::Url>().map_err(|_| err())?;
-    if url.scheme != "https" || url.host.as_deref() != Some("github.com") {
-        return Err(err());
-    }
-    if url.userinfo.is_some() || !url.query.is_empty() || url.fragment.is_some() {
+    if !is_public_github_https(&url) {
         return Err(err());
     }
     let parts: Vec<&str> = url
@@ -361,7 +371,8 @@ pub fn parse_remote(value: &str) -> Result<RemoteSource, Error> {
 }
 
 /// Minimal URL parse without pulling the `url` crate — only what we need.
-mod url_lite {
+/// Shared with `inspect`, which parses the same GitHub tree-URL shape.
+pub(crate) mod url_lite {
     #[derive(Debug)]
     pub struct Url {
         pub scheme: String,

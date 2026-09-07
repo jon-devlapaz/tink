@@ -8,7 +8,9 @@ use crate::error::Error;
 use crate::git;
 use crate::output;
 use crate::skills;
-use crate::sources::{RemoteSource, github_part_ok};
+use crate::sources::{
+    RemoteSource, github_part_ok, github_tree_segment_ok, is_public_github_https, url_lite,
+};
 
 #[derive(Debug)]
 struct ParsedUrl {
@@ -150,12 +152,7 @@ fn parse_url(value: &str) -> Result<ParsedUrl, Error> {
     let parsed = value
         .parse::<url_lite::Url>()
         .map_err(|_| Error::msg("Inspection URL must be a public GitHub HTTPS URL"))?;
-    if parsed.scheme != "https"
-        || parsed.host.as_deref() != Some("github.com")
-        || parsed.userinfo.is_some()
-        || !parsed.query.is_empty()
-        || parsed.fragment.is_some()
-    {
+    if !is_public_github_https(&parsed) {
         return Err(Error::msg(
             "Inspection URL must be a public GitHub HTTPS URL",
         ));
@@ -205,7 +202,7 @@ fn parse_url(value: &str) -> Result<ParsedUrl, Error> {
     } else {
         let mut boundary = PathBuf::new();
         for part in boundary_parts {
-            if *part == "." || *part == ".." || part.contains('\\') {
+            if !github_tree_segment_ok(part) {
                 return Err(Error::msg(
                     "Inspection boundary must stay inside the repository",
                 ));
@@ -419,56 +416,5 @@ mod tests {
             .expect_err("ancestor symlink must be refused");
 
         assert!(error.to_string().contains("symlink"), "{error}");
-    }
-}
-
-mod url_lite {
-    #[derive(Debug)]
-    pub struct Url {
-        pub scheme: String,
-        pub host: Option<String>,
-        pub userinfo: Option<String>,
-        pub path: String,
-        pub query: String,
-        pub fragment: Option<String>,
-    }
-
-    pub fn parse(input: &str) -> Result<Url, ()> {
-        let (scheme, rest) = input.split_once("://").ok_or(())?;
-        let (authority, path_and_more) = match rest.find('/') {
-            Some(index) => (&rest[..index], &rest[index..]),
-            None => (rest, "/"),
-        };
-        let (userinfo, host) = if let Some((user, host)) = authority.split_once('@') {
-            (Some(user.to_string()), host)
-        } else {
-            (None, authority)
-        };
-        if host.is_empty() {
-            return Err(());
-        }
-        let (path_query, fragment) = match path_and_more.split_once('#') {
-            Some((path, fragment)) => (path, Some(fragment.to_string())),
-            None => (path_and_more, None),
-        };
-        let (path, query) = match path_query.split_once('?') {
-            Some((path, query)) => (path.to_string(), query.to_string()),
-            None => (path_query.to_string(), String::new()),
-        };
-        Ok(Url {
-            scheme: scheme.to_string(),
-            host: Some(host.to_string()),
-            userinfo,
-            path,
-            query,
-            fragment,
-        })
-    }
-
-    impl std::str::FromStr for Url {
-        type Err = ();
-        fn from_str(value: &str) -> Result<Self, Self::Err> {
-            parse(value)
-        }
     }
 }
