@@ -151,6 +151,17 @@ pub fn reject_ambiguous_tree_ref(
     requested_ref: &str,
     relative_path: &str,
 ) -> Result<(), Error> {
+    reject_ambiguous_tree_ref_for(remote, requested_ref, relative_path, "GitHub URL")
+}
+
+/// Same as [`reject_ambiguous_tree_ref`], with a caller-chosen error noun
+/// (`inspect` reports `"Inspection URL"`).
+pub fn reject_ambiguous_tree_ref_for(
+    remote: &RemoteSource,
+    requested_ref: &str,
+    relative_path: &str,
+    origin: &str,
+) -> Result<(), Error> {
     let remote_refs = remote_ref_names(remote)?;
     let mut candidate = requested_ref.to_string();
     for segment in relative_path.split('/') {
@@ -158,7 +169,7 @@ pub fn reject_ambiguous_tree_ref(
         candidate.push_str(segment);
         if remote_refs.contains(&candidate) {
             return Err(Error::msg(format!(
-                "GitHub URL is ambiguous because Git ref `{candidate}` contains `/`; use a ref without `/`"
+                "{origin} is ambiguous because Git ref `{candidate}` contains `/`; use a ref without `/`"
             )));
         }
     }

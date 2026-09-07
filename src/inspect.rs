@@ -8,7 +8,7 @@ use crate::error::Error;
 use crate::git;
 use crate::output;
 use crate::skills;
-use crate::sources::RemoteSource;
+use crate::sources::{RemoteSource, github_part_ok};
 
 #[derive(Debug)]
 struct ParsedUrl {
@@ -133,22 +133,17 @@ fn reject_ambiguous_ref(parsed: &ParsedUrl) -> Result<(), Error> {
     if parsed.boundary.as_os_str().is_empty() {
         return Ok(());
     }
-
-    let remote_refs = git::remote_ref_names(&parsed.remote)?;
-    let mut candidate = requested_ref.to_string();
     for segment in parsed.boundary.iter() {
-        let segment = segment
+        segment
             .to_str()
             .ok_or_else(|| Error::msg("Inspection URL contains non-UTF-8 path data"))?;
-        candidate.push('/');
-        candidate.push_str(segment);
-        if remote_refs.contains(&candidate) {
-            return Err(Error::msg(format!(
-                "Inspection URL is ambiguous because Git ref `{candidate}` contains `/`; use a ref without `/`"
-            )));
-        }
     }
-    Ok(())
+    git::reject_ambiguous_tree_ref_for(
+        &parsed.remote,
+        requested_ref,
+        &parsed.boundary_display,
+        "Inspection URL",
+    )
 }
 
 fn parse_url(value: &str) -> Result<ParsedUrl, Error> {
@@ -178,7 +173,7 @@ fn parse_url(value: &str) -> Result<ParsedUrl, Error> {
     }
     let owner = parts[0];
     let repository = parts[1].trim_end_matches(".git");
-    if !valid_part(owner) || !valid_part(repository) {
+    if !github_part_ok(owner) || !github_part_ok(repository) {
         return Err(Error::msg(
             "Inspection URL has an invalid GitHub repository",
         ));
@@ -230,15 +225,6 @@ fn parse_url(value: &str) -> Result<ParsedUrl, Error> {
         boundary,
         boundary_display,
     })
-}
-
-fn valid_part(part: &str) -> bool {
-    !part.is_empty()
-        && !part.starts_with('.')
-        && !part.ends_with('.')
-        && part
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || "_.-".contains(character))
 }
 
 fn relative_posix(root: &Path, path: &Path) -> String {

@@ -233,7 +233,7 @@ fn looks_like_filesystem_path(value: &str) -> bool {
         || value.contains('\\')
 }
 
-fn github_part_ok(part: &str) -> bool {
+pub(crate) fn github_part_ok(part: &str) -> bool {
     if part.is_empty() || part == "." || part == ".." {
         return false;
     }

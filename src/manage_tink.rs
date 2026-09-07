@@ -27,7 +27,25 @@ pub(crate) enum RefreshOutcome {
     Refreshed,
 }
 
-/// Materialize the embedded tree for read-only validation or later publication.
+/// Expected embedded layout for the read-only freshness check.
+const EMBEDDED_DIRS: &[&str] = &["agents", "references", "scripts"];
+const EMBEDDED_FILES: &[(&str, &[u8])] = &[
+    ("SKILL.md", SKILL_MD.as_bytes()),
+    ("agents/openai.yaml", OPENAI_YAML.as_bytes()),
+    ("references/commands.md", COMMANDS_MD.as_bytes()),
+    (
+        "references/skillset-router.md",
+        SKILLSET_ROUTER_MD.as_bytes(),
+    ),
+    (
+        "references/router-canonical.md",
+        ROUTER_CANONICAL_MD.as_bytes(),
+    ),
+    ("scripts/list-members.mjs", LIST_MEMBERS_MJS.as_bytes()),
+    ("scripts/verify-router.mjs", VERIFY_ROUTER_MJS.as_bytes()),
+];
+
+/// Materialize the embedded tree for installation or refresh publication.
 /// The returned guard owns the bytes referenced by `Skill`.
 pub(crate) fn prepare_manage_tink() -> Result<(tempfile::TempDir, Skill), Error> {
     let staging = tempfile::Builder::new()
@@ -60,8 +78,8 @@ pub(crate) fn prepare_manage_tink() -> Result<(tempfile::TempDir, Skill), Error>
 }
 
 pub(crate) fn is_current(installed: &Skill) -> Result<bool, Error> {
-    let (_staging, embedded) = prepare_manage_tink()?;
-    skills::skill_contents_equal(&installed.path, &embedded.path)
+    // In-memory compare: `skill check` is read-only and must not stage tempdirs.
+    skills::skill_dir_matches_embedded(&installed.path, EMBEDDED_DIRS, EMBEDDED_FILES)
 }
 
 /// Require an installed embedded copy to match the payload in this binary.

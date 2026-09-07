@@ -93,18 +93,40 @@ pub fn init_project(project_root: &Path, options: InitOptions) -> Result<InitRep
     init_project_at(None, project_root, options)
 }
 
+/// `.agents/skills/` layout paths shared by `init` and the `add` bootstrap.
+fn layout_paths(project_root: &Path) -> (PathBuf, PathBuf, PathBuf) {
+    let agents = crate::home::project_agents_path(project_root);
+    let skills = crate::home::project_skills_path(project_root);
+    let readme = skills.join("README.md");
+    (agents, skills, readme)
+}
+
+/// Refuse to replace non-directories/files before creating the layout.
+fn preflight_layout_dirs(agents: &Path, skills: &Path, readme: &Path) -> Result<(), Error> {
+    require_directory(agents)?;
+    require_directory(skills)?;
+    require_file(readme)?;
+    Ok(())
+}
+
+/// Create `.agents/skills/` and its README when absent.
+fn create_layout_dirs(agents: &Path, skills: &Path, readme: &Path) -> Result<(), Error> {
+    mkdir_p(agents)?;
+    mkdir_p(skills)?;
+    if !readme.exists() {
+        std::fs::write(readme, SKILLS_README).map_err(|e| map_io(readme, e))?;
+    }
+    Ok(())
+}
+
 pub(crate) fn init_project_at(
     home: Option<&Path>,
     project_root: &Path,
     options: InitOptions,
 ) -> Result<InitReport, Error> {
-    let agents = crate::home::project_agents_path(project_root);
-    let skills = crate::home::project_skills_path(project_root);
-    let readme = skills.join("README.md");
+    let (agents, skills, readme) = layout_paths(project_root);
 
-    require_directory(&agents)?;
-    require_directory(&skills)?;
-    require_file(&readme)?;
+    preflight_layout_dirs(&agents, &skills, &readme)?;
 
     let style = CliStyle::auto_stdout();
     let with_tink_skills = opt_in(
@@ -127,11 +149,7 @@ pub(crate) fn init_project_at(
     let (inventory_home, home_created) = home::ensure_inventory_root(home)?;
 
     let skills_created = !skills.is_dir();
-    mkdir_p(&agents)?;
-    mkdir_p(&skills)?;
-    if !readme.exists() {
-        std::fs::write(&readme, SKILLS_README).map_err(|e| map_io(&readme, e))?;
-    }
+    create_layout_dirs(&agents, &skills, &readme)?;
 
     let agents_written = write_agents_md(project_root)?;
 
@@ -173,19 +191,11 @@ pub(crate) fn ensure_project_layout_at(
     home: Option<&Path>,
     project_root: &Path,
 ) -> Result<(), Error> {
-    let agents = crate::home::project_agents_path(project_root);
-    let skills = crate::home::project_skills_path(project_root);
-    let readme = skills.join("README.md");
+    let (agents, skills, readme) = layout_paths(project_root);
 
-    require_directory(&agents)?;
-    require_directory(&skills)?;
-    require_file(&readme)?;
+    preflight_layout_dirs(&agents, &skills, &readme)?;
     let _ = home::ensure_inventory_root(home)?;
 
-    mkdir_p(&agents)?;
-    mkdir_p(&skills)?;
-    if !readme.exists() {
-        std::fs::write(&readme, SKILLS_README).map_err(|e| map_io(&readme, e))?;
-    }
+    create_layout_dirs(&agents, &skills, &readme)?;
     Ok(())
 }

@@ -455,6 +455,32 @@ pub fn skill_contents_equal(left: &Path, right: &Path) -> Result<bool, Error> {
     }
 }
 
+/// Compare a skill directory against in-memory embedded bytes without staging
+/// anything to disk. Modes must match the canonical default file mode.
+pub(crate) fn skill_dir_matches_embedded(
+    dir: &Path,
+    dirs: &[&str],
+    files: &[(&str, &[u8])],
+) -> Result<bool, Error> {
+    let Some(tree) = tree_contents(dir)? else {
+        return Ok(false);
+    };
+    let mut expected = BTreeMap::new();
+    for dir in dirs {
+        expected.insert(PathBuf::from(dir), EntryKind::Dir);
+    }
+    for (path, bytes) in files {
+        expected.insert(
+            PathBuf::from(path),
+            EntryKind::File {
+                bytes: bytes.to_vec(),
+                mode: default_file_mode(),
+            },
+        );
+    }
+    Ok(tree == expected)
+}
+
 /// Like [`skill_contents_equal`], but ignore relative paths (e.g. `.tink-source.json`).
 pub fn skill_contents_equal_except(
     left: &Path,

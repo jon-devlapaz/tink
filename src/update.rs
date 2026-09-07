@@ -276,7 +276,7 @@ fn sha256_file(path: &Path) -> Result<[u8; 32], Error> {
     let mut file = fs::File::open(path)
         .map_err(|error| Error::msg(format!("read {}: {error}", output::display_path(path))))?;
     let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
+    let mut buffer = [0_u8; 8192];
     loop {
         let count = file
             .read(&mut buffer)

@@ -29,7 +29,7 @@ fn safe_project_dirname(name: &str) -> String {
     }
 }
 
-fn project_catalog_dir(home: &Path, project_root: &Path) -> Result<PathBuf, Error> {
+fn project_catalog_dir(home: &Path, project_root: &Path) -> PathBuf {
     // Leave ample room below the portable 255-byte component limit for the
     // separator and fixed-width identity, without splitting a UTF-8 scalar.
     let mut basename = safe_project_root_name(project_root);
@@ -40,7 +40,7 @@ fn project_catalog_dir(home: &Path, project_root: &Path) -> Result<PathBuf, Erro
         basename.push_str("project");
     }
     let identity = project_identity(project_root);
-    Ok(by_project_path(home).join(format!("{basename}-{identity}")))
+    by_project_path(home).join(format!("{basename}-{identity}"))
 }
 
 fn project_identity(project_root: &Path) -> String {
@@ -275,7 +275,7 @@ fn existing_project_catalog(
         )));
     }
 
-    let catalog = project_catalog_dir(&home, project_root)?;
+    let catalog = project_catalog_dir(&home, project_root);
     if let Some(catalog) = validate_catalog_dir(&catalog)? {
         return Ok(Some(catalog));
     }
@@ -298,7 +298,7 @@ pub(crate) fn preflight_deposit_skill_at(
         .canonicalize()
         .map_err(|e| map_io(project_root, e))?;
     let (home, _) = ensure_inventory_root(home)?;
-    let catalog = project_catalog_dir(&home, &project_root)?;
+    let catalog = project_catalog_dir(&home, &project_root);
     require_directory(&catalog)?;
     if let Some(existing) = validate_catalog_dir(&catalog)? {
         let meta = CatalogMeta::read(&existing.join("meta.json"), &project_root)?;
@@ -340,7 +340,7 @@ pub(crate) fn deposit_skill_at(
         .canonicalize()
         .map_err(|e| map_io(project_root, e))?;
     let (home, _) = ensure_inventory_root(home)?;
-    let catalog = project_catalog_dir(&home, &project_root)?;
+    let catalog = project_catalog_dir(&home, &project_root);
     migrate_owned_legacy_catalog(&home, &project_root, &catalog)?;
     require_directory(&catalog)?;
     mkdir_p(&catalog)?;
@@ -790,7 +790,7 @@ mod tests {
             "{error}"
         );
         assert!(legacy.join("meta.json").is_file());
-        assert!(!project_catalog_dir(&home, &project).unwrap().exists());
+        assert!(!project_catalog_dir(&home, &project).exists());
     }
 
     #[test]
@@ -811,7 +811,7 @@ mod tests {
             error.to_string().contains("Invalid catalog meta"),
             "{error}"
         );
-        assert!(!project_catalog_dir(&home, &project).unwrap().exists());
+        assert!(!project_catalog_dir(&home, &project).exists());
     }
 
     #[cfg(unix)]
@@ -980,11 +980,7 @@ mod tests {
         deposit_skill_at(Some(&home), &app, "only").unwrap();
         withdraw_skill_at(Some(&home), &app, "only").unwrap();
         assert!(list_catalog(Some(&home)).unwrap().is_empty());
-        assert!(
-            !project_catalog_dir(&home, &app.canonicalize().unwrap())
-                .unwrap()
-                .exists()
-        );
+        assert!(!project_catalog_dir(&home, &app.canonicalize().unwrap()).exists());
     }
 
     #[test]
