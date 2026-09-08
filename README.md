@@ -114,19 +114,17 @@ flowchart LR
   tink["tink CLI"]
   live[".agents/skills/"]
   library["~/.tink/skills/"]
-  catalog["~/.tink/catalog/"]
 
   agent -->|"discovers"| live
   tink -->|"add / remove"| live
   tink -->|"copies on add"| library
-  tink -->|"records names"| catalog
   tink -->|"add <library-name>"| live
 ```
 
 Tink lists and validates live project skills only under `.agents/skills/`. It
 never promotes a home-library entry automatically or configures an agent
-harness to discover the home. Library holds skill trees; catalog holds
-by-project **names** only.
+harness to discover the home. The home library holds reusable skill trees;
+skillset pins live beside the skillsets library as `$TINK_HOME/skillsets/<name>.json`.
 
 ## Use (everyday)
 
@@ -184,7 +182,7 @@ are refused.
 Skillset names are explicit and canonical: every name must end in `-skillset`;
 Tink never appends or removes that suffix. `skillset add NAME-skillset` reads
 the pinned definition at
-`$TINK_HOME/catalog/by-skillset/NAME-skillset/meta.json`. The definition contains an
+`$TINK_HOME/skillsets/NAME-skillset.json`. The pin contains an
 absolute HTTPS Git URL, a full commit SHA, a repository-relative `sourceRoot`,
 and explicit member names. Tink validates and consumes this externally authored
 file but has no command that writes it. For example:
@@ -201,38 +199,37 @@ file but has no command that writes it. For example:
 Creating or changing that exact definition is a separate, explicitly authorized
 authoring step. `tink inspect` can propose source structure, but it never creates a
 definition. Do not hand-edit `.tink-skillset.json` receipts, installed skillset
-trees, or derived `catalog/by-project` entries.
+trees.
 
 Tink copies those member skill trees atomically
 under `.agents/skills/NAME-skillset/`, validates the project tree, then mirrors
-that exact tree to `$TINK_HOME/skills/NAME-skillset/`. The project is primary;
-the home library conforms to it and never overwrites it. Both copies carry
+that exact tree to `$TINK_HOME/skillsets/NAME-skillset/`. The project is primary;
+the home skillsets library conforms to it and never overwrites it. Both copies carry
 `.tink-skillset.json` as derived receipt evidence. Repeated identical installs
 are offline no-ops. `skillset refresh NAME-skillset` updates a clean project to
-its pinned catalog definition; local project modifications are refused. Library
+its pinned definition; local project modifications are refused. Library
 drift is repaired only from a valid project tree.
 `skillset remove NAME-skillset` removes only the project tree; it preserves the
-shared catalog definition and home library copy.
+shared pin and home skillsets copy.
 `skillset list` groups each receipt-backed project skillset with its member
 skills; a divergent tree is shown as a row error and does not fail the list.
 `skillset list --library` shows the same grouped view for the home
-library. Receipt ownership takes precedence over a root `SKILL.md`: standalone
+skillsets library. Receipt ownership takes precedence over a root `SKILL.md`: standalone
 library list/add commands never expose, promote, or replace that skillset root.
 
 `tink inspect <GITHUB_URL>` performs a read-only inspection of a public GitHub
 repository, folder, or skill URL. It reports directories containing valid
 `SKILL.md` files and infers source skillsets from the URL boundary's directory
-structure. Inspection never writes the project, catalog, or home library.
+structure. Inspection never writes the project, pin, or home library.
 
 ## Power
 
-Library, catalog, init flags, and destroy:
+Library, init flags, and destroy:
 
 ```console
 tink library list
 tink skill add skill-name
 tink skill harvest
-tink skill list --catalog
 
 tink init --with-tink-skills
 tink init --no-tink-skills --no-manage-tink
@@ -241,12 +238,10 @@ tink destroy --yes
 tink update
 ```
 
-`tink skill list --catalog` always emits the `project`, `root`, `skill` TSV
-header, including for an empty catalog. Within fields, backslash, tab, carriage
-return, and newline are escaped as `\\\\`, `\\t`, `\\r`, and `\\n` so every
-skill remains one three-column row.
-
-**Breaking in 0.3.0:** `skill list --home` → `--catalog`; `skill list --stash` → `--library`. On-disk layout is still `$TINK_HOME/skills/` and `catalog/by-project/`. After updating the binary, refresh each project's embedded skill with `tink skill refresh manage-tink`.
+**Breaking:** `skill list --catalog` and the by-project index are removed; use
+project `skill list` and `tink library list` (`skill list --library` alias).
+After updating the binary, refresh each project's embedded skill with
+`tink skill refresh manage-tink`.
 
 Project lockfiles now use digest format/version 2 so file boundaries and Unix
 executable modes are actually pinned. An older lock is deliberately refused;
@@ -257,10 +252,10 @@ If the GitHub tip is already in the library and matches the tip byte-for-byte,
 `skill add` may install from the library. If a standalone library skill differs,
 tink repairs it and warns. A bare standalone skill name (not a path and not `owner/repo`) promotes from
 the library into the project. `skill remove` deletes the project skill
-directory and drops that name from the by-project catalog; it does not delete
-library trees. `destroy` removes `.agents/skills/`, removes `.agents/` only when
-it is then empty, and drops this project's catalog entry. It preserves
-files outside `.agents/` (including `AGENTS.md`), unrelated `.agents/` siblings, and all library trees.
+directory; it does not delete library trees. `destroy` removes
+`.agents/skills/` and removes `.agents/` only when it is then empty. It
+preserves files outside `.agents/` (including `AGENTS.md`), unrelated
+`.agents/` siblings, and all library trees.
 
 Successful output goes to stdout; warnings and failures go to stderr. A closed
 stdout is normal pipeline termination (exit 0), while command and usage failures
@@ -291,7 +286,7 @@ cargo uninstall tink
 ```console
 cargo test
 ./tink-test init
-./tink-test skill list --catalog
+./tink-test library list
 ```
 
 `./tink-test` builds this checkout and runs `target/debug/tink` (not

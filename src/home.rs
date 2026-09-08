@@ -8,14 +8,13 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use crate::error::Error;
+use crate::output;
 use crate::paths::{map_io, mkdir_p, refuse_symlink, require_file};
 
 pub const TINK_HOME_ENV: &str = "TINK_HOME";
 pub const TINK_HOME_NAME: &str = ".tink";
 pub const LAYOUT_FILENAME: &str = "layout.json";
 pub const LAYOUT_KIND: &str = "tink-skill-inventory";
-pub const BY_PROJECT: &str = "by-project";
-pub const BY_SKILLSET: &str = "by-skillset";
 
 /// Project agent directory (`.agents`) — the single owner of this layout decision.
 pub const PROJECT_AGENTS_DIR: &str = ".agents";
@@ -41,12 +40,13 @@ Tink home directory. This is **not** an agent skill discovery root. Agents load
 skills only from a project's `.agents/skills/`.
 
 Successful installs:
-- copy skill and validated project skillset trees into the library under `skills/<name>/`
+- copy standalone skill trees into the library under `skills/<name>/`
+- mirror validated project skillset trees under `skillsets/<name>-skillset/`
 - skillsets use canonical `<name>-skillset` roots; their project tree is primary
-- record skill **names** under `catalog/by-project/<bounded-name>-<identity>/meta.json`
-- read pinned skillset definitions from `catalog/by-skillset/<name>/meta.json`
+- read pinned skillset definitions from `skillsets/<name>.json` (sibling of the
+  mirrored tree directory `skillsets/<name>/`)
 
-`skill remove` and `destroy` update that name catalog; they do not delete
+`skill remove` and `destroy` delete project trees only; they do not prune
 library trees.
 
 Default location: `~/.tink` (override with `TINK_HOME`; relative values
@@ -115,22 +115,24 @@ pub fn existing_inventory_root(root: Option<&Path>) -> Result<Option<PathBuf>, E
     Ok(Some(root))
 }
 
-/// Path to `catalog/by-project` under a home root.
-pub fn by_project_path(home: &Path) -> PathBuf {
-    home.join("catalog").join(BY_PROJECT)
+/// Path to a skillset desired-pin file (`skillsets/<name>.json`).
+///
+/// Sibling of the mirrored tree at `skillsets/<name>/`; never nested inside it.
+pub fn skillset_pin_path(home: &Path, name: &str) -> PathBuf {
+    skillsets_library_path(home).join(format!("{name}.json"))
 }
 
-/// Path to the catalog of authored skillset definitions.
-pub fn by_skillset_path(home: &Path) -> PathBuf {
-    home.join("catalog").join(BY_SKILLSET)
-}
-
-/// Path to the skill-tree library root (`skills/`).
+/// Path to the standalone skill-tree library root (`skills/`).
 pub fn skills_library_path(home: &Path) -> PathBuf {
     home.join("skills")
 }
 
-/// Ensure inventory root + library dir + catalog + layout marker.
+/// Path to the derived skillset library root (`skillsets/`).
+pub fn skillsets_library_path(home: &Path) -> PathBuf {
+    home.join("skillsets")
+}
+
+/// Ensure inventory root + library dirs + layout marker.
 ///
 /// Returns `(path, created)` where `created` is true only when the root
 /// directory did not exist before this call. Relative roots are absolutized
@@ -153,9 +155,7 @@ pub fn ensure_inventory_root(root: Option<&Path>) -> Result<(PathBuf, bool), Err
     validate_direct_owners(&root)?;
     publish_layout_marker(&root)?;
     mkdir_p(&skills_library_path(&root))?;
-    migrate_catalog_if_needed(&root)?;
-    mkdir_p(&by_project_path(&root))?;
-    mkdir_p(&by_skillset_path(&root))?;
+    mkdir_p(&skillsets_library_path(&root))?;
     write_layout_marker(&root)?;
     Ok((root, created))
 }
@@ -190,57 +190,16 @@ fn preflight_inventory_root(root: &Path) -> Result<(), Error> {
 /// Refuse direct Tink-owned paths that would make creation or inspection
 /// traverse a symlink or replace a non-directory.
 fn validate_direct_owners(root: &Path) -> Result<(), Error> {
-    for name in ["catalog", "skills"] {
+    for name in ["skills", "skillsets"] {
         let owner = root.join(name);
         refuse_symlink(&owner)?;
         if owner.exists() && !owner.is_dir() {
             return Err(Error::msg(format!(
                 "Refusing non-directory Tink home owner: {}",
-                owner.display()
+                output::display_path(&owner)
             )));
         }
     }
-    Ok(())
-}
-
-/// True when `skills/by-project` looks like the old name catalog (not a skill tree).
-pub(crate) fn looks_like_legacy_catalog(path: &Path) -> bool {
-    path.is_dir() && !path.join("SKILL.md").is_file()
-}
-
-/// Older marked homes kept the name catalog at `skills/by-project/`; move it
-/// out so `skills/<name>/` can hold library trees.
-fn migrate_catalog_if_needed(home: &Path) -> Result<(), Error> {
-    let old = home.join("skills").join(BY_PROJECT);
-    let new = by_project_path(home);
-    if !old.exists() {
-        return Ok(());
-    }
-    if old.is_symlink() {
-        return Err(Error::msg(format!(
-            "Refusing legacy catalog symlink {}: replace it with a real directory, then re-run",
-            old.display()
-        )));
-    }
-    if !old.is_dir() {
-        return Err(Error::msg(format!(
-            "Refusing non-directory legacy catalog {}: move or delete it, then re-run",
-            old.display()
-        )));
-    }
-    // A skill tree mistakenly placed as by-project has SKILL.md — leave it.
-    if !looks_like_legacy_catalog(&old) {
-        return Ok(());
-    }
-    if new.exists() {
-        return Err(Error::msg(format!(
-            "Catalog split across {} and {}: keep catalog/by-project, remove skills/by-project, then re-run",
-            old.display(),
-            new.display()
-        )));
-    }
-    mkdir_p(&home.join("catalog"))?;
-    fs::rename(&old, &new).map_err(|e| map_io(&old, e))?;
     Ok(())
 }
 
@@ -251,7 +210,10 @@ fn write_layout_marker(root: &Path) -> Result<(), Error> {
     require_file(&readme)?;
     let refresh_readme = if readme.is_file() {
         let existing = fs::read_to_string(&readme).map_err(|e| map_io(&readme, e))?;
-        existing.contains("skills/by-project") || !existing.contains("catalog/by-project")
+        existing.contains("skills/by-project")
+            || existing.contains("catalog/by-project")
+            || existing.contains("catalog/by-skillset")
+            || !existing.contains("skillsets/<name>.json")
     } else {
         true
     };
@@ -300,77 +262,18 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn ensure_creates_layout_and_catalog() {
+    fn ensure_creates_layout_and_libraries() {
         let temp = TempDir::new().unwrap();
         let root = temp.path().join("inv");
         let (path, created) = ensure_inventory_root(Some(&root)).unwrap();
         assert!(created);
         assert_eq!(path, root);
         assert!(root.join("layout.json").is_file());
-        assert!(by_project_path(&root).is_dir());
         assert!(skills_library_path(&root).is_dir());
-        assert!(!root.join("skills").join(BY_PROJECT).exists());
+        assert!(skillsets_library_path(&root).is_dir());
+        assert!(!root.join("catalog").exists());
         let (_, created_again) = ensure_inventory_root(Some(&root)).unwrap();
         assert!(!created_again);
-    }
-
-    #[test]
-    fn migrate_moves_legacy_by_project() {
-        let temp = TempDir::new().unwrap();
-        let root = temp.path().join("inv");
-        let legacy = root.join("skills").join(BY_PROJECT).join("app");
-        fs::create_dir_all(&legacy).unwrap();
-        fs::write(
-            root.join(LAYOUT_FILENAME),
-            format!("{{\n  \"kind\": \"{LAYOUT_KIND}\"\n}}\n"),
-        )
-        .unwrap();
-        fs::write(
-            legacy.join("meta.json"),
-            "{\"name\":\"app\",\"root\":\"/tmp/app\",\"skills\":[\"x\"]}\n",
-        )
-        .unwrap();
-        ensure_inventory_root(Some(&root)).unwrap();
-        assert!(
-            by_project_path(&root)
-                .join("app")
-                .join("meta.json")
-                .is_file()
-        );
-        assert!(!root.join("skills").join(BY_PROJECT).exists());
-    }
-
-    #[test]
-    fn migrate_refuses_when_both_catalog_paths_exist() {
-        let temp = TempDir::new().unwrap();
-        let root = temp.path().join("inv");
-        fs::create_dir_all(root.join("skills").join(BY_PROJECT).join("old")).unwrap();
-        fs::create_dir_all(by_project_path(&root).join("new")).unwrap();
-        fs::write(
-            root.join(LAYOUT_FILENAME),
-            format!("{{\n  \"kind\": \"{LAYOUT_KIND}\"\n}}\n"),
-        )
-        .unwrap();
-        let err = ensure_inventory_root(Some(&root)).unwrap_err();
-        assert!(err.to_string().contains("Catalog split"), "{err}");
-    }
-
-    #[test]
-    fn migrate_refuses_legacy_file() {
-        let temp = TempDir::new().unwrap();
-        let root = temp.path().join("inv");
-        fs::create_dir_all(root.join("skills")).unwrap();
-        fs::write(root.join("skills").join(BY_PROJECT), "not a dir\n").unwrap();
-        fs::write(
-            root.join(LAYOUT_FILENAME),
-            format!("{{\n  \"kind\": \"{LAYOUT_KIND}\"\n}}\n"),
-        )
-        .unwrap();
-        let err = ensure_inventory_root(Some(&root)).unwrap_err();
-        assert!(
-            err.to_string().contains("non-directory legacy catalog"),
-            "{err}"
-        );
     }
 
     #[test]
@@ -385,13 +288,28 @@ mod tests {
         .unwrap();
         fs::write(
             root.join("README.md"),
-            "old text mentioning skills/by-project only\n",
+            "old text mentioning catalog/by-project only\n",
         )
         .unwrap();
         ensure_inventory_root(Some(&root)).unwrap();
         let readme = fs::read_to_string(root.join("README.md")).unwrap();
-        assert!(readme.contains("catalog/by-project"));
-        assert!(!readme.contains("skills/by-project/<project>"));
+        assert!(readme.contains("skillsets/<name>.json"));
+        assert!(!readme.contains("catalog/by-project"));
+        assert!(!readme.contains("catalog/by-skillset"));
+    }
+
+    #[test]
+    fn skillset_pin_is_sibling_json_not_inside_tree() {
+        let home = Path::new("/tmp/tink-home");
+        let pin = skillset_pin_path(home, "common-skillset");
+        assert_eq!(
+            pin,
+            PathBuf::from("/tmp/tink-home/skillsets/common-skillset.json")
+        );
+        assert_ne!(
+            pin,
+            skillsets_library_path(home).join("common-skillset").join("meta.json")
+        );
     }
 
     #[test]
@@ -405,7 +323,8 @@ mod tests {
         assert!(!created);
         assert!(root.join(LAYOUT_FILENAME).is_file());
         assert!(skills_library_path(&root).is_dir());
-        assert!(by_project_path(&root).is_dir());
+        assert!(skillsets_library_path(&root).is_dir());
+        assert!(!root.join("catalog").exists());
     }
 
     #[test]
@@ -418,13 +337,15 @@ mod tests {
         assert!(root.join(LAYOUT_FILENAME).is_file());
         assert!(!root.join("README.md").exists());
         assert!(!root.join("skills").exists());
+        assert!(!root.join("skillsets").exists());
         assert!(!root.join("catalog").exists());
 
         ensure_inventory_root(Some(&root)).unwrap();
 
         assert!(root.join("README.md").is_file());
         assert!(skills_library_path(&root).is_dir());
-        assert!(by_project_path(&root).is_dir());
+        assert!(skillsets_library_path(&root).is_dir());
+        assert!(!root.join("catalog").exists());
     }
 
     #[test]
@@ -486,10 +407,10 @@ mod tests {
     }
 
     #[test]
-    fn existing_home_keeps_marked_legacy_layout_compatible() {
+    fn existing_home_tolerates_leftover_by_project_dirs() {
         let temp = TempDir::new().unwrap();
         let root = temp.path().join("legacy");
-        fs::create_dir_all(root.join("skills").join(BY_PROJECT)).unwrap();
+        fs::create_dir_all(root.join("skills").join("by-project")).unwrap();
         fs::write(
             root.join(LAYOUT_FILENAME),
             format!("{{\"kind\":\"{LAYOUT_KIND}\"}}"),
@@ -502,7 +423,7 @@ mod tests {
     #[test]
     fn existing_home_refuses_non_directory_direct_owners() {
         let temp = TempDir::new().unwrap();
-        for owner in ["catalog", "skills"] {
+        for owner in ["skills", "skillsets"] {
             let root = temp.path().join(format!("{owner}-home"));
             fs::create_dir(&root).unwrap();
             fs::write(
@@ -521,7 +442,7 @@ mod tests {
     #[test]
     fn ensure_refuses_direct_owner_symlinks_before_traversal() {
         let temp = TempDir::new().unwrap();
-        for owner in ["catalog", "skills"] {
+        for owner in ["skills", "skillsets"] {
             let root = temp.path().join(owner);
             let target = temp.path().join(format!("{owner}-target"));
             fs::create_dir_all(&root).unwrap();

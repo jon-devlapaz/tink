@@ -12,7 +12,6 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crate::catalog;
 use crate::check;
 use crate::error::Error;
 use crate::library;
@@ -175,7 +174,6 @@ pub(crate) fn rollback_skill_at(home: Option<&Path>, root: &Path, name: &str) ->
             path: restored,
         },
     )?;
-    catalog::deposit_skill_at(home, root, name)?;
     refuse_symlink(&snapshot.dir)?;
     fs::remove_dir_all(&snapshot.dir).map_err(|e| map_io(&snapshot.dir, e))?;
     Ok(())

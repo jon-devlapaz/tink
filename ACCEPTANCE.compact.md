@@ -16,19 +16,19 @@
 
 - `init`: create `.agents/skills/`, write `AGENTS.md` if missing, install `manage-tink` by default, ensure `~/.tink`.
 - `skill add <source> [--skill <name-or-path>]`: one local path, public GitHub skill, GitHub tree URL, or library name. Remote selectors may be unique names or repo-relative paths.
-- `skill list` / `--catalog` / `--library`: project skills (read-only); offline by-project TSV (`project\troot\tskill`); library names.
+- `skill list` / `--library`: project skills (read-only); library names (`tink library list` / compatibility alias).
 - `skill read <name> [--library] [--raw]`: description + lifecycle metadata.
 - `skill harvest`: harness roots into library (create-only, no project writes).
 - `skill promote <name> [--replace]`: validated project skill to library as receipt-free payload; divergence requires `--replace`.
 - `skill check`: validate project, no network, no writes.
 - `skill lock [--source <name=source>]` / `sync` / `verify`: record, restore, verify manifest (`.tink/skills.toml` v1) + lockfile (`.tink/skills.lock` v2).
 - `skill refresh [name]` / `--dry-run` / `outdated` / `rollback`: clean GitHub imports only; refuse local edits; preview; staleness; one-generation undo.
-- `skill remove <name>`: delete project skill + drop catalog name (not library).
+- `skill remove <name>`: delete project skill + project only (not library).
 - `skillset add <url> [name]` / `add <name>-skillset`: from tree URL (create-only definition) or pinned catalog definition; nested project tree + baseline router + library mirror.
 - `skillset list [--library]` / `refresh` / `update` / `remove`: grouped read-only view; clean replace; advance pinned revision; delete project tree only (definition + library preserved).
 - `inspect <GITHUB_URL>`: skills + inferred skillsets, no project/home writes.
 - `update`: replace binary with newer verified release (`curl` + `tar`).
-- `destroy [--yes]`: remove `.agents/skills/` (+ empty `.agents/`); preserve `AGENTS.md`, unrelated siblings, library; drop catalog entry.
+- `destroy [--yes]`: remove `.agents/skills/` (+ empty `.agents/`); preserve `AGENTS.md`, unrelated siblings, library.
 
 ## On-disk (condensed)
 
@@ -36,9 +36,9 @@
 - Live skillsets: `<project>/.agents/skills/<name>-skillset/<member>/`, one `SKILL.md` per explicit member.
 - Receipt `.tink-source.json`: exactly `source`, `revision`, `path` (non-empty strings).
 - Home: `$TINK_HOME` or `~/.tink` (relative absolutized vs cwd) with `layout.json` (`kind: tink-skill-inventory`).
-- Library `skills/<name>/`: rebuildable copies on successful add; identical tip may seed project; divergence repairs + warns; project overwrite still refused; never a discovery root.
-- Catalog `catalog/by-project/<bounded-name>-<sha256(raw-root)>/meta.json`: display `name`, `root`, raw `identity`, `skills` list.
-- Skillset definition `catalog/by-skillset/<name>-skillset/meta.json`: create-only, `source`, immutable `revision`, repo-relative `sourceRoot`, explicit `members`.
+- Library `skills/<name>/`: rebuildable standalone copies on successful add; identical tip may seed project; divergence repairs + warns; project overwrite still refused; never a discovery root.
+- Skillsets library `skillsets/<name>-skillset/`: derived copies of validated project skillsets; project is primary; never a discovery root.
+- Skillset pin `$TINK_HOME/skillsets/<name>-skillset.json`: create-only, `source`, immutable `revision`, repo-relative `sourceRoot`, explicit `members`.
 - Manifest `.tink/skills.toml` v1: `name`, typed `source`, optional rel `path`.
 - Lock `.tink/skills.lock` v2: domain-separated length-framed SHA-256 over path bytes, entry kind, canonical 0o755/0o644 mode, contents (receipt excluded). v1 must be relocked.
 - Skillset receipt `.tink-skillset.json`: digest v2, same tree semantics; legacy migrates only via clean `skillset refresh`.
@@ -54,7 +54,7 @@
 - I1 init empty: creates `.agents/skills/` as real dirs, not symlinks.
 - I2 `.agents` symlink: FAIL mentions symlink, nothing unsafe created.
 - I3 non-interactive / `--no-tink-skills`: no `ZEN.md`, no `.github/workflows/*` (manage-tink + AGENTS.md allowed).
-- I4 `TINK_HOME` set: creates home root + `layout.json` + `catalog/by-project/` + `skills/`.
+- I4 `TINK_HOME` set: creates home root + `layout.json` + `skills/` + `skillsets/` (no `catalog/`).
 - I5 `AGENTS.md` absent: writes Tink-manages-skills note; later init leaves existing file byte-identical.
 - I6 default: installs + catalogs `manage-tink`, copies to library.
 - I7 `--no-manage-tink`: no manage-tink.
@@ -62,7 +62,7 @@
 - I9 init twice unchanged: 2nd OK (`Ready`/`Already present`), files identical.
 - I10 `--with-tink-skills` vs incomplete bundle: 1st FAILS preserving setup; after repair 2nd OK with manage-tink + skill-scout + triangulate-me.
 - I11 `TINK_HOME` = non-empty project dir: FAIL, project identical.
-- I12 marker-only partial home: OK, rebuilds library/catalog, valid inventory.
+- I12 marker-only partial home: OK, rebuilds skills/skillsets, valid inventory.
 
 ### Local add
 
@@ -74,9 +74,8 @@
 - A5 multi-skill source without `--skill`: FAIL, lists choices.
 - A6 library same name, different tree, project missing: OK, installs project, repairs library, stderr warn.
 - A6B stderr closed during A6 warn: OK, mutation complete, no retry ambiguity.
-- A7 name `by-project`: FAIL reserved, no writes.
+- A7 name `by-project`: OK installs (reservation retired with catalog removal).
 - A8 same GitHub tip in library: OK from library, no clone, stdout notes it.
-- A9 malformed catalog: 1st FAILS preserving project/library; after repair 2nd OK, catalogs, copies identical.
 - A10 direct symlink / symlinked child: FAIL mentions symlink, no project/library/catalog entry.
 - A11 project target is symlink: FAIL, symlink untouched, no library/catalog.
 - A12 `TINK_HOME` = unrelated non-empty dir: FAIL, dir identical.
@@ -111,21 +110,22 @@
 
 ### Skillsets
 
-- K1 add pinned definition: installs members under `.agents/skills/<name>-skillset/`, digest-v2 receipt, validates, mirrors exact tree to library; re-add noop; library drift repaired from project.
+- K1 add pinned definition: installs members under `.agents/skills/<name>-skillset/`, digest-v2 receipt, validates, mirrors exact tree to `skillsets/`; re-add noop; skillsets-library drift repaired from project.
 - K1B root router added later: ignored by digest, check clean, re-add mirrors router, refresh preserves router while updating members.
-- K2 remove after K1: deletes project tree only; keeps definition + library; `skill remove` refuses skillset root. Sensor: K1.
+- K1C missing root router: check FAIL; clean refresh/add restores library copy or regenerates baseline.
+- K2 remove after K1: deletes project tree only; keeps definition + skillsets library; `skill remove` refuses skillset root. Sensor: K1.
 - K3 list after K1: groups receipt-backed skillsets + members, no network/writes. Sensor: K1.
 - K3B two skillsets, drift one: list exits 0 showing both; check reports valid counts then exits ≠ 0; clean refresh still works.
 - K4 invalid skillset name: FAIL, no tree written.
-- K5 ordinary/unowned library entry at canonical name: FAIL before network/project publication, library preserved.
+- K5 ordinary/unowned entry at `skillsets/<name>-skillset/`: FAIL before network/project publication, entry preserved.
 - K6 remove with missing/invalid receipt: FAIL, project dir preserved.
 - K7 before project/catalog setup: list explains init; missing catalog leaves project untouched.
 - K8 re-add unchanged while remote down: OK offline, syncs library from project.
 - K9 only grouped members: check reports standalone + skillset + member counts; list says no standalone, points to `skillset list`.
-- K10 refresh after definition change: stages + rename-replaces clean tree (best-effort rollback), mirrors to library; refuses local mods.
+- K10 refresh after definition change: stages + rename-replaces clean tree (best-effort rollback), mirrors to `skillsets/`; refuses local mods.
 - K11 member folder vs `SKILL.md` name differ: FAIL before publication.
-- K12 add `<url> [name]`: create-only `meta.json` with immutable SHA; discovery skips non-skills; aborts on corrupt frontmatter; baseline router generated; mirrors to library; re-add = Unchanged; `inspect` preview is read-only.
-- K13 update: queries upstream, advances `meta.json` to new tip SHA, discovers members, preserves router, replaces project tree, mirrors to library; Unchanged if at tip; refuses on local mods.
+- K12 add `<url> [name]`: create-only `meta.json` with immutable SHA; discovery skips non-skills; aborts on corrupt frontmatter; baseline router generated; mirrors to `skillsets/`; re-add = Unchanged; `inspect` preview is read-only.
+- K13 update: queries upstream, advances `meta.json` to new tip SHA, discovers members, preserves router, replaces project tree, mirrors to `skillsets/`; Unchanged if at tip; refuses on local mods.
 
 ### Inspection (`inspect`, read-only, no project/home writes)
 
@@ -171,16 +171,8 @@
 
 - L1 after init: OK includes manage-tink.
 - L2 without `.agents/skills`: FAIL.
-- L3 `--catalog` after init + add: OK, `project\troot\tskill` header + 3-col TSV.
-- L5 `--stash` / `--home`: FAIL, stderr names flag (removed 0.3.0; use `--library` / `--catalog`).
-- L6 `--catalog` with valid + malformed metadata: OK, valid rows only.
 - L7 nested symlink in standalone: list + check FAIL mention symlink, tree untouched.
-- L8 `--library` / `--catalog` with non-empty unmarked home: FAIL, dir identical.
-- L9 home owner (`skills/` or `catalog/`) is symlink: FAIL, no follow/replace.
-- L10 two projects, same basename, one home: distinct identities, own roots + skills.
-- L11 project name starts with `.`: hashed identity still visible; not a staging entry.
-- L12 catalog name/root has tab/CR/LF/backslash/control: visible escapes (`\t` `\r` `\n` `\\` `\x1b`), 3 TSV cols, no raw controls.
-- L13 `--catalog` empty: OK header only.
+- L9 `--library` when `$TINK_HOME/skills/` is a symlink: FAIL, refuses symlink.
 - L14 `library list` vs `skill list --library`: identical stdout + stderr.
 
 ### Read
@@ -225,7 +217,7 @@
 - V4 stdout closed before listing write: OK, no panic/101.
 - V5 stderr closed while command fails: exit 1 preserved.
 - V6 `install.sh` stdout closed after verified install: OK, destination intact.
-- V7 catalog failure from control-char path: FAIL, stderr escaped, one row.
+- V7 home-owner failure from control-char path: FAIL, stderr escaped, one row.
 
 ### Refresh / outdated / preview / rollback / doctor
 
@@ -260,17 +252,14 @@
 
 ### Remove / destroy
 
-- X1 remove after init + add: OK; project dir gone; list omits; library kept; `--catalog` omits for project.
+- X1 remove after init + add: OK; project dir gone; list omits; library kept.
 - X2 missing: FAIL not-found; nothing deleted.
 - X3 `.agents` symlink: FAIL mentions symlink; tree unchanged.
 - X4 successful remove: never deletes library copy.
-- X5 manage-tink content: covers lifecycle, proof/partial-state reporting, lock sources, session-vs-persistent completion, refresh warning, library/catalog effects, skillsets, update, destroy.
-- X6 malformed catalog metadata: FAIL; project + library intact.
-- X7 catalog symlink: FAIL mentions symlink; project + external target identical.
-- D1 `destroy --yes` after init: removes `.agents/skills/` + empty `.agents/`; preserves `AGENTS.md`; library + `layout.json` intact; drops catalog entry.
+- X5 manage-tink content: covers lifecycle, proof/partial-state reporting, lock sources, session-vs-persistent completion, refresh warning, library effects, skillsets, update, destroy.
+- D1 `destroy --yes` after init: removes `.agents/skills/` + empty `.agents/`; preserves `AGENTS.md`; library + `layout.json` intact.
 - D2 no `--yes` non-TTY: FAIL, files unchanged.
 - D3 `.agents` symlink: FAIL mentions symlink.
-- D4 catalog symlink: FAIL mentions symlink; scaffolding + target identical.
 - D5 unrelated sibling in `.agents/`: removes `skills/`, preserves sibling, keeps `.agents/`.
 
 ### Update (binary) / install.sh

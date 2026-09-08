@@ -1,8 +1,8 @@
 //! Pinned nested skillset lifecycle.
 //!
 //! Receipt entry presence classifies a root as a skillset before receipt contents are
-//! trusted. The project tree is authoritative; library copies are derived from a
-//! validated project tree.
+//! trusted. The project tree is authoritative; `$TINK_HOME/skillsets/` copies are
+//! derived from a validated project tree.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -141,9 +141,15 @@ pub struct ListedSkillset {
 
 fn read_json<T: for<'de> Deserialize<'de>>(path: &Path, label: &str) -> Result<T, Error> {
     refuse_symlink(path)?;
-    if !path.is_file() {
+    if !path.exists() {
         return Err(Error::msg(format!(
             "Missing {label}: {}",
+            output::display_path(path)
+        )));
+    }
+    if !path.is_file() {
+        return Err(Error::msg(format!(
+            "Refusing non-file {label}: {}",
             output::display_path(path)
         )));
     }
@@ -328,6 +334,59 @@ fn validate_installed_tree(path: &Path, receipt: &SkillsetReceipt) -> Result<(),
     Ok(())
 }
 
+fn require_router(path: &Path) -> Result<(), Error> {
+    match read_router_overlay(path)? {
+        Some(_) => Ok(()),
+        None => {
+            let name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("NAME-skillset");
+            Err(Error::msg(format!(
+                "Skillset router missing: {}; run `tink skillset refresh {name}` to restore the baseline",
+                output::display_path(&path.join(ROUTER_FILE))
+            )))
+        }
+    }
+}
+
+fn member_descriptions_from_installed(
+    path: &Path,
+    members: &[String],
+) -> Result<Vec<(String, String)>, Error> {
+    let mut out = Vec::with_capacity(members.len());
+    for member in members {
+        let member_path = path.join(member);
+        let (_skill, desc) = skills::read_skill_and_description(&member_path, true)?;
+        out.push((member.clone(), desc));
+    }
+    Ok(out)
+}
+
+/// Restore a missing project router without touching member digests.
+///
+/// Prefers an existing `$TINK_HOME/skillsets/` router (may be elevated), otherwise
+/// writes a fresh baseline from installed member descriptions.
+fn ensure_project_router(
+    home: Option<&Path>,
+    project: &Path,
+    name: &str,
+    members: &[String],
+) -> Result<bool, Error> {
+    if read_router_overlay(project)?.is_some() {
+        return Ok(false);
+    }
+    let library_router = read_router_overlay(&library_root(home)?.join(name))?;
+    if let Some(bytes) = library_router {
+        write_router_overlay(project, &bytes)?;
+        return Ok(true);
+    }
+    let descriptions = member_descriptions_from_installed(project, members)?;
+    let text = generate_baseline_router(name, &descriptions);
+    write_router_overlay(project, text.as_bytes())?;
+    Ok(true)
+}
+
 fn validate_legacy_tree_for_refresh(path: &Path, receipt: &SkillsetReceipt) -> Result<(), Error> {
     validate_member_trees(path, receipt)?;
     let digest = skills::tree_digest_legacy(path, DIGEST_ROOT_IGNORE)?;
@@ -340,15 +399,15 @@ fn validate_legacy_tree_for_refresh(path: &Path, receipt: &SkillsetReceipt) -> R
     Ok(())
 }
 
-fn read_catalog(home: Option<&Path>, name: &str) -> Result<SkillsetMeta, Error> {
+fn read_skillset_pin(home: Option<&Path>, name: &str) -> Result<SkillsetMeta, Error> {
     validate_skillset_name(name)?;
     let home = match home {
         Some(home) => home.to_path_buf(),
         None => home::resolve_home()?,
     };
-    let catalog = home::by_skillset_path(&home).join(name);
-    refuse_symlink(&catalog)?;
-    let meta: SkillsetMeta = read_json(&catalog.join("meta.json"), "skillset catalog meta")?;
+    let meta_path = home::skillset_pin_path(&home, name);
+    refuse_symlink(&meta_path)?;
+    let meta: SkillsetMeta = read_json(&meta_path, "skillset pin")?;
     validate_meta(&meta)?;
     Ok(meta)
 }
@@ -654,51 +713,70 @@ fn discover_skillset_members_in_boundary(
     Ok(members)
 }
 
-fn ensure_catalog_definition(
+fn write_skillset_pin(path: &Path, meta: &SkillsetMeta) -> Result<(), Error> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| map_io(parent, e))?;
+    }
+    let text = serde_json::to_string_pretty(meta)
+        .map_err(|e| Error::msg(format!("serialize skillset pin: {e}")))?;
+    fs::write(path, format!("{text}\n")).map_err(|e| map_io(path, e))?;
+    Ok(())
+}
+
+fn pin_metadata_diffs(existing: &SkillsetMeta, candidate: &SkillsetMeta) -> Vec<&'static str> {
+    let mut diffs = Vec::new();
+    if existing.source != candidate.source {
+        diffs.push("source");
+    }
+    if existing.revision != candidate.revision {
+        diffs.push("revision");
+    }
+    if existing.source_root != candidate.source_root {
+        diffs.push("sourceRoot");
+    }
+    if existing.members != candidate.members {
+        diffs.push("members");
+    }
+    diffs
+}
+
+fn refuse_diverging_skillset_pin(
+    name: &str,
+    path: &Path,
+    existing: &SkillsetMeta,
+    candidate: &SkillsetMeta,
+) -> Result<(), Error> {
+    let diffs = pin_metadata_diffs(existing, candidate);
+    if diffs.is_empty() {
+        return Ok(());
+    }
+    let hint = if !diffs.contains(&"source") && !diffs.contains(&"sourceRoot") {
+        format!(
+            "\n\nHint: To update this skillset to the latest upstream commit, run:\n  tink skillset update {name}"
+        )
+    } else {
+        String::new()
+    };
+    Err(Error::msg(format!(
+        "Refusing to add {name}: skillset pin already exists with differing metadata ({}) at {}{hint}",
+        diffs.join(", "),
+        output::display_path(path)
+    )))
+}
+
+fn ensure_skillset_pin(
     home: &Path,
     name: &str,
     candidate_meta: &SkillsetMeta,
 ) -> Result<(), Error> {
-    let catalog_dir = home::by_skillset_path(home).join(name);
-    let meta_path = catalog_dir.join("meta.json");
+    let meta_path = home::skillset_pin_path(home, name);
     if meta_path.exists() || meta_path.is_symlink() {
         refuse_symlink(&meta_path)?;
-        let existing_meta: SkillsetMeta = read_json(&meta_path, "skillset catalog meta")?;
-        if &existing_meta != candidate_meta {
-            let mut diffs = Vec::new();
-            if existing_meta.source != candidate_meta.source {
-                diffs.push("source");
-            }
-            if existing_meta.revision != candidate_meta.revision {
-                diffs.push("revision");
-            }
-            if existing_meta.source_root != candidate_meta.source_root {
-                diffs.push("sourceRoot");
-            }
-            if existing_meta.members != candidate_meta.members {
-                diffs.push("members");
-            }
-            let hint = if !diffs.contains(&"source") && !diffs.contains(&"sourceRoot") {
-                format!(
-                    "\n\nHint: To update this skillset to the latest upstream commit, run:\n  tink skillset update {name}"
-                )
-            } else {
-                String::new()
-            };
-            return Err(Error::msg(format!(
-                "Refusing to add {name}: catalog definition already exists with differing metadata ({}) at {}{hint}",
-                diffs.join(", "),
-                output::display_path(&meta_path)
-            )));
-        }
+        let existing_meta: SkillsetMeta = read_json(&meta_path, "skillset pin")?;
+        refuse_diverging_skillset_pin(name, &meta_path, &existing_meta, candidate_meta)?;
         return Ok(());
     }
-
-    fs::create_dir_all(&catalog_dir).map_err(|e| map_io(&catalog_dir, e))?;
-    let text = serde_json::to_string_pretty(candidate_meta)
-        .map_err(|e| Error::msg(format!("serialize skillset catalog meta: {e}")))?;
-    fs::write(&meta_path, format!("{text}\n")).map_err(|e| map_io(&meta_path, e))?;
-    Ok(())
+    write_skillset_pin(&meta_path, candidate_meta)
 }
 
 pub fn add_skillset(
@@ -785,7 +863,7 @@ fn add_skillset_url_at(
 
     preflight_library_target(home, &name)?;
     let (resolved_home, _) = home::ensure_inventory_root(home)?;
-    ensure_catalog_definition(&resolved_home, &name, &candidate_meta)?;
+    ensure_skillset_pin(&resolved_home, &name, &candidate_meta)?;
 
     init::ensure_project_layout_at(home, project_root)?;
     let target_dir = home::project_skills_path(project_root).join(&name);
@@ -810,9 +888,10 @@ fn add_skillset_url_at(
         }
         if receipt_meta(&receipt) != candidate_meta {
             return Err(Error::msg(format!(
-                "Skillset catalog changed for {name}; run `tink skillset refresh {name}`"
+                "Skillset pin changed for {name}; run `tink skillset refresh {name}`"
             )));
         }
+        ensure_project_router(home, &target_dir, &name, &candidate_meta.members)?;
         let library_write = sync_library_from_project(home, &target_dir)?;
         return Ok(SkillsetAddOutcome {
             name,
@@ -844,7 +923,7 @@ fn add_skillset_name_at(
 ) -> Result<SkillsetAddOutcome, Error> {
     let canonical = canonicalize_skillset_name(name)?;
     let name = canonical.as_str();
-    let meta = read_catalog(home, name)?;
+    let meta = read_skillset_pin(home, name)?;
     preflight_library_target(home, name)?;
     let target = home::project_skills_path(project_root).join(name);
     if target.exists() || target.is_symlink() {
@@ -868,9 +947,10 @@ fn add_skillset_name_at(
         }
         if receipt_meta(&receipt) != meta {
             return Err(Error::msg(format!(
-                "Skillset catalog changed for {name}; run `tink skillset refresh {name}`"
+                "Skillset pin changed for {name}; run `tink skillset refresh {name}`"
             )));
         }
+        ensure_project_router(home, &target, name, &meta.members)?;
         let library_write = sync_library_from_project(home, &target)?;
         return Ok(SkillsetAddOutcome {
             name: name.to_string(),
@@ -915,7 +995,7 @@ pub(crate) fn refresh_skillset_at(
 ) -> Result<bool, Error> {
     let canonical = canonicalize_skillset_name(name)?;
     let name = canonical.as_str();
-    let meta = read_catalog(home, name)?;
+    let meta = read_skillset_pin(home, name)?;
     let skills_root = home::project_skills_path(project_root);
     let target = skills_root.join(name);
     refuse_symlink(&target)?;
@@ -936,6 +1016,7 @@ pub(crate) fn refresh_skillset_at(
     }
     preflight_library_target(home, name)?;
     if !legacy_receipt && receipt_meta(&receipt) == meta {
+        ensure_project_router(home, &target, name, &meta.members)?;
         sync_library_from_project(home, &target)?;
         return Ok(false);
     }
@@ -1002,7 +1083,7 @@ pub(crate) fn update_single_skillset_at(
 ) -> Result<SkillsetUpdateOutcome, Error> {
     let canonical = canonicalize_skillset_name(name)?;
     let name = canonical.as_str();
-    let meta = read_catalog(home, name)?;
+    let meta = read_skillset_pin(home, name)?;
     let skills_root = home::project_skills_path(project_root);
     let target = skills_root.join(name);
     refuse_symlink(&target)?;
@@ -1026,6 +1107,7 @@ pub(crate) fn update_single_skillset_at(
     let remote = validate_meta(&meta)?;
     let (_clone, repository, tip) = git::checkout(&remote)?;
     if tip == meta.revision {
+        ensure_project_router(home, &target, name, &meta.members)?;
         sync_library_from_project(home, &target)?;
         return Ok(SkillsetUpdateOutcome {
             name: name.to_string(),
@@ -1063,14 +1145,8 @@ pub(crate) fn update_single_skillset_at(
     let installed = replace_from_checkout(&repository, &new_meta, &skills_root, name)?;
 
     let (resolved_home, _) = home::ensure_inventory_root(home)?;
-    let catalog_path = resolved_home
-        .join("catalog")
-        .join("by-skillset")
-        .join(name)
-        .join("meta.json");
-    let text = serde_json::to_string_pretty(&new_meta)
-        .map_err(|e| Error::msg(format!("serialize skillset catalog meta: {e}")))?;
-    fs::write(&catalog_path, format!("{text}\n")).map_err(|e| map_io(&catalog_path, e))?;
+    let pin_path = home::skillset_pin_path(&resolved_home, name);
+    write_skillset_pin(&pin_path, &new_meta)?;
 
     sync_library_from_project(home, &installed)?;
 
@@ -1109,13 +1185,14 @@ fn read_installed(path: &Path) -> Result<InstalledSkillset, Error> {
     validate_skillset_name(name)?;
     let receipt = read_owned_receipt(path, "installed skillset receipt")?;
     validate_installed_tree(path, &receipt)?;
+    require_router(path)?;
     Ok(InstalledSkillset {
         name: name.to_string(),
         receipt,
     })
 }
 
-/// Validate an installed skillset without consulting the network or catalog.
+/// Validate an installed skillset without consulting the network or pin file.
 ///
 /// Returns the receipt member count on success.
 pub fn validate_installed(path: &Path) -> Result<usize, Error> {
@@ -1202,7 +1279,7 @@ fn validate_library_receipt(path: &Path) -> Result<(), Error> {
 
 fn library_root(home: Option<&Path>) -> Result<PathBuf, Error> {
     let (home, _) = home::ensure_inventory_root(home)?;
-    Ok(home::skills_library_path(&home))
+    Ok(home::skillsets_library_path(&home))
 }
 
 fn preflight_library_target(home: Option<&Path>, name: &str) -> Result<(), Error> {
@@ -1288,14 +1365,14 @@ pub fn list_library(home_root: Option<&Path>) -> Result<Vec<ListedSkillset>, Err
         return Ok(Vec::new());
     }
     refuse_symlink(&home)?;
-    let library = home::skills_library_path(&home);
+    let library = home::skillsets_library_path(&home);
     if !library.exists() {
         return Ok(Vec::new());
     }
     refuse_symlink(&library)?;
     if !library.is_dir() {
         return Err(Error::msg(format!(
-            "Refusing to read non-directory library: {}",
+            "Refusing to read non-directory skillsets library: {}",
             output::display_path(&library)
         )));
     }
@@ -1505,6 +1582,13 @@ mod tests {
             };
             let text = serde_json::to_string_pretty(&receipt).unwrap();
             fs::write(root.join(RECEIPT_FILE), format!("{text}\n")).unwrap();
+            fs::write(
+                root.join(ROUTER_FILE),
+                format!(
+                    "---\nname: {name}\ndescription: Router for {name}.\n---\n\n# Router\n"
+                ),
+            )
+            .unwrap();
             root
         };
 
@@ -1532,5 +1616,47 @@ mod tests {
             .map(|item| item.members.len())
             .sum();
         assert_eq!((ok, ok_members), (1, 1));
+    }
+
+    #[test]
+    fn ensure_pin_create_only_refuses_diverging_definition() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        home::ensure_inventory_root(Some(&home)).unwrap();
+        let meta = SkillsetMeta {
+            source: "https://github.com/example/skills.git".into(),
+            revision: "a".repeat(40),
+            source_root: "skills".into(),
+            members: vec!["alpha".into()],
+        };
+        ensure_skillset_pin(&home, "demo-skillset", &meta).unwrap();
+        let pin = home::skillset_pin_path(&home, "demo-skillset");
+        assert!(pin.is_file(), "{}", pin.display());
+        assert!(!pin.starts_with(home::skillsets_library_path(&home).join("demo-skillset")));
+
+        let mut other = meta.clone();
+        other.revision = "b".repeat(40);
+        let err = ensure_skillset_pin(&home, "demo-skillset", &other).unwrap_err();
+        assert!(
+            err.to_string().contains("skillset pin already exists"),
+            "{err}"
+        );
+        ensure_skillset_pin(&home, "demo-skillset", &meta).unwrap();
+    }
+
+    #[test]
+    fn read_skillset_pin_refuses_non_file_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        home::ensure_inventory_root(Some(&home)).unwrap();
+        let pin = home::skillset_pin_path(&home, "blocked-skillset");
+        fs::create_dir_all(&pin).unwrap();
+        fs::write(pin.join("oops"), "not a pin\n").unwrap();
+
+        let err = read_skillset_pin(Some(&home), "blocked-skillset").unwrap_err();
+        assert!(
+            err.to_string().contains("Refusing non-file skillset pin"),
+            "{err}"
+        );
     }
 }

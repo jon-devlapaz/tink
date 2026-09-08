@@ -109,14 +109,12 @@ unpublished; cross-skill rollback is not promised. Rerun `tink skill sync` to co
 The same recovery principle applies to ordinary add/init flows: successful prior
 steps remain valid, and retry resumes idempotently. Individual writes commonly use
 destination-adjacent staging and rename, and some replacements attempt rollback, but
-Tink does not claim atomicity across project trees, the library, catalog metadata, or
+Tink does not claim atomicity across project trees, the library, skillset pins, or
 manifest/lock pairs.
 
-`tink destroy` preflights catalog cleanup before deleting project state. It removes
-only `.agents/skills/`, removes `.agents/` if that directory is then empty, and drops
-the owned by-project catalog entry. It preserves files outside `.agents/`
-(including `AGENTS.md`), unrelated `.agents/` siblings, the library, and other
-projects' catalog entries.
+`tink destroy` removes only `.agents/skills/`, then removes `.agents/` if that
+directory is empty. It preserves files outside `.agents/` (including `AGENTS.md`),
+unrelated `.agents/` siblings, and the library.
 
 ## Explicit operating boundary
 

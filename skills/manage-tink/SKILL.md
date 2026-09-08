@@ -3,7 +3,7 @@ name: manage-tink
 description: >
   Runs the Tink CLI for project skills and skillsets. Use when the user asks to
   init Tink; add, list, read, check, lock, verify, sync, refresh, or remove
-  skills; manage skillsets; use the library or catalog; harvest harness skills;
+  skills; manage skillsets; use the library; harvest harness skills;
   inspect a GitHub skill source; configure completion; update Tink; refresh
   embedded manage-tink; or destroy project agent scaffolding.
 ---
@@ -37,7 +37,7 @@ Otherwise run only the read command that matches the request:
 - Project state or names: `tink skill check` or `tink skill list`.
 - One installed skill's description: `tink skill read NAME` (`--library` for the
   home copy; `--raw` for the description line only).
-- Catalog or library: `tink skill list --catalog` or `tink library list`
+- Library: `tink library list`
   (`tink skill list --library` remains a compatibility alias).
 - Project or library skillsets: `tink skillset list` or
   `tink skillset list --library`.
@@ -50,7 +50,7 @@ treat row-level errors as actionable without stopping inspection of other trees.
 
 **On failure:** For `skill check` and mutation-bound reads that exit non-zero,
 report the exact refusal or error and stop. Prefer the CLI over hand-parsing
-`~/.tink/catalog` or `~/.tink/skills`.
+`~/.tink/skills` or skillset pin files.
 
 ### Step 2: Select one authorized mutation
 
@@ -59,12 +59,12 @@ For an explicit mutation request, load
 command. Match the CLI's flags and surfaces exactly.
 
 Require canonical skillset names ending in `-skillset`. `skillset add` reads
-`$TINK_HOME/catalog/by-skillset/NAME-skillset/meta.json`; inspection does not
-create that definition. Tink has no definition-writer command. Only when the
-user explicitly authorizes creating or changing a pinned skillset definition,
-author that exact external-input file using the schema in
-`references/commands.md`. Definition authoring does not authorize installing it or editing receipts,
-installed trees, or the derived by-project index.
+`$TINK_HOME/skillsets/NAME-skillset.json`; inspection does not
+create that definition. URL `skillset add` and `skillset update` write pins; name-based add reads them.
+Only when the user explicitly authorizes creating or changing a pinned skillset
+definition by hand, author that exact external-input file using the schema in
+`references/commands.md`. Hand authoring does not authorize installing it or editing receipts,
+installed trees.
 
 **Expected:** One primary command exactly matches the user's authority.
 
@@ -73,7 +73,7 @@ installed trees, or the derived by-project index.
 ### Step 3: Execute the primary mutation
 
 Execute the selected mutation once. For authorized external definition
-authoring, write only the exact `catalog/by-skillset/NAME-skillset/meta.json`
+authoring, write only the exact `skillsets/NAME-skillset.json`
 input and stop unless installation was separately authorized. Honor create-only
 and divergence refusals. Use `tink skill add NAME` to promote a bare library
 skill. Receipt-backed roots remain skillsets. Use `tink skill harvest` to fill
@@ -85,7 +85,7 @@ known.
 
 **On failure:** Stop and report the failure. Leave Tink-managed state to Tink.
 Init, add, skillset refresh, and embedded-skill refresh can fail after an
-earlier project, library, catalog, or guidance write succeeded. Report each
+earlier project, library, or guidance write succeeded. Report each
 surface known or possibly changed; do not describe the failure as a no-op
 unless that was proved.
 
@@ -152,34 +152,34 @@ refreshing the embedded package, run `tink skill refresh manage-tink`.
 
 **Expected:** Missing copies are installed, current copies report `Unchanged`,
 and differing receipt-free copies are atomically replaced. The project,
-library, and catalog are reconciled, and the binary's embedded copy becomes
+library, and skillset pins are reconciled, and the binary's embedded copy becomes
 the live project skill. A same-named skill with remote provenance is refused.
 
 **On failure:** Stop after the failing command and report which project,
-library, and catalog states were proven. Keep partial publication visible.
+library, and pin states were proven. Keep partial publication visible.
 
 ### Step 7: Prove the post-state
 
-- After `init`, run `tink skill check`, project/catalog/library listings, and
+- After `init`, run `tink skill check`, project/library listings, and
   verify `AGENTS.md` plus the requested optional bundle state.
 - After add, promotion, refresh, or sync, run `tink skill check` and verify the
-  affected project, catalog, and library entries. After sync, also run
+  affected project and library entries. After sync, also run
   `tink skill verify`.
 - After harvest, use its summary and `tink library list`; project check does not
   prove a library-only mutation.
 - After `skill lock`, run `tink skill verify`.
 - After skillset add or refresh, run `tink skill check`, `tink skillset list`,
   and `tink skillset list --library`.
-- After `skill remove`, verify project/catalog absence and library retention.
-- After `skillset remove`, verify project absence and library presence; its
-  external definition should remain.
+- After `skill remove`, verify project absence and library retention.
+- After `skillset remove`, verify project absence and `$TINK_HOME/skillsets/`
+  presence; its
+  pin file should remain.
 - After update, resolve the active binary and probe its exact version. After
-  refreshing embedded `manage-tink`, run project/catalog/library listings plus
+  refreshing embedded `manage-tink`, run project/library listings plus
   `tink skill check`; check compares the live payload with the active binary.
 - After `destroy`, confirm `.agents/skills/` is gone, `.agents/` is gone only if
   it became empty, files outside `.agents/` (including `AGENTS.md`) are
-  preserved, unrelated `.agents/` siblings remain, and the project has no
-  catalog rows; skip `skill check`.
+  preserved, and unrelated `.agents/` siblings remain; skip `skill check`.
 
 **Expected:** The proof matching the mutation is reported to the user.
 
@@ -203,7 +203,7 @@ command success as incomplete until this proof lands.
 - Inferring a skillset suffix or definition from inspection output.
 - Combining a binary update with project-skill replacement without approval.
 - Treating external skillset-definition authoring as authority to edit receipts,
-  derived by-project catalog metadata, or divergent managed trees.
+  divergent managed trees.
 - Treating command completion as proof of the requested outcome.
 
 ## Related Skills
@@ -220,14 +220,13 @@ command success as incomplete until this proof lands.
 | Set up / init Tink (no extras) | `tink init --no-tink-skills` (embeds `manage-tink`) |
 | …and tink-skills / skip manage-tink | Only the matching `--with-*` / `--no-*` flags |
 | Add / list / read / check / refresh / remove … | The matching `tink skill …` command |
-| List catalog | `tink skill list --catalog` |
 | List library / promote from library | `tink library list` (`tink skill list --library` compatibility alias) / `tink skill add NAME` |
 | Harvest harness skills into library | `tink skill harvest` |
 | Inspect a public GitHub skill source | `tink inspect GITHUB_URL` (read-only) |
 | List project / library skillsets | `tink skillset list` / `tink skillset list --library` |
 | Add / refresh / update / remove a canonical skillset | The matching `tink skillset …` command (`tink skillset add <url> [name]`, `tink skillset update [name]`, or `tink skillset add <name>`) |
 | Elevate / regenerate a skillset router | Elevate via [references/skillset-router.md](references/skillset-router.md) |
-| Author a pinned skillset definition | Only the exact `catalog/by-skillset/NAME-skillset/meta.json` input; does not authorize install |
+| Author a pinned skillset definition | Only the exact `skillsets/NAME-skillset.json` input; does not authorize install |
 | Configure shell completion | Only the matching shell command |
 | Persist shell completion | Only the exact startup file the user authorizes |
 | Lock / verify / sync reproducible state | Only the matching `tink skill …` command; lock requires a project-contained source mapping for each local skill |
@@ -245,19 +244,19 @@ refresh, and destroy each need their own ask.
 - `.tink-skillset.json` is skillset ownership and digest evidence. Its presence
   owns the root even when a root `SKILL.md` router also exists; standalone
   library commands leave that root alone. The receipt digest ignores root
-  `SKILL.md` so manage-tink can author the required router.
-- Skillset definitions under `catalog/by-skillset/` are the only externally
+  `SKILL.md` so manage-tink can author the required router. A missing root
+  router fails `skill check`; clean add/refresh/update restore it.
+- Skillset pins under `$TINK_HOME/skillsets/<name>.json` are the only externally
   authored Tink-home metadata. Create or change one only with explicit authority;
   keep revision and members tied to that authorized file, not to inspection
   proposals.
 - Authorized deletes are only:
-  - `tink skill remove NAME` → `.agents/skills/<name>/` and drops that name
-    from the by-project catalog
+  - `tink skill remove NAME` → `.agents/skills/<name>/` only (library preserved)
   - `tink skillset remove NAME-skillset` → only the receipt-backed project
-    skillset tree; preserves its catalog definition and library copy
-  - `tink destroy` → `.agents/skills/`, then `.agents/` only if empty, and
-    drops this project's by-project catalog entry; preserves files outside
-    `.agents/` (including `AGENTS.md`) and unrelated `.agents/` siblings
+    skillset tree; preserves its pin file and `$TINK_HOME/skillsets/` copy
+  - `tink destroy` → `.agents/skills/`, then `.agents/` only if empty;
+    preserves files outside `.agents/` (including `AGENTS.md`) and unrelated
+    `.agents/` siblings
 - Local skills stay non-refreshable unless they carry a valid receipt.
 - Skill instructions stay unread as executable code while Tink manages the tree.
 - Library (`~/.tink/skills/`) is not an agent discovery root; promote with

@@ -3,7 +3,6 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use crate::catalog;
 use crate::check;
 use crate::error::Error;
 use crate::git;
@@ -203,10 +202,7 @@ pub(crate) fn refresh_skill_at(
         None => Err(Error::msg(format!(
             "Local skill has no remote source: {name}"
         ))),
-        Some(changed) => {
-            catalog::deposit_skill_at(home, root, name)?;
-            Ok(changed)
-        }
+        Some(changed) => Ok(changed),
     }
 }
 
@@ -303,13 +299,9 @@ pub(crate) fn refresh_all_at(home: Option<&Path>, root: &Path) -> Result<Vec<Str
         let name = plan.name().to_string();
         match apply_refresh(home, root, plan)? {
             Some(true) => {
-                catalog::deposit_skill_at(home, root, &name)?;
                 refreshed.push(name);
             }
-            Some(false) => {
-                catalog::deposit_skill_at(home, root, &name)?;
-            }
-            None => {}
+            Some(false) | None => {}
         }
     }
     Ok(refreshed)

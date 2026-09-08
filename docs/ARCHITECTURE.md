@@ -3,7 +3,7 @@
 Tink is a local CLI that installs Agent Skills into a project's
 `.agents/skills/`. That project directory is the only live agent-discovery root.
 `$TINK_HOME` (default `~/.tink`) is offline inventory: it stores reusable skill
-trees, project-name indexes, and pinned skillset definitions.
+trees and pinned skillset definitions.
 
 This document is the current navigation map. [`ACCEPTANCE.md`](../ACCEPTANCE.md)
 records intended CLI and on-disk behavior, the workflow files own delivery automation,
@@ -16,15 +16,15 @@ records intended CLI and on-disk behavior, the workflow files own delivery autom
 | `<project>/.agents/skills/` | `home.rs`, `skills.rs`, `check.rs`, `skillsets.rs` | Sole live discovery root. Standalone project divergence blocks overwrite; skillsets use their validated nested lifecycle. |
 | `<project>/.tink/skills.toml` and `skills.lock` | `manifest.rs`, `sources.rs` | Project-owned standalone-skill intent and resolved pins for `lock`, `sync`, and `verify`. |
 | `$TINK_HOME/layout.json` and root directories | `home.rs` | Marks and migrates offline inventory; never an agent discovery root. |
-| `$TINK_HOME/skills/<name>/` | `library.rs`, `skillsets.rs` | Reusable standalone trees or derived skillset copies. A skillset receipt decides which lifecycle owns a root. |
-| `$TINK_HOME/catalog/by-project/<bounded-name>-<identity>/meta.json` | `catalog.rs` | Derived project-name index. `identity` is SHA-256 of the canonical project path (raw bytes on Unix), so same-basename projects do not collide. Add/refresh deposit names; remove/destroy withdraw them. It is not runtime state. |
-| `$TINK_HOME/catalog/by-skillset/<name>/meta.json` | `skillsets.rs` | Pinned skillset definition: HTTPS source, immutable revision, source root, and explicit members. Authored externally or via create-only `tink skillset add <url>`, and advanced by `tink skillset update` (K12/K13). |
+| `$TINK_HOME/skills/<name>/` | `library.rs` | Reusable standalone skill trees. Receipt-classified roots are refused at standalone boundaries. |
+| `$TINK_HOME/skillsets/<name>-skillset/` | `skillsets.rs` | Derived skillset copies mirrored from a validated project tree. |
+| `$TINK_HOME/skillsets/<name>.json` | `skillsets.rs` | Pinned skillset definition (sibling of `skillsets/<name>/`): HTTPS source, immutable revision, source root, and explicit members. Authored externally or via create-only `tink skillset add <url>`, and advanced by `tink skillset update` (K12/K13). |
 | `.tink-source.json` | `provenance.rs` | Optional standalone remote provenance: source, revision, and path. It does not classify a root. |
 | `.tink-skillset.json` | `skillsets.rs` | Skillset ownership and digest evidence. Presence classifies; validated contents prove the installed tree. |
 
-Use the qualified terms **project-name index**, **skillset definition**, **source
-receipt**, and **skillset receipt**. Bare “catalog” and “receipt” hide different
-owners and should not carry architectural decisions.
+Use the qualified terms **skillset definition**, **source receipt**, and
+**skillset receipt**. Bare “catalog” and “receipt” hide different owners and
+should not carry architectural decisions.
 
 ## Module ownership
 
@@ -34,7 +34,7 @@ owners and should not carry architectural decisions.
 | Layout and persisted state | `home.rs`, `catalog.rs`, `manifest.rs`, `provenance.rs` | Project/home paths, project-name index, standalone manifest/lock, and source receipts. |
 | Skill mechanisms | `skills.rs`, `sources.rs`, `git.rs`, `paths.rs`, `library.rs` | Skill discovery/validation/copy/digest, typed source classification, supervised Git checkout, filesystem refusals, and standalone library policy. |
 | Project workflows | `init.rs`, `add.rs`, `inventory.rs`, `check.rs`, `read.rs`, `refresh.rs`, `remove.rs`, `harvest.rs` | Bootstrap, standalone skill lifecycle (publish seam in `inventory.rs`), and read-only local skill inspection. |
-| Skillset workflow | `skillsets.rs` | Canonical names, definition validation, staged install/refresh, receipt validation, grouped listing, removal, and project-to-library mirroring. |
+| Skillset workflow | `skillsets.rs` | Canonical names, definition validation, staged install/refresh, receipt validation, grouped listing, removal, and project-to-`$TINK_HOME/skillsets/` mirroring. |
 | Read-only source inspection | `inspect.rs` | GitHub structure inspection and source-defined skillset inference; no project or home writes. |
 | Supporting workflows | `destroy.rs`, `update.rs`, `manage_tink.rs` | Project teardown, binary update, and embedded `manage-tink`. |
 
@@ -57,9 +57,9 @@ visible as row errors without failing the list command.
    regular or dangling receipt entry cannot cross a standalone publication boundary.
 4. **Standalone project state is protected first.** A source add rejects project
    divergence before it may repair the reusable library and publish the project name.
-5. **Installed skillsets flow project to library.** A skillset definition selects the
+5. **Installed skillsets flow project to skillsets library.** A skillset definition selects the
    desired pinned source. Once installed and validated, the project tree is primary;
-   it may create or repair the library copy, never the reverse.
+   it may create or repair `$TINK_HOME/skillsets/<name>/`, never the reverse.
 6. **Removal is scoped.** Standalone and skillset removal delete only their project
    trees. Shared library trees and skillset definitions remain.
 7. **Filesystem safety bounds convenience.** Managed roots and copied trees reject

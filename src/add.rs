@@ -663,7 +663,6 @@ mod tests {
     fn add_skill_at_installs_from_isolated_library() {
         let temp = tempfile::tempdir().unwrap();
         let home = temp.path().join("tink-home");
-        let other = temp.path().join("other-home");
         let project = temp.path().join("project");
         fs::create_dir_all(&project).unwrap();
 
@@ -676,7 +675,6 @@ mod tests {
         .unwrap();
         let skill = skills::read_skill(&src, true).unwrap();
         library::deposit_at(Some(&home), &skill, None).unwrap();
-        crate::home::ensure_inventory_root(Some(&other)).unwrap();
 
         let outcome = add_skill_quiet_at(Some(&home), &project, "demo-skill", None).unwrap();
         assert_eq!(outcome.name, "demo-skill");
@@ -684,21 +682,6 @@ mod tests {
             crate::home::project_skills_path(&project)
                 .join("demo-skill/SKILL.md")
                 .is_file()
-        );
-
-        let catalog = crate::catalog::list_catalog(Some(&home)).unwrap();
-        assert!(
-            catalog.iter().any(|entry| entry.skill == "demo-skill"),
-            "catalog skills: {:?}",
-            catalog
-                .iter()
-                .map(|entry| entry.skill.as_str())
-                .collect::<Vec<_>>(),
-        );
-        assert!(
-            crate::catalog::list_catalog(Some(&other))
-                .unwrap()
-                .is_empty()
         );
     }
 }

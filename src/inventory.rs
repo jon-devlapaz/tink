@@ -1,12 +1,11 @@
 //! Standalone inventory publish seam: layout → preflight → library →
-//! project install → catalog.
+//! project install.
 //!
 //! Callers keep classification/selection and warn rendering. Skillset
 //! staging stays out of this seam.
 
 use std::path::{Path, PathBuf};
 
-use crate::catalog;
 use crate::error::Error;
 use crate::init;
 use crate::library::{self, LibraryWrite};
@@ -37,8 +36,6 @@ pub(crate) fn publish(
         .require_compatible(&skill.name, &destination_root)?;
     let (_, library_write) = library::deposit_at(home, skill, provenance)?;
     let (installed, created) = skills::install_local(skill, &destination_root, provenance)?;
-    // Catalog even on identical noop so the name index can catch up.
-    catalog::deposit_skill_at(home, project_root, &skill.name)?;
     Ok(PublishOutcome {
         name: skill.name.clone(),
         created,
@@ -58,7 +55,6 @@ pub(crate) fn publish_from_library(
     skills::preflight_install(skill, &destination_root, None)?
         .require_compatible(&skill.name, &destination_root)?;
     let (installed, created) = skills::install_local(skill, &destination_root, None)?;
-    catalog::deposit_skill_at(home, project_root, &skill.name)?;
     Ok(PublishOutcome {
         name: skill.name.clone(),
         created,
