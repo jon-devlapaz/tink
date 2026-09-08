@@ -214,7 +214,8 @@ drift is repaired only from a valid project tree.
 `skillset remove NAME-skillset` removes only the project tree; it preserves the
 shared catalog definition and home library copy.
 `skillset list` groups each receipt-backed project skillset with its member
-skills. `skillset list --library` shows the same grouped view for the home
+skills; a divergent tree is shown as a row error and does not fail the list.
+`skillset list --library` shows the same grouped view for the home
 library. Receipt ownership takes precedence over a root `SKILL.md`: standalone
 library list/add commands never expose, promote, or replace that skillset root.
 

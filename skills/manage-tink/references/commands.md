@@ -20,7 +20,7 @@ list, read, check, refresh, and remove.
 | Read one standalone skill | `tink skill read NAME` |
 | Read from the library | `tink skill read NAME --library` |
 | Raw description | `tink skill read NAME --raw` |
-| Check | `tink skill check` |
+| Check | `tink skill check` (exit ≠ 0 if any root is invalid; prints valid counts first) |
 | Diagnose environment and consistency | `tink doctor` |
 | Generate project manifest and lockfile | `tink skill lock --source NAME=PATH` for each local skill; every path must resolve inside the project |
 | Verify manifest, lockfile, and installed trees | `tink skill verify` |
@@ -34,7 +34,7 @@ list, read, check, refresh, and remove.
 | Remove one project skill | `tink skill remove NAME` |
 | Add a skillset from a GitHub tree URL | `tink skillset add <url> [optional-name]` |
 | Add a pinned catalog skillset | `tink skillset add NAME-skillset` (or `NAME`) |
-| List project skillsets | `tink skillset list` |
+| List project skillsets | `tink skillset list` (divergent trees stay visible; list exits 0) |
 | List library skillsets | `tink skillset list --library` |
 | Refresh a clean pinned skillset | `tink skillset refresh NAME-skillset` (or `NAME`) |
 | Update skillset(s) to latest upstream commit | `tink skillset update [NAME[-skillset]]` |

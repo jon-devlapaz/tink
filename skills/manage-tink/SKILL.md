@@ -44,9 +44,13 @@ Otherwise run only the read command that matches the request:
 - Public GitHub structure: `tink inspect GITHUB_URL`.
 
 **Expected:** The command's exit status and output are known, with no writes.
+`tink skillset list` may exit 0 while marking divergent trees in the listing;
+treat row-level errors as actionable without stopping inspection of other trees.
+`tink skill check` remains the integrity gate: non-zero means stop.
 
-**On failure:** Report the exact refusal or error and stop. Prefer the CLI over
-hand-parsing `~/.tink/catalog` or `~/.tink/skills`.
+**On failure:** For `skill check` and mutation-bound reads that exit non-zero,
+report the exact refusal or error and stop. Prefer the CLI over hand-parsing
+`~/.tink/catalog` or `~/.tink/skills`.
 
 ### Step 2: Select one authorized mutation
 

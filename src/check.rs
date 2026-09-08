@@ -8,6 +8,25 @@ use crate::paths::{map_io, refuse_symlink};
 use crate::provenance;
 use crate::skills::{self, Skill};
 
+/// Result of a project integrity walk that enumerates every root.
+#[derive(Debug, Default)]
+pub struct ProjectCheck {
+    pub skills: Vec<Skill>,
+    pub skillsets: usize,
+    pub members: usize,
+    pub failures: Vec<String>,
+}
+
+fn read_standalone(path: &Path, strict_manage_tink: bool) -> Result<Skill, Error> {
+    let skill = skills::read_skill(path, true)?;
+    skills::validate_skill_tree(path)?;
+    let provenance = provenance::read(&skill)?;
+    if strict_manage_tink && skill.name == "manage-tink" && provenance.is_none() {
+        crate::manage_tink::require_current(&skill)?;
+    }
+    Ok(skill)
+}
+
 fn read_skill_entry(path: &Path, strict_manage_tink: bool) -> Result<Option<Skill>, Error> {
     let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
     match crate::skillsets::classify_entry(path) {
@@ -23,18 +42,15 @@ fn read_skill_entry(path: &Path, strict_manage_tink: bool) -> Result<Option<Skil
         }
         crate::skillsets::EntryClass::Standalone => {}
     }
-    let skill = skills::read_skill(path, true)?;
-    skills::validate_skill_tree(path)?;
-    let provenance = provenance::read(&skill)?;
-    if strict_manage_tink && skill.name == "manage-tink" && provenance.is_none() {
-        crate::manage_tink::require_current(&skill)?;
-    }
-    Ok(Some(skill))
+    Ok(Some(read_standalone(path, strict_manage_tink)?))
 }
 
 /// Load and validate project skills under `.agents/skills/`.
 /// No writes. No network for local skills; provenance shape is checked
 /// without fetching.
+///
+/// Fails closed on the first invalid root. Prefer [`check_project`] when a
+/// full inventory report is needed.
 pub fn load_project_skills(root: &Path) -> Result<Vec<Skill>, Error> {
     load_entries(skill_entries(root)?, true)
 }
@@ -43,6 +59,61 @@ pub fn load_project_skills(root: &Path) -> Result<Vec<Skill>, Error> {
 /// read-only diagnostics (`outdated`) can report it instead of failing.
 pub fn load_project_skills_lenient(root: &Path) -> Result<Vec<Skill>, Error> {
     load_entries(skill_entries(root)?, false)
+}
+
+/// Load standalone project skills only; receipt-backed skillset roots are skipped
+/// without digest validation so one divergent skillset cannot blank standalone list.
+pub fn load_standalone_skills(root: &Path) -> Result<Vec<Skill>, Error> {
+    let mut skills = Vec::new();
+    for path in skill_entries(root)? {
+        let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        match crate::skillsets::classify_entry(&path) {
+            crate::skillsets::EntryClass::Ignored => {}
+            crate::skillsets::EntryClass::Unexpected => {
+                return Err(Error::msg(format!(
+                    "Unexpected entry in .agents/skills: {name}"
+                )));
+            }
+            crate::skillsets::EntryClass::Skillset => {}
+            crate::skillsets::EntryClass::Standalone => {
+                skills.push(read_standalone(&path, true)?);
+            }
+        }
+    }
+    Ok(skills)
+}
+///
+/// Structural problems (missing skills root, unexpected entries, root
+/// symlinks) still return `Err`. Divergent skillset or standalone trees are
+/// recorded in [`ProjectCheck::failures`] so healthy roots stay visible.
+pub fn check_project(root: &Path) -> Result<ProjectCheck, Error> {
+    let entries = skill_entries(root)?;
+    let mut report = ProjectCheck::default();
+    for path in entries {
+        let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        match crate::skillsets::classify_entry(&path) {
+            crate::skillsets::EntryClass::Ignored => {}
+            crate::skillsets::EntryClass::Unexpected => {
+                return Err(Error::msg(format!(
+                    "Unexpected entry in .agents/skills: {name}"
+                )));
+            }
+            crate::skillsets::EntryClass::Skillset => {
+                match crate::skillsets::validate_installed(&path) {
+                    Ok(members) => {
+                        report.skillsets += 1;
+                        report.members += members;
+                    }
+                    Err(error) => report.failures.push(error.to_string()),
+                }
+            }
+            crate::skillsets::EntryClass::Standalone => match read_standalone(&path, true) {
+                Ok(skill) => report.skills.push(skill),
+                Err(error) => report.failures.push(error.to_string()),
+            },
+        }
+    }
+    Ok(report)
 }
 
 fn skill_entries(root: &Path) -> Result<Vec<PathBuf>, Error> {

@@ -40,7 +40,9 @@ owners and should not carry architectural decisions.
 
 `lib.rs` owns the public command vocabulary. There is no `skillset check` or
 `skillset status`: `skill check` validates both standalone and receipt-backed
-roots, while `skillset list` provides the grouped member view.
+roots (enumerating every tree, then exiting non-zero if any failed), while
+`skillset list` provides the grouped member view and keeps divergent trees
+visible as row errors without failing the list command.
 
 ## Cross-cutting invariants
 

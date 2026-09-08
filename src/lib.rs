@@ -205,7 +205,7 @@ pub enum LibraryCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum SkillsetCommand {
-    /// List receipt-backed project skillsets and their members
+    /// List receipt-backed project skillsets and their members (divergent trees stay visible)
     List {
         /// List receipt-backed library skillsets and their members
         #[arg(long)]
@@ -543,13 +543,36 @@ fn dispatch_skillset(cwd: &Path, command: SkillsetCommand) -> Result<(), Error> 
                     } else {
                         "skills"
                     };
-                    println!(
-                        "{} {}",
-                        style.skillset(&skillset.name),
-                        style.muted(format!("({} {noun})", skillset.members.len()))
-                    );
-                    for member in &skillset.members {
-                        println!("  {}", style.skill(member));
+                    match &skillset.error {
+                        None => {
+                            println!(
+                                "{} {}",
+                                style.skillset(&skillset.name),
+                                style.muted(format!("({} {noun})", skillset.members.len()))
+                            );
+                            for member in &skillset.members {
+                                println!("  {}", style.skill(member));
+                            }
+                        }
+                        Some(error) => {
+                            if skillset.members.is_empty() {
+                                println!(
+                                    "{} {}",
+                                    style.skillset(&skillset.name),
+                                    style.error(error)
+                                );
+                            } else {
+                                println!(
+                                    "{} {} {}",
+                                    style.skillset(&skillset.name),
+                                    style.muted(format!("({} {noun})", skillset.members.len())),
+                                    style.error(error)
+                                );
+                                for member in &skillset.members {
+                                    println!("  {}", style.skill(member));
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -771,21 +794,39 @@ fn dispatch_skill_verify(cwd: &Path) -> Result<(), Error> {
 
 fn dispatch_skill_check(cwd: &Path) -> Result<(), Error> {
     let style = CliStyle::auto_stdout();
-    let skills = check::load_project_skills(cwd)?;
-    let (skillsets, members) = skillsets::project_counts(cwd)?;
-    if skillsets == 0 {
+    let report = check::check_project(cwd)?;
+    if !report.failures.is_empty() {
+        // Surface healthy counts first so one bad tree cannot blank the rest.
+        if report.skillsets == 0 {
+            println!(
+                "{} {} skill(s) valid before failure",
+                style.error("FAIL"),
+                style.accent(report.skills.len())
+            );
+        } else {
+            println!(
+                "{} {} skill(s), {} skillset(s), {} member skill(s) valid before failure",
+                style.error("FAIL"),
+                style.accent(report.skills.len()),
+                style.accent(report.skillsets),
+                style.accent(report.members)
+            );
+        }
+        return Err(Error::msg(report.failures.join("\n")));
+    }
+    if report.skillsets == 0 {
         println!(
             "{} {} skill(s)",
             style.success("OK"),
-            style.accent(skills.len())
+            style.accent(report.skills.len())
         );
     } else {
         println!(
             "{} {} skill(s), {} skillset(s), {} member skill(s)",
             style.success("OK"),
-            style.accent(skills.len()),
-            style.accent(skillsets),
-            style.accent(members)
+            style.accent(report.skills.len()),
+            style.accent(report.skillsets),
+            style.accent(report.members)
         );
     }
     Ok(())
@@ -798,16 +839,15 @@ fn dispatch_skill_read(cwd: &Path, name: &str, library: bool, raw: bool) -> Resu
 
 fn dispatch_skill_list(cwd: &Path) -> Result<(), Error> {
     let out = CliStyle::auto_stdout();
-    let skills = check::load_project_skills(cwd)?;
+    let skills = check::load_standalone_skills(cwd)?;
     if skills.is_empty() {
-        let (skillsets, _) = skillsets::project_counts(cwd)?;
-        if skillsets > 0 {
+        if skillsets::list_installed(cwd)?.is_empty() {
+            println!("{}", out.muted("(no skills)"));
+        } else {
             println!(
                 "{}",
                 out.muted("(no standalone skills; use `tink skillset list`)")
             );
-        } else {
-            println!("{}", out.muted("(no skills)"));
         }
     } else {
         for skill in &skills {

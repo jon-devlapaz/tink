@@ -1314,6 +1314,88 @@ fn k1_skillset_add_installs_explicit_members_and_checks_digest() {
 }
 
 #[test]
+fn k3b_skillset_list_and_check_report_all_trees_when_one_mismatches() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let repository = ws.root.join("skillset-repo");
+    init_repo(&repository);
+    write_skill(
+        &repository.join("bundles/alpha/one"),
+        "one",
+        "alpha member",
+    );
+    write_skill(
+        &repository.join("bundles/zeta/two"),
+        "two",
+        "zeta member",
+    );
+    let revision = commit_all(&repository, "skillsets");
+    let source = "https://github.com/example/skillsets.git";
+    write_skillset_meta(
+        &ws.skillset_meta("alpha-skillset"),
+        source,
+        &revision,
+        "bundles/alpha",
+        &["one"],
+    );
+    write_skillset_meta(
+        &ws.skillset_meta("zeta-skillset"),
+        source,
+        &revision,
+        "bundles/zeta",
+        &["two"],
+    );
+
+    let redirect = github_redirect(&repository, source);
+    ws.cmd(&project)
+        .args(["skillset", "add", "alpha-skillset"])
+        .envs(redirect.clone())
+        .assert()
+        .success();
+    ws.cmd(&project)
+        .args(["skillset", "add", "zeta-skillset"])
+        .envs(redirect)
+        .assert()
+        .success();
+
+    fs::write(
+        Workspace::skill_path(&project, "zeta-skillset").join("two/SKILL.md"),
+        "---\nname: two\ndescription: drifted\n---\n",
+    )
+    .unwrap();
+
+    ws.cmd(&project)
+        .args(["skillset", "list"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("alpha-skillset (1 skill)\n  one\n")
+                .and(predicate::str::contains("zeta-skillset (1 skill)"))
+                .and(predicate::str::contains("digest mismatch")),
+        );
+
+    ws.cmd(&project)
+        .args(["skill", "check"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains(
+            "0 skill(s), 1 skillset(s), 1 member skill(s) valid before failure",
+        ))
+        .stderr(predicate::str::contains("digest mismatch"));
+
+    ws.cmd(&project)
+        .args(["skillset", "refresh", "alpha-skillset"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Unchanged"));
+}
+
+#[test]
 fn k1b_skillset_root_router_is_ignored_by_digest_and_preserved_on_refresh() {
     let ws = Workspace::new();
     let project = ws.project("app");

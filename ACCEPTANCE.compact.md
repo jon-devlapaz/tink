@@ -115,6 +115,7 @@
 - K1B root router added later: ignored by digest, check clean, re-add mirrors router, refresh preserves router while updating members.
 - K2 remove after K1: deletes project tree only; keeps definition + library; `skill remove` refuses skillset root. Sensor: K1.
 - K3 list after K1: groups receipt-backed skillsets + members, no network/writes. Sensor: K1.
+- K3B two skillsets, drift one: list exits 0 showing both; check reports valid counts then exits ≠ 0; clean refresh still works.
 - K4 invalid skillset name: FAIL, no tree written.
 - K5 ordinary/unowned library entry at canonical name: FAIL before network/project publication, library preserved.
 - K6 remove with missing/invalid receipt: FAIL, project dir preserved.

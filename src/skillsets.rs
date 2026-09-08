@@ -135,6 +135,8 @@ struct InstalledSkillset {
 pub struct ListedSkillset {
     pub name: String,
     pub members: Vec<String>,
+    /// `None` when the tree matches its receipt; otherwise the validation error.
+    pub error: Option<String>,
 }
 
 fn read_json<T: for<'de> Deserialize<'de>>(path: &Path, label: &str) -> Result<T, Error> {
@@ -980,6 +982,10 @@ pub(crate) fn update_skillset_at(
         if installed.is_empty() {
             return Ok(Vec::new());
         }
+        // Mutations stay fail-closed: any divergent tree blocks update-all.
+        if let Some(error) = installed.iter().find_map(|item| item.error.clone()) {
+            return Err(Error::msg(error));
+        }
         let mut outcomes = Vec::with_capacity(installed.len());
         for item in installed {
             let outcome = update_single_skillset_at(home, project_root, &item.name)?;
@@ -1110,11 +1116,45 @@ fn read_installed(path: &Path) -> Result<InstalledSkillset, Error> {
 }
 
 /// Validate an installed skillset without consulting the network or catalog.
-pub fn validate_installed(path: &Path) -> Result<(), Error> {
-    read_installed(path).map(|_| ())
+///
+/// Returns the receipt member count on success.
+pub fn validate_installed(path: &Path) -> Result<usize, Error> {
+    read_installed(path).map(|installed| installed.receipt.members.len())
+}
+
+fn entry_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+/// List one receipt-backed root without failing the surrounding inventory walk.
+fn list_skillset_entry(path: &Path) -> ListedSkillset {
+    match read_installed(path) {
+        Ok(installed) => ListedSkillset {
+            name: installed.name,
+            members: installed.receipt.members,
+            error: None,
+        },
+        Err(error) => {
+            let members = read_owned_receipt(path, "installed skillset receipt")
+                .map(|receipt| receipt.members)
+                .unwrap_or_default();
+            ListedSkillset {
+                name: entry_name(path),
+                members,
+                error: Some(error.to_string()),
+            }
+        }
+    }
 }
 
 /// List receipt-backed skillsets installed in a project.
+///
+/// Structural project problems (missing skills root, unexpected entries) still
+/// fail the command. Per-tree validation errors are returned as row `error`
+/// values so one divergent skillset cannot blank the rest of the inventory.
 pub fn list_installed(project_root: &Path) -> Result<Vec<ListedSkillset>, Error> {
     let agents = home::project_agents_path(project_root);
     let skills_root = home::project_skills_path(project_root);
@@ -1138,10 +1178,7 @@ pub fn list_installed(project_root: &Path) -> Result<Vec<ListedSkillset>, Error>
 
     let mut skillsets = Vec::new();
     for path in entries {
-        let name = path
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or("");
+        let name = entry_name(&path);
         match classify_entry(&path) {
             EntryClass::Ignored => continue,
             EntryClass::Unexpected => {
@@ -1150,33 +1187,13 @@ pub fn list_installed(project_root: &Path) -> Result<Vec<ListedSkillset>, Error>
                 )));
             }
             EntryClass::Skillset => {
-                let installed = read_installed(&path)?;
-                skillsets.push(ListedSkillset {
-                    name: installed.name,
-                    members: installed.receipt.members,
-                });
+                skillsets.push(list_skillset_entry(&path));
             }
             EntryClass::Standalone => {}
         }
     }
     skillsets.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(skillsets)
-}
-
-/// Count validated project skillsets and their declared member skills.
-pub fn project_counts(project_root: &Path) -> Result<(usize, usize), Error> {
-    let skills_root = home::project_skills_path(project_root);
-    let mut skillset_count = 0;
-    let mut member_count = 0;
-    for entry in fs::read_dir(&skills_root).map_err(|e| map_io(&skills_root, e))? {
-        let path = entry.map_err(|e| map_io(&skills_root, e))?.path();
-        if has_receipt_entry(&path) {
-            let installed = read_installed(&path)?;
-            skillset_count += 1;
-            member_count += installed.receipt.members.len();
-        }
-    }
-    Ok((skillset_count, member_count))
 }
 
 fn validate_library_receipt(path: &Path) -> Result<(), Error> {
@@ -1298,11 +1315,7 @@ pub fn list_library(home_root: Option<&Path>) -> Result<Vec<ListedSkillset>, Err
             continue;
         }
         if has_receipt_entry(&path) {
-            let installed = read_installed(&path)?;
-            skillsets.push(ListedSkillset {
-                name: installed.name,
-                members: installed.receipt.members,
-            });
+            skillsets.push(list_skillset_entry(&path));
         }
     }
     Ok(skillsets)
@@ -1461,5 +1474,63 @@ mod tests {
         );
         assert!(canonicalize_skillset_name("bad name").is_err());
         assert!(canonicalize_skillset_name("").is_err());
+    }
+
+    #[test]
+    fn list_installed_keeps_healthy_skillset_when_sibling_mismatches() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path();
+        let skills = project.join(".agents/skills");
+        fs::create_dir_all(&skills).unwrap();
+
+        let write_tree = |name: &str, member: &str, body: &str| {
+            let root = skills.join(name);
+            let member_dir = root.join(member);
+            fs::create_dir_all(&member_dir).unwrap();
+            fs::write(
+                member_dir.join("SKILL.md"),
+                format!(
+                    "---\nname: {member}\ndescription: Fixture for {member}.\n---\n\n{body}\n"
+                ),
+            )
+            .unwrap();
+            let digest = skills::tree_digest(&root, DIGEST_ROOT_IGNORE).unwrap();
+            let receipt = SkillsetReceipt {
+                source: "https://github.com/example/skills.git".into(),
+                revision: "a".repeat(40),
+                source_root: "skills".into(),
+                members: vec![member.into()],
+                digest_version: DIGEST_VERSION,
+                digest,
+            };
+            let text = serde_json::to_string_pretty(&receipt).unwrap();
+            fs::write(root.join(RECEIPT_FILE), format!("{text}\n")).unwrap();
+            root
+        };
+
+        let _ok = write_tree("alpha-skillset", "alpha", "ok");
+        let dirty = write_tree("zeta-skillset", "zeta", "clean");
+        fs::write(
+            dirty.join("zeta/SKILL.md"),
+            "---\nname: zeta\ndescription: Fixture for zeta.\n---\n\ndrifted\n",
+        )
+        .unwrap();
+
+        let listed = list_installed(project).unwrap();
+        assert_eq!(listed.len(), 2);
+        assert!(listed[0].error.is_none(), "{:?}", listed[0]);
+        assert_eq!(listed[0].name, "alpha-skillset");
+        assert!(
+            listed[1].error.as_ref().unwrap().contains("digest mismatch"),
+            "{:?}",
+            listed[1]
+        );
+        let ok = listed.iter().filter(|item| item.error.is_none()).count();
+        let ok_members: usize = listed
+            .iter()
+            .filter(|item| item.error.is_none())
+            .map(|item| item.members.len())
+            .sum();
+        assert_eq!((ok, ok_members), (1, 1));
     }
 }
