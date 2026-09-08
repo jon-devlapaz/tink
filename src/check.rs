@@ -1,7 +1,7 @@
 //! Offline project skill validation (`tink skill check`).
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::error::Error;
 use crate::paths::{map_io, refuse_symlink};
@@ -12,7 +12,7 @@ fn is_ignored_skill_entry(name: &str) -> bool {
     name == "README.md" || name.starts_with('.')
 }
 
-fn read_skill_entry(path: &Path) -> Result<Option<Skill>, Error> {
+fn read_skill_entry(path: &Path, strict_manage_tink: bool) -> Result<Option<Skill>, Error> {
     let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
     if is_ignored_skill_entry(name) {
         return Ok(None);
@@ -29,7 +29,7 @@ fn read_skill_entry(path: &Path) -> Result<Option<Skill>, Error> {
     let skill = skills::read_skill(path, true)?;
     skills::validate_skill_tree(path)?;
     let provenance = provenance::read(&skill)?;
-    if skill.name == "manage-tink" && provenance.is_none() {
+    if strict_manage_tink && skill.name == "manage-tink" && provenance.is_none() {
         crate::manage_tink::require_current(&skill)?;
     }
     Ok(Some(skill))
@@ -39,6 +39,16 @@ fn read_skill_entry(path: &Path) -> Result<Option<Skill>, Error> {
 /// No writes. No network for local skills; provenance shape is checked
 /// without fetching.
 pub fn load_project_skills(root: &Path) -> Result<Vec<Skill>, Error> {
+    load_entries(skill_entries(root)?, true)
+}
+
+/// Load project skills, tolerating a stale embedded manage-tink so
+/// read-only diagnostics (`outdated`) can report it instead of failing.
+pub fn load_project_skills_lenient(root: &Path) -> Result<Vec<Skill>, Error> {
+    load_entries(skill_entries(root)?, false)
+}
+
+fn skill_entries(root: &Path) -> Result<Vec<PathBuf>, Error> {
     let agents = crate::home::project_agents_path(root);
     let skills_root = crate::home::project_skills_path(root);
     refuse_symlink(&agents)?;
@@ -56,10 +66,13 @@ pub fn load_project_skills(root: &Path) -> Result<Vec<Skill>, Error> {
         })
         .collect::<Result<_, _>>()?;
     entries.sort();
+    Ok(entries)
+}
 
+fn load_entries(entries: Vec<PathBuf>, strict_manage_tink: bool) -> Result<Vec<Skill>, Error> {
     let mut skills = Vec::new();
     for path in entries {
-        if let Some(skill) = read_skill_entry(&path)? {
+        if let Some(skill) = read_skill_entry(&path, strict_manage_tink)? {
             skills.push(skill);
         }
     }

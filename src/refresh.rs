@@ -9,6 +9,7 @@ use crate::error::Error;
 use crate::git;
 use crate::library;
 use crate::provenance::{self, Provenance};
+use crate::rollback;
 use crate::skills::{self, Skill};
 use crate::sources;
 
@@ -48,7 +49,7 @@ fn checkout_reference_skill(
     Ok((checkout, Some(temp)))
 }
 
-enum RefreshPlan {
+pub(crate) enum RefreshPlan {
     Local {
         name: String,
     },
@@ -73,7 +74,7 @@ impl RefreshPlan {
     }
 }
 
-fn prepare_refresh(home: Option<&Path>, installed: Skill) -> Result<RefreshPlan, Error> {
+pub(crate) fn prepare_refresh(home: Option<&Path>, installed: Skill) -> Result<RefreshPlan, Error> {
     let name = installed.name.clone();
     let Some(provenance) = provenance::read(&installed)? else {
         return Ok(RefreshPlan::Local { name });
@@ -148,7 +149,13 @@ fn prepare_refresh(home: Option<&Path>, installed: Skill) -> Result<RefreshPlan,
 }
 
 /// Returns whether the installed skill tree changed (receipt-only bumps are false).
-fn apply_refresh(home: Option<&Path>, plan: RefreshPlan) -> Result<Option<bool>, Error> {
+/// On update, the displaced tree is snapshotted for `skill rollback` before
+/// anything is replaced.
+fn apply_refresh(
+    home: Option<&Path>,
+    root: &Path,
+    plan: RefreshPlan,
+) -> Result<Option<bool>, Error> {
     match plan {
         RefreshPlan::Local { .. } => Ok(None),
         RefreshPlan::Unchanged { installed } => {
@@ -167,7 +174,9 @@ fn apply_refresh(home: Option<&Path>, plan: RefreshPlan) -> Result<Option<bool>,
                 .path
                 .parent()
                 .ok_or_else(|| Error::msg("skill has no parent"))?;
-            let _installed = skills::replace_verified(&new_skill, destination_root, &next)?;
+            let pending = rollback::begin_snapshot(root, &installed)?;
+            let replaced = skills::replace_verified(&new_skill, destination_root, &next)?;
+            pending.commit(&skills::tree_digest(&replaced, &[])?)?;
             library::deposit_refresh_at(home, &new_skill, &next)?;
             Ok(Some(tree_changed))
         }
@@ -190,7 +199,7 @@ pub(crate) fn refresh_skill_at(
     let installed = skills
         .get(name)
         .ok_or_else(|| Error::msg(format!("Installed skill not found: {name}")))?;
-    match apply_refresh(home, prepare_refresh(home, installed.clone())?)? {
+    match apply_refresh(home, root, prepare_refresh(home, installed.clone())?)? {
         None => Err(Error::msg(format!(
             "Local skill has no remote source: {name}"
         ))),
@@ -199,6 +208,84 @@ pub(crate) fn refresh_skill_at(
             Ok(changed)
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PreviewKind {
+    Local,
+    Unchanged,
+    Update,
+}
+
+/// What `refresh` would do, computed without writing anything.
+#[derive(Debug, Clone)]
+pub(crate) struct RefreshPreview {
+    pub name: String,
+    pub kind: PreviewKind,
+    pub tree_changed: bool,
+    pub diff: Option<skills::TreeDiff>,
+}
+
+pub fn preview_all(root: &Path) -> Result<Vec<RefreshPreview>, Error> {
+    preview_all_at(None, root)
+}
+
+pub(crate) fn preview_all_at(
+    home: Option<&Path>,
+    root: &Path,
+) -> Result<Vec<RefreshPreview>, Error> {
+    let skills = installed_skills(root)?;
+    let mut previews = Vec::new();
+    for installed in skills.values() {
+        previews.push(preview_skill(home, installed)?);
+    }
+    Ok(previews)
+}
+
+fn installed_skills(root: &Path) -> Result<BTreeMap<String, Skill>, Error> {
+    Ok(check::load_project_skills(root)?
+        .into_iter()
+        .map(|skill| (skill.name.clone(), skill))
+        .collect())
+}
+
+fn preview_skill(home: Option<&Path>, installed: &Skill) -> Result<RefreshPreview, Error> {
+    let (kind, tree_changed, diff) = match prepare_refresh(home, installed.clone())? {
+        RefreshPlan::Local { .. } => (PreviewKind::Local, false, None),
+        RefreshPlan::Unchanged { .. } => (PreviewKind::Unchanged, false, None),
+        RefreshPlan::Update {
+            installed,
+            new_skill,
+            tree_changed,
+            ..
+        } => (
+            PreviewKind::Update,
+            tree_changed,
+            skills::diff_skill_trees(&installed.path, &new_skill.path)?,
+        ),
+    };
+    Ok(RefreshPreview {
+        name: installed.name.clone(),
+        kind,
+        tree_changed,
+        diff,
+    })
+}
+
+pub fn preview_refresh(root: &Path, name: &str) -> Result<RefreshPreview, Error> {
+    preview_refresh_at(None, root, name)
+}
+
+pub(crate) fn preview_refresh_at(
+    home: Option<&Path>,
+    root: &Path,
+    name: &str,
+) -> Result<RefreshPreview, Error> {
+    let skills = installed_skills(root)?;
+    let installed = skills
+        .get(name)
+        .ok_or_else(|| Error::msg(format!("Installed skill not found: {name}")))?;
+    preview_skill(home, installed)
 }
 
 pub fn refresh_all(root: &Path) -> Result<Vec<String>, Error> {
@@ -214,7 +301,7 @@ pub(crate) fn refresh_all_at(home: Option<&Path>, root: &Path) -> Result<Vec<Str
     let mut refreshed = Vec::new();
     for plan in plans {
         let name = plan.name().to_string();
-        match apply_refresh(home, plan)? {
+        match apply_refresh(home, root, plan)? {
             Some(true) => {
                 catalog::deposit_skill_at(home, root, &name)?;
                 refreshed.push(name);

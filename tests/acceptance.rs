@@ -2200,6 +2200,565 @@ fn r13_add_github_skill_tree_url_writes_receipt_and_refreshes() {
 }
 
 #[test]
+fn o1_outdated_reports_behind_and_writes_nothing() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("outdated-repo");
+    init_repo(&remote);
+    let skill_path = "skills/alpha";
+    write_skill(&remote.join(skill_path), "alpha", "v1");
+    commit_all(&remote, "alpha v1");
+    let branch = current_branch(&remote);
+    let public = "https://github.com/example/outdated.git";
+    let tree_url = format!("https://github.com/example/outdated/tree/{branch}/{skill_path}");
+    let redirect = github_redirect(&remote, public);
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", &tree_url]);
+    add.envs(redirect.clone());
+    add.assert().success();
+
+    let installed = Workspace::skill_path(&project, "alpha");
+    let before_skill = fs::read_to_string(installed.join("SKILL.md")).unwrap();
+    let before_receipt = fs::read_to_string(installed.join(".tink-source.json")).unwrap();
+
+    write_skill(&remote.join(skill_path), "alpha", "v2");
+    commit_all(&remote, "alpha v2");
+
+    let mut outdated = ws.cmd(&project);
+    outdated.args(["skill", "outdated"]);
+    outdated.envs(redirect);
+    outdated
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("behind").and(predicate::str::contains("alpha")));
+
+    assert_eq!(
+        fs::read_to_string(installed.join("SKILL.md")).unwrap(),
+        before_skill
+    );
+    assert_eq!(
+        fs::read_to_string(installed.join(".tink-source.json")).unwrap(),
+        before_receipt
+    );
+}
+
+#[test]
+fn o2_outdated_reports_current_after_refresh() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("outdated-current-repo");
+    init_repo(&remote);
+    let skill_path = "skills/alpha";
+    write_skill(&remote.join(skill_path), "alpha", "v1");
+    commit_all(&remote, "alpha v1");
+    let branch = current_branch(&remote);
+    let public = "https://github.com/example/outdated-current.git";
+    let tree_url =
+        format!("https://github.com/example/outdated-current/tree/{branch}/{skill_path}");
+    let redirect = github_redirect(&remote, public);
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", &tree_url]);
+    add.envs(redirect.clone());
+    add.assert().success();
+
+    write_skill(&remote.join(skill_path), "alpha", "v2");
+    commit_all(&remote, "alpha v2");
+    let mut refresh = ws.cmd(&project);
+    refresh.args(["skill", "refresh", "alpha"]);
+    refresh.envs(redirect.clone());
+    refresh.assert().success();
+
+    let mut outdated = ws.cmd(&project);
+    outdated.args(["skill", "outdated"]);
+    outdated.envs(redirect);
+    outdated
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Current (no stale imports)"));
+}
+
+#[test]
+fn o3_outdated_reports_modified_for_local_edits() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("outdated-modified-repo");
+    init_repo(&remote);
+    let skill_path = "skills/alpha";
+    write_skill(&remote.join(skill_path), "alpha", "v1");
+    commit_all(&remote, "alpha v1");
+    let branch = current_branch(&remote);
+    let public = "https://github.com/example/outdated-modified.git";
+    let tree_url =
+        format!("https://github.com/example/outdated-modified/tree/{branch}/{skill_path}");
+    let redirect = github_redirect(&remote, public);
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", &tree_url]);
+    add.envs(redirect.clone());
+    add.assert().success();
+
+    write_skill(&remote.join(skill_path), "alpha", "v2");
+    commit_all(&remote, "alpha v2");
+
+    let installed = Workspace::skill_path(&project, "alpha");
+    let mut local = fs::read_to_string(installed.join("SKILL.md")).unwrap();
+    local.push_str("\nlocal edit\n");
+    fs::write(installed.join("SKILL.md"), local).unwrap();
+
+    let mut outdated = ws.cmd(&project);
+    outdated.args(["skill", "outdated"]);
+    outdated.envs(redirect);
+    outdated
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("modified").and(predicate::str::contains("alpha")));
+}
+
+#[test]
+fn o4_outdated_marks_moved_revision_with_same_tree() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("outdated-sametree-repo");
+    init_repo(&remote);
+    let skill_path = "skills/alpha";
+    write_skill(&remote.join(skill_path), "alpha", "v1");
+    commit_all(&remote, "alpha v1");
+    let branch = current_branch(&remote);
+    let public = "https://github.com/example/outdated-sametree.git";
+    let tree_url =
+        format!("https://github.com/example/outdated-sametree/tree/{branch}/{skill_path}");
+    let redirect = github_redirect(&remote, public);
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", &tree_url]);
+    add.envs(redirect.clone());
+    add.assert().success();
+
+    fs::write(remote.join("UNRELATED.md"), "unrelated\n").unwrap();
+    commit_all(&remote, "unrelated change");
+
+    let mut outdated = ws.cmd(&project);
+    outdated.args(["skill", "outdated"]);
+    outdated.envs(redirect);
+    outdated.assert().success().stdout(
+        predicate::str::contains("behind")
+            .and(predicate::str::contains("alpha"))
+            .and(predicate::str::contains("(tree unchanged)")),
+    );
+}
+
+#[test]
+fn y1_refresh_dry_run_lists_files_and_writes_nothing() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("dry-run-repo");
+    init_repo(&remote);
+    let skill_path = "skills/alpha";
+    write_skill(&remote.join(skill_path), "alpha", "v1");
+    commit_all(&remote, "alpha v1");
+    let branch = current_branch(&remote);
+    let public = "https://github.com/example/dry-run.git";
+    let tree_url = format!("https://github.com/example/dry-run/tree/{branch}/{skill_path}");
+    let redirect = github_redirect(&remote, public);
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", &tree_url]);
+    add.envs(redirect.clone());
+    add.assert().success();
+
+    let installed = Workspace::skill_path(&project, "alpha");
+    let before_skill = fs::read_to_string(installed.join("SKILL.md")).unwrap();
+    let before_receipt = fs::read_to_string(installed.join(".tink-source.json")).unwrap();
+
+    write_skill(&remote.join(skill_path), "alpha", "v2");
+    fs::write(remote.join(skill_path).join("EXTRA.md"), "extra\n").unwrap();
+    commit_all(&remote, "alpha v2");
+
+    let mut dry = ws.cmd(&project);
+    dry.args(["skill", "refresh", "--dry-run", "alpha"]);
+    dry.envs(redirect);
+    dry.assert().success().stdout(
+        predicate::str::contains("would refresh")
+            .and(predicate::str::contains("alpha"))
+            .and(predicate::str::contains("SKILL.md"))
+            .and(predicate::str::contains("EXTRA.md")),
+    );
+
+    assert_eq!(
+        fs::read_to_string(installed.join("SKILL.md")).unwrap(),
+        before_skill
+    );
+    assert_eq!(
+        fs::read_to_string(installed.join(".tink-source.json")).unwrap(),
+        before_receipt
+    );
+}
+
+#[test]
+fn y2_refresh_dry_run_matches_real_refresh() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("dry-run-equivalence-repo");
+    init_repo(&remote);
+    let skill_path = "skills/alpha";
+    write_skill(&remote.join(skill_path), "alpha", "v1");
+    commit_all(&remote, "alpha v1");
+    let branch = current_branch(&remote);
+    let public = "https://github.com/example/dry-run-equivalence.git";
+    let tree_url =
+        format!("https://github.com/example/dry-run-equivalence/tree/{branch}/{skill_path}");
+    let redirect = github_redirect(&remote, public);
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", &tree_url]);
+    add.envs(redirect.clone());
+    add.assert().success();
+
+    write_skill(&remote.join(skill_path), "alpha", "v2");
+    commit_all(&remote, "alpha v2");
+
+    let installed = Workspace::skill_path(&project, "alpha");
+    let mut dry = ws.cmd(&project);
+    dry.args(["skill", "refresh", "--dry-run", "alpha"]);
+    dry.envs(redirect.clone());
+    dry.assert().success().stdout(
+        predicate::str::contains("would refresh").and(predicate::str::contains("SKILL.md")),
+    );
+
+    let mut refresh = ws.cmd(&project);
+    refresh.args(["skill", "refresh", "alpha"]);
+    refresh.envs(redirect);
+    refresh.assert().success();
+    assert!(
+        fs::read_to_string(installed.join("SKILL.md"))
+            .unwrap()
+            .contains("v2")
+    );
+}
+
+#[test]
+fn y3_refresh_dry_run_reports_unchanged_when_current() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("dry-run-current-repo");
+    init_repo(&remote);
+    let skill_path = "skills/alpha";
+    write_skill(&remote.join(skill_path), "alpha", "v1");
+    commit_all(&remote, "alpha v1");
+    let branch = current_branch(&remote);
+    let public = "https://github.com/example/dry-run-current.git";
+    let tree_url = format!("https://github.com/example/dry-run-current/tree/{branch}/{skill_path}");
+    let redirect = github_redirect(&remote, public);
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", &tree_url]);
+    add.envs(redirect.clone());
+    add.assert().success();
+
+    let mut dry = ws.cmd(&project);
+    dry.args(["skill", "refresh", "--dry-run"]);
+    dry.envs(redirect);
+    dry.assert()
+        .success()
+        .stdout(predicate::str::contains("Unchanged (nothing would update)"));
+}
+
+#[test]
+fn b1_rollback_restores_pre_refresh_tree_and_receipt() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("rollback-repo");
+    init_repo(&remote);
+    let skill_path = "skills/alpha";
+    write_skill(&remote.join(skill_path), "alpha", "v1");
+    let first_revision = commit_all(&remote, "alpha v1");
+    let branch = current_branch(&remote);
+    let public = "https://github.com/example/rollback.git";
+    let tree_url = format!("https://github.com/example/rollback/tree/{branch}/{skill_path}");
+    let redirect = github_redirect(&remote, public);
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", &tree_url]);
+    add.envs(redirect.clone());
+    add.assert().success();
+
+    write_skill(&remote.join(skill_path), "alpha", "v2");
+    commit_all(&remote, "alpha v2");
+    let mut refresh = ws.cmd(&project);
+    refresh.args(["skill", "refresh", "alpha"]);
+    refresh.envs(redirect.clone());
+    refresh.assert().success();
+
+    let installed = Workspace::skill_path(&project, "alpha");
+    assert!(
+        fs::read_to_string(installed.join("SKILL.md"))
+            .unwrap()
+            .contains("v2")
+    );
+
+    let mut rollback = ws.cmd(&project);
+    rollback.args(["skill", "rollback", "alpha"]);
+    rollback.envs(redirect.clone());
+    rollback
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Rolled back").and(predicate::str::contains("alpha")));
+
+    assert!(
+        fs::read_to_string(installed.join("SKILL.md"))
+            .unwrap()
+            .contains("v1")
+    );
+    let receipt: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(installed.join(".tink-source.json")).unwrap())
+            .unwrap();
+    assert_eq!(receipt["revision"], first_revision);
+
+    // Single-use: the snapshot is consumed.
+    let mut again = ws.cmd(&project);
+    again.args(["skill", "rollback", "alpha"]);
+    again.envs(redirect);
+    again
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("No rollback snapshot"));
+}
+
+#[test]
+fn b2_rollback_refuses_when_tree_changed_after_refresh() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("rollback-dirty-repo");
+    init_repo(&remote);
+    let skill_path = "skills/alpha";
+    write_skill(&remote.join(skill_path), "alpha", "v1");
+    commit_all(&remote, "alpha v1");
+    let branch = current_branch(&remote);
+    let public = "https://github.com/example/rollback-dirty.git";
+    let tree_url = format!("https://github.com/example/rollback-dirty/tree/{branch}/{skill_path}");
+    let redirect = github_redirect(&remote, public);
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", &tree_url]);
+    add.envs(redirect.clone());
+    add.assert().success();
+
+    write_skill(&remote.join(skill_path), "alpha", "v2");
+    commit_all(&remote, "alpha v2");
+    let mut refresh = ws.cmd(&project);
+    refresh.args(["skill", "refresh", "alpha"]);
+    refresh.envs(redirect.clone());
+    refresh.assert().success();
+
+    let installed = Workspace::skill_path(&project, "alpha");
+    let mut edited = fs::read_to_string(installed.join("SKILL.md")).unwrap();
+    edited.push_str("\npost-refresh edit\n");
+    fs::write(installed.join("SKILL.md"), edited).unwrap();
+
+    let mut rollback = ws.cmd(&project);
+    rollback.args(["skill", "rollback", "alpha"]);
+    rollback.envs(redirect);
+    rollback
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("changed since refresh"));
+    assert!(
+        fs::read_to_string(installed.join("SKILL.md"))
+            .unwrap()
+            .contains("post-refresh edit")
+    );
+}
+
+#[test]
+fn b3_rollback_without_snapshot_is_a_clean_error() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("rollback-missing-repo");
+    init_repo(&remote);
+    let skill_path = "skills/alpha";
+    write_skill(&remote.join(skill_path), "alpha", "v1");
+    commit_all(&remote, "alpha v1");
+    let branch = current_branch(&remote);
+    let public = "https://github.com/example/rollback-missing.git";
+    let tree_url =
+        format!("https://github.com/example/rollback-missing/tree/{branch}/{skill_path}");
+    let redirect = github_redirect(&remote, public);
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", &tree_url]);
+    add.envs(redirect.clone());
+    add.assert().success();
+
+    let mut rollback = ws.cmd(&project);
+    rollback.args(["skill", "rollback", "alpha"]);
+    rollback.envs(redirect);
+    rollback
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("No rollback snapshot"));
+}
+
+#[test]
+fn b4_second_refresh_replaces_the_snapshot_generation() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("rollback-generations-repo");
+    init_repo(&remote);
+    let skill_path = "skills/alpha";
+    write_skill(&remote.join(skill_path), "alpha", "v1");
+    commit_all(&remote, "alpha v1");
+    let branch = current_branch(&remote);
+    let public = "https://github.com/example/rollback-generations.git";
+    let tree_url =
+        format!("https://github.com/example/rollback-generations/tree/{branch}/{skill_path}");
+    let redirect = github_redirect(&remote, public);
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", &tree_url]);
+    add.envs(redirect.clone());
+    add.assert().success();
+
+    for version in ["v2", "v3"] {
+        write_skill(&remote.join(skill_path), "alpha", version);
+        commit_all(&remote, &format!("alpha {version}"));
+        let mut refresh = ws.cmd(&project);
+        refresh.args(["skill", "refresh", "alpha"]);
+        refresh.envs(redirect.clone());
+        refresh.assert().success();
+    }
+
+    let mut rollback = ws.cmd(&project);
+    rollback.args(["skill", "rollback", "alpha"]);
+    rollback.envs(redirect);
+    rollback.assert().success();
+
+    // One generation only: rollback lands on v2, not v1.
+    let installed = Workspace::skill_path(&project, "alpha");
+    let body = fs::read_to_string(installed.join("SKILL.md")).unwrap();
+    assert!(body.contains("v2"), "{body}");
+    assert!(!body.contains("v3"), "{body}");
+}
+
+#[test]
+fn t1_doctor_reports_healthy_local_project() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let mut doctor = ws.cmd(&project);
+    doctor.args(["doctor"]);
+    doctor.assert().success().stdout(
+        predicate::str::contains("ok")
+            .and(predicate::str::contains("git"))
+            .and(predicate::str::contains("home"))
+            .and(predicate::str::contains("skills")),
+    );
+}
+
+#[test]
+fn t2_doctor_names_failing_probe_and_exits_nonzero() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let broken = project.join(".agents/skills/broken");
+    fs::create_dir_all(&broken).unwrap();
+    fs::write(broken.join("SKILL.md"), "no frontmatter here\n").unwrap();
+
+    let mut doctor = ws.cmd(&project);
+    doctor.args(["doctor"]);
+    doctor
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("fail").and(predicate::str::contains("skills")));
+}
+
+#[test]
+fn t3_doctor_reports_reachable_remote() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let remote = ws.root.join("doctor-remote-repo");
+    init_repo(&remote);
+    let skill_path = "skills/alpha";
+    write_skill(&remote.join(skill_path), "alpha", "v1");
+    commit_all(&remote, "alpha v1");
+    let branch = current_branch(&remote);
+    let public = "https://github.com/example/doctor-remote.git";
+    let tree_url = format!("https://github.com/example/doctor-remote/tree/{branch}/{skill_path}");
+    let redirect = github_redirect(&remote, public);
+    let mut add = ws.cmd(&project);
+    add.args(["skill", "add", &tree_url]);
+    add.envs(redirect.clone());
+    add.assert().success();
+
+    let mut doctor = ws.cmd(&project);
+    doctor.args(["doctor"]);
+    doctor.envs(redirect);
+    doctor.assert().success().stdout(
+        predicate::str::contains("ok")
+            .and(predicate::str::contains("network"))
+            .and(predicate::str::contains("reachable")),
+    );
+}
+
+#[test]
 fn r14_add_github_group_tree_url_refuses_without_writes() {
     let ws = Workspace::new();
     let project = ws.project("app");

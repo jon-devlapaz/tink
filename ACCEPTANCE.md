@@ -303,6 +303,40 @@ Ids are stable. Tests must name or comment the id they prove.
 | P13 | `skill refresh manage-tink` when the project copy is missing and the same-named library skill has remote provenance | Exit ≠ 0 before publication; project remains missing; library tree and receipt remain byte-identical |
 | P14 | `skill refresh manage-tink` when a current or stale receipt-free project copy exists and the same-named library skill has remote provenance | Exit ≠ 0 before publication; project trees plus library tree and receipt remain byte-identical |
 
+### Outdated
+
+| Id | Action | Expect |
+|---|---|---|
+| O1 | `skill outdated` after upstream moves | Names the skill as behind; project tree and receipt byte-identical afterwards |
+| O2 | `skill outdated` after `skill refresh` catches up | Reports `Current (no stale imports)` |
+| O3 | `skill outdated` when the installed skill has local modifications | Names the skill as modified |
+| O4 | `skill outdated` when upstream revision moves but skill tree bytes match | Names the skill as behind with `(tree unchanged)` |
+
+### Refresh preview
+
+| Id | Action | Expect |
+|---|---|---|
+| Y1 | `skill refresh --dry-run NAME` after upstream change | Lists added/modified files; project tree and receipt byte-identical afterwards |
+| Y2 | `skill refresh --dry-run NAME` then real `skill refresh NAME` | Preview names the changed files; refresh applies them |
+| Y3 | `skill refresh --dry-run` when everything is current | Reports `Unchanged (nothing would update)` |
+
+### Rollback
+
+| Id | Action | Expect |
+|---|---|---|
+| B1 | `skill refresh` then `skill rollback` | Project tree and receipt return to pre-refresh bytes; second rollback reports no snapshot |
+| B2 | `skill rollback` after post-refresh local edits | Exit ≠ 0; names the change; edited tree untouched |
+| B3 | `skill rollback` with no snapshot | Exit ≠ 0; clean no-snapshot error |
+| B4 | Two `skill refresh` runs then `skill rollback` | Restores the second pre-image (one snapshot generation) |
+
+### Doctor
+
+| Id | Action | Expect |
+|---|---|---|
+| T1 | `tink doctor` on a healthy local project | Exit 0; names git, home, and skills rows |
+| T2 | `tink doctor` with an invalid installed tree | Exit ≠ 0; names the failing skills probe |
+| T3 | `tink doctor` with a reachable remote source | Reports the network probe reachable |
+
 ### Remove
 
 | Id | Action | Expect |

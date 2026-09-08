@@ -6,6 +6,7 @@ mod add;
 mod catalog;
 mod check;
 mod destroy;
+mod doctor;
 mod error;
 mod git;
 mod harvest;
@@ -16,6 +17,7 @@ mod inventory;
 mod library;
 mod manage_tink;
 mod manifest;
+mod outdated;
 mod output;
 mod paths;
 mod process;
@@ -23,6 +25,7 @@ mod provenance;
 mod read;
 mod refresh;
 mod remove;
+mod rollback;
 mod skills;
 mod skillsets;
 mod sources;
@@ -114,6 +117,8 @@ pub enum Command {
     },
     /// Replace this binary with a newer verified GitHub Release
     Update,
+    /// Run read-only environment and consistency diagnostics
+    Doctor,
 }
 
 #[derive(Debug, Subcommand)]
@@ -164,7 +169,17 @@ pub enum SkillCommand {
     Refresh {
         /// Optional skill name; default refreshes all imported skills
         name: Option<String>,
+        /// Show what refresh would change without writing anything
+        #[arg(long)]
+        dry_run: bool,
     },
+    /// Restore a skill to its pre-refresh tree (single use; refresh snapshots once)
+    Rollback {
+        /// Directory name below `.agents/skills/`
+        name: String,
+    },
+    /// List installed remote skills behind their upstream without changing anything
+    Outdated,
     /// Delete one project skill directory and drop it from the by-project catalog (not library)
     Remove {
         /// Skill directory name under `.agents/skills/`
@@ -344,6 +359,36 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
             update::print_report(&report)?;
             Ok(())
         }
+        Command::Doctor => dispatch_doctor(&cwd),
+    }
+}
+
+fn dispatch_doctor(cwd: &Path) -> Result<(), Error> {
+    use doctor::ProbeOutcome;
+    let style = CliStyle::auto_stdout();
+    let rows = doctor::doctor(cwd)?;
+    for row in &rows {
+        let marker = match row.outcome {
+            ProbeOutcome::Pass => style.success("ok"),
+            ProbeOutcome::Fail => style.error("fail"),
+            ProbeOutcome::Skip => style.muted("skip"),
+        };
+        if row.detail.is_empty() {
+            println!("{marker} {}", style.accent(row.name));
+        } else {
+            println!("{marker} {} {}", style.accent(row.name), row.detail);
+        }
+    }
+    if doctor::healthy(&rows) {
+        Ok(())
+    } else {
+        let failures = rows
+            .iter()
+            .filter(|row| row.outcome == ProbeOutcome::Fail)
+            .count();
+        Err(Error::msg(format!(
+            "doctor found {failures} problem(s); see rows above"
+        )))
     }
 }
 
@@ -459,7 +504,16 @@ fn dispatch_skill(cwd: &Path, command: SkillCommand) -> Result<(), Error> {
         SkillCommand::Verify => dispatch_skill_verify(cwd),
         SkillCommand::Lock { source } => dispatch_skill_lock(cwd, &source),
         SkillCommand::Sync => dispatch_skill_sync(cwd),
-        SkillCommand::Refresh { name } => dispatch_skill_refresh(cwd, name.as_deref()),
+        SkillCommand::Refresh { name, dry_run } => {
+            dispatch_skill_refresh(cwd, name.as_deref(), dry_run)
+        }
+        SkillCommand::Outdated => dispatch_skill_outdated(cwd),
+        SkillCommand::Rollback { name } => {
+            rollback::rollback_skill(cwd, &name)?;
+            let style = CliStyle::auto_stdout();
+            println!("{} {}", style.success("Rolled back"), style.skill(&name));
+            Ok(())
+        }
         SkillCommand::Remove { name } => dispatch_skill_remove(cwd, &name),
         SkillCommand::Harvest => dispatch_skill_harvest(cwd),
         SkillCommand::Promote { name, replace } => dispatch_skill_promote(cwd, &name, replace),
@@ -876,8 +930,11 @@ fn dispatch_skill_promote(cwd: &Path, name: &str, replace: bool) -> Result<(), E
     Ok(())
 }
 
-fn dispatch_skill_refresh(cwd: &Path, name: Option<&str>) -> Result<(), Error> {
+fn dispatch_skill_refresh(cwd: &Path, name: Option<&str>, dry_run: bool) -> Result<(), Error> {
     let style = CliStyle::auto_stdout();
+    if dry_run {
+        return dispatch_skill_refresh_dry_run(cwd, name);
+    }
     match name {
         Some("manage-tink") => {
             let outcome = manage_tink::refresh_manage_tink(cwd)?;
@@ -912,4 +969,127 @@ fn dispatch_skill_refresh(cwd: &Path, name: Option<&str>) -> Result<(), Error> {
             Ok(())
         }
     }
+}
+
+fn dispatch_skill_refresh_dry_run(cwd: &Path, name: Option<&str>) -> Result<(), Error> {
+    use refresh::PreviewKind;
+    let style = CliStyle::auto_stdout();
+    if let Some("manage-tink") = name {
+        let target = home::project_skills_path(cwd).join("manage-tink");
+        if !target.is_dir() {
+            println!("{} {}", style.muted("missing"), style.skill("manage-tink"));
+            return Ok(());
+        }
+        let installed = skills::read_skill(&target, true)?;
+        if manage_tink::is_current(&installed)? {
+            println!(
+                "{} {}",
+                style.muted("unchanged"),
+                style.skill("manage-tink")
+            );
+        } else {
+            println!(
+                "{} {} {}",
+                style.warn("would refresh"),
+                style.skill("manage-tink"),
+                style.muted("(embedded copy differs)")
+            );
+        }
+        return Ok(());
+    }
+    let previews = match name {
+        Some(name) => vec![refresh::preview_refresh(cwd, name)?],
+        None => refresh::preview_all(cwd)?,
+    };
+    if previews
+        .iter()
+        .all(|preview| !matches!(preview.kind, PreviewKind::Update))
+    {
+        println!("{}", style.muted("Unchanged (nothing would update)"));
+        return Ok(());
+    }
+    for preview in &previews {
+        let name = style.skill(&preview.name);
+        match preview.kind {
+            PreviewKind::Local => println!("{} {name}", style.muted("local")),
+            PreviewKind::Unchanged => println!("{} {name}", style.muted("unchanged")),
+            PreviewKind::Update => {
+                if preview.tree_changed {
+                    println!("{} {name}", style.warn("would refresh"));
+                } else {
+                    println!(
+                        "{} {name} {}",
+                        style.warn("would refresh"),
+                        style.muted("(receipt only)")
+                    );
+                }
+                if let Some(diff) = preview.diff.as_ref().filter(|diff| !diff.is_empty()) {
+                    for path in &diff.added {
+                        println!("  {} {path}", style.success("+"));
+                    }
+                    for path in &diff.removed {
+                        println!("  {} {path}", style.error("-"));
+                    }
+                    for path in &diff.modified {
+                        println!("  {} {path}", style.warn("~"));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn short_revision(revision: &str) -> &str {
+    revision.get(..7).unwrap_or(revision)
+}
+
+fn dispatch_skill_outdated(cwd: &Path) -> Result<(), Error> {
+    use outdated::OutdatedStatus;
+    let style = CliStyle::auto_stdout();
+    let rows = outdated::outdated_all(cwd)?;
+    if rows
+        .iter()
+        .all(|row| matches!(row.status, OutdatedStatus::Current | OutdatedStatus::Local))
+    {
+        println!("{}", style.muted("Current (no stale imports)"));
+        return Ok(());
+    }
+    for row in &rows {
+        let name = style.skill(&row.name);
+        match row.status {
+            OutdatedStatus::Current => println!("{} {name}", style.muted("current")),
+            OutdatedStatus::Local => println!("{} {name}", style.muted("local")),
+            OutdatedStatus::Behind { tree_changed } => {
+                let movement = match (&row.recorded, &row.tip) {
+                    (Some(recorded), Some(tip)) => format!(
+                        " {}→{}",
+                        style.accent(short_revision(recorded)),
+                        style.accent(short_revision(tip))
+                    ),
+                    _ => String::new(),
+                };
+                let mut line = format!("{} {name}{movement}", style.warn("behind"));
+                if tree_changed {
+                    if let Some(detail) = row.note.as_deref().filter(|note| !note.is_empty()) {
+                        line.push_str(&format!(" {}", style.muted(detail)));
+                    }
+                } else {
+                    line.push_str(&format!(" {}", style.muted("(tree unchanged)")));
+                }
+                println!("{line}");
+            }
+            OutdatedStatus::Modified => println!(
+                "{} {name} {}",
+                style.warn("modified"),
+                style.muted("(local changes block refresh)")
+            ),
+            OutdatedStatus::Unknown => println!(
+                "{} {name} {}",
+                style.warn("unknown"),
+                style.muted(row.note.as_deref().unwrap_or(""))
+            ),
+        }
+    }
+    Ok(())
 }

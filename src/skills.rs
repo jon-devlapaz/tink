@@ -481,6 +481,45 @@ pub(crate) fn skill_dir_matches_embedded(
     Ok(tree == expected)
 }
 
+/// File-level delta between two skill trees, with posix-style sorted paths.
+/// `None` when either tree is unreadable (symlinks/specials).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TreeDiff {
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+    pub modified: Vec<String>,
+}
+
+impl TreeDiff {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.added.is_empty() && self.removed.is_empty() && self.modified.is_empty()
+    }
+}
+
+pub(crate) fn diff_skill_trees(old: &Path, new: &Path) -> Result<Option<TreeDiff>, Error> {
+    let (Some(old), Some(new)) = (tree_contents(old)?, tree_contents(new)?) else {
+        return Ok(None);
+    };
+    let mut diff = TreeDiff::default();
+    for (path, old_kind) in &old {
+        match new.get(path) {
+            None => diff.removed.push(posix_relative(path)),
+            Some(new_kind) if new_kind != old_kind => diff.modified.push(posix_relative(path)),
+            Some(_) => {}
+        }
+    }
+    for path in new.keys() {
+        if !old.contains_key(path) {
+            diff.added.push(posix_relative(path));
+        }
+    }
+    Ok(Some(diff))
+}
+
+fn posix_relative(relative: &Path) -> String {
+    relative.to_string_lossy().replace('\\', "/")
+}
+
 /// Like [`skill_contents_equal`], but ignore relative paths (e.g. `.tink-source.json`).
 pub fn skill_contents_equal_except(
     left: &Path,

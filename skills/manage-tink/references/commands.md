@@ -21,11 +21,15 @@ list, read, check, refresh, and remove.
 | Read from the library | `tink skill read NAME --library` |
 | Raw description | `tink skill read NAME --raw` |
 | Check | `tink skill check` |
+| Diagnose environment and consistency | `tink doctor` |
 | Generate project manifest and lockfile | `tink skill lock --source NAME=PATH` for each local skill; every path must resolve inside the project |
 | Verify manifest, lockfile, and installed trees | `tink skill verify` |
 | Sync the exact pinned manifest set | `tink skill sync` (preflights expected project/library/catalog refusals, then publishes sequentially; rerun after an operational interruption) |
 | Refresh all clean imports | `tink skill refresh` |
 | Refresh one | `tink skill refresh NAME` |
+| List stale imports (read-only) | `tink skill outdated` |
+| Preview refresh without writing | `tink skill refresh --dry-run [NAME]` |
+| Roll back the last refresh (single use) | `tink skill rollback NAME` |
 | Refresh the active binary's embedded manage-tink | `tink skill refresh manage-tink` (explicitly replaces a differing receipt-free reserved copy; refuses remote provenance) |
 | Remove one project skill | `tink skill remove NAME` |
 | Add a skillset from a GitHub tree URL | `tink skillset add <url> [optional-name]` |
