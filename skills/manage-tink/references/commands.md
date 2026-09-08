@@ -15,7 +15,6 @@ list, read, check, refresh, and remove.
 | Harvest harness skills into library | `tink skill harvest` |
 | Inspect a public GitHub repository or tree | `tink inspect GITHUB_URL` |
 | List (this project) | `tink skill list` |
-| List (catalog) | `tink skill list --catalog` |
 | List (library) | `tink library list` (`tink skill list --library` compatibility alias) |
 | Read one standalone skill | `tink skill read NAME` |
 | Read from the library | `tink skill read NAME --library` |
@@ -24,7 +23,7 @@ list, read, check, refresh, and remove.
 | Diagnose environment and consistency | `tink doctor` |
 | Generate project manifest and lockfile | `tink skill lock --source NAME=PATH` for each local skill; every path must resolve inside the project |
 | Verify manifest, lockfile, and installed trees | `tink skill verify` |
-| Sync the exact pinned manifest set | `tink skill sync` (preflights expected project/library/catalog refusals, then publishes sequentially; rerun after an operational interruption) |
+| Sync the exact pinned manifest set | `tink skill sync` (preflights expected project/library refusals, then publishes sequentially; rerun after an operational interruption) |
 | Refresh all clean imports | `tink skill refresh` |
 | Refresh one | `tink skill refresh NAME` |
 | List stale imports (read-only) | `tink skill outdated` |
@@ -33,7 +32,7 @@ list, read, check, refresh, and remove.
 | Refresh the active binary's embedded manage-tink | `tink skill refresh manage-tink` (explicitly replaces a differing receipt-free reserved copy; refuses remote provenance) |
 | Remove one project skill | `tink skill remove NAME` |
 | Add a skillset from a GitHub tree URL | `tink skillset add <url> [optional-name]` |
-| Add a pinned catalog skillset | `tink skillset add NAME-skillset` (or `NAME`) |
+| Add a pinned skillset | `tink skillset add NAME-skillset` (or `NAME`) |
 | List project skillsets | `tink skillset list` (divergent trees stay visible; list exits 0) |
 | List library skillsets | `tink skillset list --library` |
 | Refresh a clean pinned skillset | `tink skillset refresh NAME-skillset` (or `NAME`) |
@@ -49,9 +48,11 @@ list, read, check, refresh, and remove.
   `<project>/.agents/skills/<name>-skillset/<member>/SKILL.md`. Skillset directories
   end canonically with `-skillset`; CLI mutating commands auto-append `-skillset` if omitted.
 - Home (`$TINK_HOME` or `~/.tink`) is not an agent discovery root. Installs
-  library trees at `skills/<name>/`. List the library with
+  standalone library trees at `skills/<name>/` and derived skillset trees at
+  `skillsets/<name>-skillset/`. List standalone skills with
   `tink library list` (`tink skill list --library` remains a compatibility
-  alias); promote into a project with
+  alias); list skillsets with `tink skillset list --library`. Promote a
+  standalone skill into a project with
   `tink skill add NAME` (bare standalone library skill name). `tink skill read
   NAME` prints one standalone skill's description (`--library` for the home
   copy; `--raw` for the description line). Receipt-backed
@@ -61,34 +62,27 @@ list, read, check, refresh, and remove.
   overwrites a divergent library entry). Do not duplicate or infer that root
   inventory in agent policy. Matching GitHub tips install into the project from
   that library; divergent library trees are repaired with a warning on `skill
-  add`. Names are recorded in
-  `catalog/by-project/<bounded-name>-<sha256-identity>/meta.json`. List the catalog with
-  `tink skill list --catalog` (always headered three-column TSV; backslash, tab, CR,
-  and LF inside fields are escaped as `\\\\`, `\\t`, `\\r`, and `\\n`).
-  Do not hand-parse this derived by-project `meta.json` when the CLI is available. `skill remove`
-  deletes the project skill directory and drops that name from the by-project
-  catalog; it does not prune the library. `destroy` removes
-  `.agents/skills/`, removes `.agents/` only when it is then empty, and drops
-  this project's catalog entry. It preserves files outside `.agents/`
-  (including `AGENTS.md`), unrelated
-  `.agents/` siblings, library trees, and other projects' catalog rows.
-  Project skill overwrites are still refused.
+  add`. `skill remove` deletes the project skill directory; it does not prune
+  the library. `destroy` removes `.agents/skills/` and removes `.agents/` only
+  when it is then empty. It preserves files outside `.agents/` (including
+  `AGENTS.md`), unrelated `.agents/` siblings, and library trees. Project skill
+  overwrites are still refused.
 - Project lockfiles use version 2 tree digests with unambiguous entry framing,
   raw Unix path bytes, canonical executable modes, and file contents. A version-1 lock
   is refused until `tink skill lock` explicitly rewrites it. Manifest sync
-  prepares every exact source and preflights expected project, library, and
-  catalog failures before sequential publication; it does not promise
+  prepares every exact source and preflights expected project and library
+  failures before sequential publication; it does not promise
   cross-skill atomicity. Retry the same sync after an unexpected operational
   interruption.
 - `tink inspect GITHUB_URL` is read-only. It recursively discovers valid
   `SKILL.md` folders and reports inferred source skillsets, standalone skills,
   diagnostics, and the immutable inspected revision. It does not install
-  anything or write a catalog definition.
-- Skillset definitions live at
-  `catalog/by-skillset/<name>-skillset/meta.json` and pin an HTTPS Git source,
-  full revision, source root, and explicit members. Tink validates and consumes
-  this external input but has no command that writes it. Only an explicitly
-  authorized authoring step may create or change the exact definition:
+  anything or write a skillset pin.
+- Skillset pins live at `skillsets/<name>-skillset.json` and pin an HTTPS Git
+  source, full revision, source root, and explicit members. `tink skillset add
+  <url>` create-only authors a pin; `tink skillset update` advances its revision.
+  Name-based `skillset add` reads an existing pin. Hand authoring of that exact
+  file still requires explicit authority and does not authorize install:
 
   ```json
   {
@@ -102,14 +96,18 @@ list, read, check, refresh, and remove.
   `tink inspect` may inform a proposal, but never infer or write the pinned
   revision or member list automatically. Definition authoring does not authorize
   `skillset add`. Installed project and
-  library trees carry `.tink-skillset.json`. A valid project tree is primary:
-  it may repair its library copy, while library state never overwrites a
+  skillsets-library trees carry `.tink-skillset.json`. A valid project tree is primary:
+  it may repair its `$TINK_HOME/skillsets/` copy, while skillsets-library state never
+  overwrites a
   divergent project. Receipt presence owns the root even when it also contains
   `SKILL.md`; standalone skill commands never expose, promote, or replace it.
   The receipt digest ignores root `SKILL.md` so manage-tink can author the
   required router without dirtying the install; refresh preserves that router.
+  A missing root router fails `skill check`; clean `skillset add`/`refresh`/`update`
+  restore it from `$TINK_HOME/skillsets/` when present, otherwise regenerate a
+  baseline.
   `skillset remove` deletes only the project tree and keeps
-  both the definition and library copy.
+  both the definition and skillsets-library copy.
   New receipts use `digestVersion: 2`; a clean legacy receipt migrates only via
   `tink skillset refresh NAME-skillset`.
 - Tink has no inter-process lock. Do not run concurrent mutations against the

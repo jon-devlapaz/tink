@@ -3,7 +3,6 @@
 use std::path::Path;
 
 use crate::add;
-use crate::catalog;
 use crate::error::Error;
 use crate::library;
 use crate::paths::{map_io, refuse_symlink};
@@ -144,10 +143,8 @@ pub(crate) fn refresh_manage_tink_at(
     let (_staging, embedded) = prepare_manage_tink()?;
     if !skills::skill_contents_equal(&installed.path, &embedded.path)? {
         library::preflight_deposit_at(home, &embedded, None)?;
-        catalog::preflight_deposit_skill_at(home, project_root)?;
         skills::replace_embedded_verified(&embedded, &skills_root)?;
         library::deposit_at(home, &embedded, None)?;
-        catalog::deposit_skill_at(home, project_root, "manage-tink")?;
 
         let refreshed = skills::read_skill(&target, true)?;
         require_current(&refreshed)?;
@@ -155,9 +152,7 @@ pub(crate) fn refresh_manage_tink_at(
     }
 
     library::preflight_deposit_at(home, &installed, None)?;
-    catalog::preflight_deposit_skill_at(home, project_root)?;
     library::sync_from_installed_at(home, &installed)?;
-    catalog::deposit_skill_at(home, project_root, "manage-tink")?;
     Ok(RefreshOutcome::Unchanged)
 }
 
@@ -233,15 +228,6 @@ mod tests {
             crate::home::skills_library_path(&home.home)
                 .join("manage-tink/SKILL.md")
                 .is_file()
-        );
-        let catalog = crate::catalog::list_catalog(Some(&home.home)).unwrap();
-        assert!(
-            catalog.iter().any(|entry| entry.skill == "manage-tink"),
-            "catalog skills: {:?}",
-            catalog
-                .iter()
-                .map(|entry| entry.skill.as_str())
-                .collect::<Vec<_>>(),
         );
     }
 }

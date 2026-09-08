@@ -3,7 +3,6 @@
 //! Acceptance boundary: [`../ACCEPTANCE.md`](../ACCEPTANCE.md).
 
 mod add;
-mod catalog;
 mod check;
 mod destroy;
 mod doctor;
@@ -109,7 +108,7 @@ pub enum Command {
     },
     /// Inspect skills and source-defined skillsets in a public GitHub URL
     Inspect { url: String },
-    /// Remove `.agents/skills/`, an empty `.agents/`, and this project's catalog entry (not guidance or library)
+    /// Remove `.agents/skills/`, an empty `.agents/`, and leave guidance/library untouched
     Destroy {
         /// Skip the confirmation prompt
         #[arg(long)]
@@ -132,13 +131,10 @@ pub enum SkillCommand {
         #[arg(long)]
         skill: Option<String>,
     },
-    /// List installed project skills, the by-project catalog, or the library
+    /// List installed project skills or the library
     List {
-        /// List offline catalog under `$TINK_HOME` / `~/.tink` as `project\\troot\\tskill` TSV
-        #[arg(long, group = "list_source")]
-        catalog: bool,
         /// List skill names in the library (`skills/<name>/`)
-        #[arg(long, group = "list_source")]
+        #[arg(long)]
         library: bool,
     },
     /// Read a standalone skill's description and metadata
@@ -180,7 +176,7 @@ pub enum SkillCommand {
     },
     /// List installed remote skills behind their upstream without changing anything
     Outdated,
-    /// Delete one project skill directory and drop it from the by-project catalog (not library)
+    /// Delete one project skill directory (not the home library copy)
     Remove {
         /// Skill directory name under `.agents/skills/`
         name: String,
@@ -211,14 +207,14 @@ pub enum SkillsetCommand {
         #[arg(long)]
         library: bool,
     },
-    /// Install a skillset from a GitHub tree URL or pinned catalog name
+    /// Install a skillset from a GitHub tree URL or pinned skillset name
     Add {
-        /// GitHub tree URL or catalog skillset name (appends -skillset if omitted)
+        /// GitHub tree URL or pinned skillset name (appends -skillset if omitted)
         target: String,
         /// Optional skillset name (appends -skillset if omitted; valid only with a URL)
         name: Option<String>,
     },
-    /// Update one clean installed skillset to its pinned catalog definition
+    /// Replace one clean installed skillset from its pinned definition
     Refresh {
         /// Skillset name (appends -skillset if omitted)
         name: String,
@@ -228,7 +224,7 @@ pub enum SkillsetCommand {
         /// Skillset name (appends -skillset if omitted; if omitted, updates all installed skillsets)
         name: Option<String>,
     },
-    /// Remove one installed skillset without deleting its shared catalog definition
+    /// Remove one installed skillset without deleting its shared pin or library copy
     Remove {
         /// Skillset name (appends -skillset if omitted)
         name: String,
@@ -487,10 +483,8 @@ fn dispatch_inspect(url: &str) -> Result<(), Error> {
 fn dispatch_skill(cwd: &Path, command: SkillCommand) -> Result<(), Error> {
     match command {
         SkillCommand::Add { source, skill } => dispatch_skill_add(cwd, &source, skill.as_deref()),
-        SkillCommand::List { catalog, library } => {
-            if catalog {
-                dispatch_skill_list_catalog()
-            } else if library {
+        SkillCommand::List { library } => {
+            if library {
                 dispatch_skill_list_library()
             } else {
                 dispatch_skill_list(cwd)
@@ -853,27 +847,6 @@ fn dispatch_skill_list(cwd: &Path) -> Result<(), Error> {
         for skill in &skills {
             println!("{}", out.skill(&skill.name));
         }
-    }
-    Ok(())
-}
-
-fn dispatch_skill_list_catalog() -> Result<(), Error> {
-    let style = CliStyle::auto_stdout();
-    let entries = catalog::list_catalog(None)?;
-    // Header + TSV rows: plain when piped; lightly role-colored on a TTY.
-    println!(
-        "{}\t{}\t{}",
-        style.muted("project"),
-        style.muted("root"),
-        style.muted("skill")
-    );
-    for entry in &entries {
-        println!(
-            "{}\t{}\t{}",
-            style.muted(output::escape_untrusted(&entry.project)),
-            style.muted(output::escape_untrusted(&entry.root)),
-            style.skill(output::escape_untrusted(&entry.skill))
-        );
     }
     Ok(())
 }

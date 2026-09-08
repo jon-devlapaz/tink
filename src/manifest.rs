@@ -421,14 +421,13 @@ fn sync_at(root: &Path, home: Option<&Path>) -> Result<usize, Error> {
         }
     }
 
-    // Library and catalog refusals are predictable and must be discovered
-    // before publishing the first prepared project skill. Operational failures
+    // Library refusals are predictable and must be discovered before
+    // publishing the first prepared project skill. Operational failures
     // such as ENOSPC can still interrupt sequential publication and are
     // recoverable by rerunning sync.
     for candidate in &prepared {
         crate::library::preflight_deposit_at(home, candidate.skill(), candidate.provenance())?;
     }
-    crate::catalog::preflight_deposit_skill_at(home, root)?;
 
     for candidate in prepared {
         candidate.publish_at(root, home)?;
@@ -701,11 +700,6 @@ mod tests {
                 .exists()
         );
         assert!(!skills_library_path(&home).join("alpha").exists());
-        assert!(
-            crate::catalog::list_catalog(Some(&home))
-                .unwrap()
-                .is_empty()
-        );
     }
 
     #[test]

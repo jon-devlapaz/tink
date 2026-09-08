@@ -7,7 +7,8 @@
  *   node list-members.mjs <...> --out <file.json>
  *   node list-members.mjs <...> --stdout full|summary   # default: summary
  *
- * Resolves project (.agents/skills/<name>) and library ($TINK_HOME/skills or ~/.tink/skills).
+ * Resolves project (.agents/skills/<name>) and skillsets library
+ * ($TINK_HOME/skillsets or ~/.tink/skillsets).
  * Full JSON defaults to ~/.tink/cache/manage-tink-skillset-router/<skillset>.<kind>.json
  * (never writes into the skillset tree — protects Tink digests).
  */
@@ -25,7 +26,7 @@ import { homedir } from 'node:os';
 function usage(code = 2) {
 	console.error(`Usage: node list-members.mjs <skillset-name-or-dir> [options]
   --project <dir>     Project root (default: cwd). Looks in <dir>/.agents/skills/<name>
-  --library <dir>     Library skills root (default: $TINK_HOME/skills or ~/.tink/skills)
+  --library <dir>     Skillsets library root (default: $TINK_HOME/skillsets or ~/.tink/skillsets)
   --out <file>        Write full JSON inventory (default: ~/.tink/cache/manage-tink-skillset-router/...)
   --stdout full|summary   What to print (default: summary)
   --all-trees         Inventory every resolved candidate tree`);
@@ -68,8 +69,8 @@ function parseArgs(argv) {
 
 function defaultLibraryRoot() {
 	const home = process.env.TINK_HOME?.trim();
-	if (home) return join(home, 'skills');
-	return join(homedir(), '.tink', 'skills');
+	if (home) return join(home, 'skillsets');
+	return join(homedir(), '.tink', 'skillsets');
 }
 
 function defaultCacheDir() {

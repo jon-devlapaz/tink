@@ -21,10 +21,6 @@ pub fn valid_skill_name(name: &str) -> bool {
     if name.is_empty() || name.len() > 64 {
         return false;
     }
-    // Reserved: home used to store the name catalog at skills/by-project/.
-    if name == "by-project" {
-        return false;
-    }
     let mut parts = name.split('-');
     let Some(first) = parts.next() else {
         return false;

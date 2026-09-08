@@ -7,9 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::error::Error;
-use crate::home::{
-    BY_PROJECT, ensure_inventory_root, existing_inventory_root, skills_library_path,
-};
+use crate::home::{ensure_inventory_root, existing_inventory_root, skills_library_path};
 use crate::paths::{map_io, mkdir_p, refuse_symlink};
 use crate::provenance::{self, Provenance};
 use crate::skills::{self, PreflightOutcome, Skill};
@@ -203,11 +201,6 @@ fn iter_library_skills(library: &Path) -> Result<Vec<Skill>, Error> {
     for entry in fs::read_dir(library).map_err(|e| map_io(library, e))? {
         let entry = entry.map_err(|e| map_io(library, e))?;
         let path = entry.path();
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if name == BY_PROJECT {
-            continue;
-        }
         if !matches!(
             crate::skillsets::classify_entry(&path),
             crate::skillsets::EntryClass::Standalone

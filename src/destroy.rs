@@ -4,7 +4,6 @@ use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
-use crate::catalog;
 use crate::error::Error;
 use crate::paths::{map_io, refuse_symlink};
 use crate::style::CliStyle;
@@ -14,21 +13,12 @@ pub struct DestroyReport {
     pub removed: Vec<PathBuf>,
 }
 
-/// Remove this project's `.agents/skills/`, then drop its by-project catalog
-/// entry. An empty `.agents/` directory is removed, but unrelated siblings are
-/// preserved. Files outside `.agents/` (including `AGENTS.md`) are untouched.
-/// Does not touch the home library. Catalog cleanup is preflighted before disk
-/// deletes; expected catalog refusals leave project files intact. Refuses
-/// symlinks. Requires `--yes` or an interactive `y` confirmation (default no).
+/// Remove this project's `.agents/skills/`. An empty `.agents/` directory is
+/// removed, but unrelated siblings are preserved. Files outside `.agents/`
+/// (including `AGENTS.md`) are untouched. Does not touch the home library.
+/// Refuses symlinks. Requires `--yes` or an interactive `y` confirmation
+/// (default no).
 pub fn destroy_project(project_root: &Path, yes: bool) -> Result<DestroyReport, Error> {
-    destroy_project_at(project_root, yes, None)
-}
-
-fn destroy_project_at(
-    project_root: &Path,
-    yes: bool,
-    catalog_home: Option<&Path>,
-) -> Result<DestroyReport, Error> {
     if !yes {
         confirm_destroy()?;
     }
@@ -54,11 +44,6 @@ fn destroy_project_at(
         }
     }
 
-    match catalog_home {
-        Some(home) => catalog::preflight_forget_project_at(Some(home), project_root)?,
-        None => catalog::preflight_forget_project(project_root)?,
-    }
-
     let mut removed = Vec::new();
     if skills.is_dir() {
         fs::remove_dir_all(&skills).map_err(|e| map_io(&skills, e))?;
@@ -72,11 +57,6 @@ fn destroy_project_at(
     {
         fs::remove_dir(&agents).map_err(|e| map_io(&agents, e))?;
         removed.push(agents);
-    }
-
-    match catalog_home {
-        Some(home) => catalog::forget_project_at(Some(home), project_root)?,
-        None => catalog::forget_project(project_root)?,
     }
 
     Ok(DestroyReport { removed })
@@ -120,15 +100,12 @@ mod tests {
     fn destroy_preserves_preexisting_project_guidance() {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path().join("project");
-        let home = temp.path().join("home");
         fs::create_dir_all(crate::home::project_skills_path(&project)).unwrap();
         let agents_body = "# Existing agent guidance\n";
         fs::write(project.join("AGENTS.md"), agents_body).unwrap();
-        catalog::deposit_skill_at(Some(&home), &project, "alpha").unwrap();
 
-        let report = destroy_project_at(&project, true, Some(&home)).unwrap();
+        let report = destroy_project(&project, true).unwrap();
         assert!(!crate::home::project_agents_path(&project).exists());
-        assert!(catalog::list_catalog(Some(&home)).unwrap().is_empty());
         assert!(
             project.join("AGENTS.md").is_file(),
             "destroy removed pre-existing AGENTS.md"
@@ -150,13 +127,11 @@ mod tests {
     fn destroy_preserves_unrelated_agents_siblings() {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path().join("project");
-        let home = temp.path().join("home");
         let agents = crate::home::project_agents_path(&project);
         fs::create_dir_all(crate::home::project_skills_path(&project)).unwrap();
         fs::write(agents.join("foreign-config.json"), b"keep\n").unwrap();
-        catalog::deposit_skill_at(Some(&home), &project, "alpha").unwrap();
 
-        destroy_project_at(&project, true, Some(&home)).unwrap();
+        destroy_project(&project, true).unwrap();
 
         assert!(!crate::home::project_skills_path(&project).exists());
         assert_eq!(
@@ -164,6 +139,5 @@ mod tests {
             b"keep\n"
         );
         assert!(agents.is_dir());
-        assert!(catalog::list_catalog(Some(&home)).unwrap().is_empty());
     }
 }

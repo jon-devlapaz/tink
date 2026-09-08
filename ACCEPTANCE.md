@@ -42,7 +42,6 @@ top-level `add` / `check` / `refresh` aliases. CLI binary updates use top-level
 | `tink init` | Create `.agents/skills/`; write `AGENTS.md` if missing; install `manage-tink` by default; optional tink-skills; ensure `~/.tink` |
 | `tink skill add <source> [--skill <name-or-path>]` | Install one local path, public GitHub skill, GitHub skill tree URL, or library skill by name; remote selectors may be unique names or repository-relative paths |
 | `tink skill list` | List project skills under `.agents/skills/` (read-only) |
-| `tink skill list --catalog` | List offline by-project catalog (`project`, `root`, `skill` TSV) |
 | `tink skill read <name> [--library] [--raw]` | Print one standalone skill's description and lifecycle metadata (read-only) |
 | `tink library list` | List standalone skill names in the library; receipt-backed skillset roots are excluded |
 | `tink skill list --library` | Compatibility alias for `tink library list` |
@@ -53,16 +52,16 @@ top-level `add` / `check` / `refresh` aliases. CLI binary updates use top-level
 | `tink skill sync` | Restore the locked project skills from their typed sources |
 | `tink skill verify` | Verify installed project skills against the manifest and lockfile |
 | `tink skill refresh [name]` | Refresh clean GitHub imports; refuse local edits |
-| `tink skill remove <name>` | Delete one project skill under `.agents/skills/<name>/` and drop that name from the by-project catalog (not library) |
-| `tink skillset add <url> [name-skillset]` | Install a skillset from a GitHub tree URL (with inferred or explicit name), create-only author its catalog definition, generate a baseline root router, and mirror to the library |
-| `tink skillset add <name>-skillset` | Install one catalog-defined, revision-pinned skillset definition as a nested project tree, generate a baseline root router if missing, and mirror it to the library |
-| `tink skillset list [--library]` | Group receipt-backed project or library skillsets with their member names (read-only) |
+| `tink skill remove <name>` | Delete one project skill under `.agents/skills/<name>/` (not library) |
+| `tink skillset add <url> [name-skillset]` | Install a skillset from a GitHub tree URL (with inferred or explicit name), create-only author its catalog definition, generate a baseline root router, and mirror to `$TINK_HOME/skillsets/` |
+| `tink skillset add <name>-skillset` | Install one catalog-defined, revision-pinned skillset definition as a nested project tree, generate a baseline root router if missing, and mirror it to `$TINK_HOME/skillsets/` |
+| `tink skillset list [--library]` | Group receipt-backed project or `$TINK_HOME/skillsets/` skillsets with their member names (read-only) |
 | `tink skillset refresh <name>-skillset` | Replace one clean installed skillset from its current pinned definition; refuse local edits |
 | `tink skillset update [name]` | Advance pinned catalog revision to upstream default branch and update project and library trees; preserves router |
 | `tink skillset remove <name>-skillset` | Delete only the installed project skillset; preserve its definition and library copy |
 | `tink inspect <GITHUB_URL>` | Inspect skills and source-defined skillsets in a public GitHub URL without writing project or home state |
 | `tink update` | Replace this binary with a newer verified public GitHub Release (requires `curl` + `tar`) |
-| `tink destroy [--yes]` | Remove `.agents/skills/` and an empty `.agents/`; preserve files outside `.agents/` (including `AGENTS.md`), unrelated `.agents/` siblings, and the library; drop this project's catalog entry |
+| `tink destroy [--yes]` | Remove `.agents/skills/` and an empty `.agents/`; preserve files outside `.agents/` (including `AGENTS.md`), unrelated `.agents/` siblings, and the library |
 
 ## On-disk contracts
 
@@ -72,9 +71,9 @@ top-level `add` / `check` / `refresh` aliases. CLI binary updates use top-level
 | Live skillsets | `<project>/.agents/skills/<name>-skillset/<member>/` with one `SKILL.md` per explicitly named member |
 | Receipt | `.tink-source.json` with exactly `source`, `revision`, `path` (non-empty strings) |
 | Home root | `$TINK_HOME` or `~/.tink` (relative `$TINK_HOME` absolutized against cwd), with `layout.json` (`kind`: `tink-skill-inventory`) |
-| Library | `skills/<name>/` skill trees copied on successful add (rebuildable collection; identical tip may install project from library; divergent → repair + warn; project overwrite still refused; not an agent discovery root) |
-| Offline catalog | `catalog/by-project/<bounded-name>-<sha256(raw-canonical-root)>/meta.json` with display `name`, `root`, raw-path `identity`, and `skills` name list; owned basename-only entries migrate on the next deposit |
-| Skillset definition | `catalog/by-skillset/<name>-skillset/meta.json` is create-only authored by `tink skillset add <url>` or externally authored desired state with `source`, immutable `revision`, repository-relative `sourceRoot`, and explicit `members` |
+| Library | `skills/<name>/` standalone skill trees copied on successful add (rebuildable collection; identical tip may install project from library; divergent → repair + warn; project overwrite still refused; not an agent discovery root) |
+| Skillsets library | `skillsets/<name>-skillset/` derived copies of validated project skillsets (project is primary; not an agent discovery root) |
+| Skillset pin | `$TINK_HOME/skillsets/<name>-skillset.json` is create-only authored by `tink skillset add <url>` or externally authored desired state with `source`, immutable `revision`, repository-relative `sourceRoot`, and explicit `members` |
 | Project manifest | `.tink/skills.toml` version 1 declares each standalone skill's `name`, typed `source`, and optional repository-relative `path` |
 | Project lock | `.tink/skills.lock` version 2; a domain-separated, length-framed SHA-256 pins path bytes, entry kind, canonical executable/non-executable mode, and contents (receipt excluded). Version 1 must be regenerated with `skill lock`. |
 | Skillset receipt | `.tink-skillset.json` digest version 2 pins the same tree semantics; `skillset refresh` is the migration path for a legacy receipt. |
@@ -90,38 +89,37 @@ Ids are stable. Tests must name or comment the id they prove.
 | I1 | `init` in empty project | Creates `.agents/skills/` as real directories (not symlinks) |
 | I2 | `init` when `.agents` is a symlink | Exit ≠ 0; mentions symlink; creates nothing unsafe |
 | I3 | `init` (non-interactive / `--no-tink-skills`) | Does **not** write `ZEN.md` or `.github/workflows/*` (may still install `manage-tink` and `AGENTS.md`) |
-| I4 | `init` with `TINK_HOME` set | Creates home root + `layout.json` + `catalog/by-project/` + `skills/` |
+| I4 | `init` with `TINK_HOME` set | Creates home root + `layout.json` + `skills/` + `skillsets/` (no `catalog/`) |
 | I5 | `init` when `AGENTS.md` is absent | Writes `AGENTS.md` stating that Tink manages skills under `.agents/skills/`; a later `init` leaves an existing `AGENTS.md` byte-identical |
-| I6 | `init` (default) | Installs `.agents/skills/manage-tink/`; catalogs `manage-tink`; copies tree into library at `skills/manage-tink/` |
+| I6 | `init` (default) | Installs `.agents/skills/manage-tink/`; copies tree into library at `skills/manage-tink/` |
 | I7 | `init --no-manage-tink` | Does **not** install `manage-tink` |
 | I8 | `init` with relative `TINK_HOME` (e.g. `../home`) from project cwd | Exit 0; home is the absolutized sibling path (not nested under the project); stdout shows an absolute home path |
 | I9 | Run non-interactive `init` twice with an unchanged project | Second run exits 0, reports `Ready` / `Already present`, and leaves project/home contract files byte-identical |
 | I10 | Run `init --with-tink-skills` against an incomplete optional bundle, repair the bundle, then rerun the same command | First run fails but preserves completed setup; second run exits 0 and converges to `manage-tink`, `skill-scout`, and `triangulate-me` |
 | I11 | Run `init` with `TINK_HOME` pointed at the non-empty project directory | Exit ≠ 0; refuses to claim the directory and leaves the project byte-identical |
-| I12 | Run `init` with a marker-only partial Tink home left by interrupted initialization | Exit 0; recreates the owned library/catalog directories and leaves a valid inventory |
+| I12 | Run `init` with a marker-only partial Tink home left by interrupted initialization | Exit 0; recreates the owned `skills/` and `skillsets/` directories and leaves a valid inventory |
 
 ### Local add
 
 | Id | Action | Expect |
 |---|---|---|
-| A1 | `skill add` valid local skill dir | Installs under `.agents/skills/<name>/`; records name in catalog; copies tree into library at `$TINK_HOME/skills/<name>/` |
+| A1 | `skill add` valid local skill dir | Installs under `.agents/skills/<name>/`; copies tree into library at `$TINK_HOME/skills/<name>/` |
 | A2 | `skill add` same skill again (byte-identical) | Success noop; project + library unchanged |
 | A3 | `skill add` when project target exists and differs | Exit ≠ 0; "Refusing to overwrite"; project target unchanged |
 | A3B | Re-add an unchanged local skill whose stale `.tink-source.json` is its only divergence | Exit 0; removes the inapplicable remote-source sidecar |
 | A4 | `skill add` skill tree containing a symlink | Exit ≠ 0; refuse |
 | A5 | `skill add` multi-skill source without `--skill` | Exit ≠ 0; lists choices |
 | A6 | `skill add` when library has same name but different tree (project missing) | Exit 0; installs project; repairs library; warns on stderr that the home copy was updated |
-| A6B | Close stderr while `skill add` emits its post-repair warning | Exit 0 after the completed project/library/catalog mutation; advisory output failure cannot create retry ambiguity |
-| A7 | `skill add` skill named `by-project` | Exit ≠ 0; reserved name; no project/library write |
+| A6B | Close stderr while `skill add` emits its post-repair warning | Exit 0 after the completed project/library mutation; advisory output failure cannot create retry ambiguity |
+| A7 | `skill add` skill named `by-project` | Exit 0; installs project + library (name no longer reserved after catalog removal) |
 | A8 | `skill add` same GitHub tip already in library | Exit 0; installs project from library (no clone); stdout notes library |
-| A9 | `skill add` when catalog metadata is malformed, repair the catalog, then rerun the same command | First run fails after preserving valid project/library copies; second run exits 0, catalogs the skill, and leaves those copies byte-identical |
-| A10 | `skill add` from a direct symlink or a symlinked child under `skills/` | Exit ≠ 0; mentions symlink; creates no project, library, or catalog entry for that skill |
-| A11 | `skill add` when the matching project target is a symlink | Exit ≠ 0; leaves the symlink untouched; creates no library or catalog entry |
+| A10 | `skill add` from a direct symlink or a symlinked child under `skills/` | Exit ≠ 0; mentions symlink; creates no project or library entry for that skill |
+| A11 | `skill add` when the matching project target is a symlink | Exit ≠ 0; leaves the symlink untouched; creates no library entry |
 | A12 | `skill add` with `TINK_HOME` pointed at an unrelated non-empty directory | Exit ≠ 0; refuses to claim the directory and leaves its existing files byte-identical |
 | A13 | `skill add owner/repo` when one non-root remote skill at the same tip is already in the library | Exit 0 without cloning; installs from library and reports that source |
 | A14 | `skill add` regular executable and non-executable files | Preserves executable semantics in project and library using portable `0o755`/`0o644` modes while stripping special bits and umask-only variation |
 | A15 | `skill add` a tree with two distinct non-UTF-8 Unix filenames | On filesystems that admit opaque names, preserves both names and their distinct contents in project and library; macOS/APFS may reject the fixture before Tink writes |
-| A16 | `skill add` a standalone-looking source with a regular or dangling `.tink-skillset.json` entry | Exit ≠ 0 before project, home, library, or catalog creation; direct the user to `tink skillset add NAME` |
+| A16 | `skill add` a standalone-looking source with a regular or dangling `.tink-skillset.json` entry | Exit ≠ 0 before project, home, or library creation; direct the user to `tink skillset add NAME` |
 
 ### Standalone promotion
 
@@ -140,36 +138,37 @@ Ids are stable. Tests must name or comment the id they prove.
 | R3 | `skill add ./missing-skill` (path-like, absent) | Exit ≠ 0; "Path does not exist"; **no** GitHub network fetch |
 | R4 | `skill add /abs/missing` | Exit ≠ 0; "Path does not exist" |
 | R5 | `skill add owner/repo` when `SKILL.md` is at repo root | Receipt `path` is `"."` (non-empty); `skill check` passes; `skill refresh` updates from repo root |
-| R6 | `skill add owner/repo --skill <unique-name>` when the skill is nested below a nonstandard wrapper | Installs the unique recursive match; receipt records its exact repository-relative path; catalog, library, and `skill check` are valid |
-| R7 | `skill add owner/repo --skill <duplicate-name>` with multiple recursive matches | Exit ≠ 0 before project/library/catalog writes; lists every matching repository-relative path |
+| R6 | `skill add owner/repo --skill <unique-name>` when the skill is nested below a nonstandard wrapper | Installs the unique recursive match; receipt records its exact repository-relative path; library and `skill check` are valid |
+| R7 | `skill add owner/repo --skill <duplicate-name>` with multiple recursive matches | Exit ≠ 0 before project/library writes; lists every matching repository-relative path |
 | R8 | `skill add owner/repo --skill <repository-relative-path>` | Installs exactly that nested skill; receipt preserves the path and `skill refresh` follows it on the remote default branch |
 | R9 | A matching library copy exists for one of several same-name remote skills | Name-only add still checks the repository and refuses ambiguity; the cache cannot choose a path implicitly |
 | R10 | A canonical nested skill and a directory/name-mismatched `SKILL.md` declare the same name | Name selection ignores the malformed candidate and installs the one valid tree; inspection may still diagnose both |
 | R11 | Root and nested skills share a name, then `--skill .` selects the listed root path | Installs the root skill and records receipt path `"."` |
 | R12 | `skill add tink:embedded/manage-tink` through the free-form add boundary | Exit ≠ 0; embedded lock sources are not accepted as remote add sources |
 | R13 | `skill add` a GitHub skill tree URL | Installs that skill directory; receipt `source` is the canonical repository URL, `path` is the tree path, and `skill refresh` follows the remote default branch at that path |
-| R14 | `skill add` a GitHub tree URL that is not itself a skill | Exit ≠ 0 before project/library/catalog writes; lists skill paths under that boundary |
-| R15 | `skill add` a GitHub tree URL whose ref contains `/` | Exit ≠ 0; refuse the ambiguous URL; no project/library/catalog writes |
+| R14 | `skill add` a GitHub tree URL that is not itself a skill | Exit ≠ 0 before project/library writes; lists skill paths under that boundary |
+| R15 | `skill add` a GitHub tree URL whose ref contains `/` | Exit ≠ 0; refuse the ambiguous URL; no project/library writes |
 
 ### Skillsets
 
 | Id | Action | Expect |
 |---|---|---|
-| K1 | `skillset add <name>-skillset` with `$TINK_HOME/catalog/by-skillset/<name>-skillset/meta.json` | Installs the pinned members under `.agents/skills/<name>-skillset/`, writes a mode-aware digest-version-2 receipt, validates the project, then mirrors that exact tree to `$TINK_HOME/skills/<name>-skillset/`; matching re-add is a no-op; library drift is repaired from the valid project |
-| K1B | Skillset root `SKILL.md` router added after `skillset add` | Root router is ignored by the receipt digest, `skill check` stays clean, re-add mirrors the router to the library, and `skillset refresh` preserves the router while updating members |
-| K2 | `skillset remove <name>-skillset` after K1 | Removes only the project skillset tree; preserves the shared catalog definition and home library copy; `skill remove` refuses the skillset root. Sensor: K1. |
-| K3 | `skillset list [--library]` after K1 | Groups each receipt-backed project or library skillset with its member skill names without network or writes. Sensor: K1. |
+| K1 | `skillset add <name>-skillset` with `$TINK_HOME/skillsets/<name>-skillset.json` | Installs the pinned members under `.agents/skills/<name>-skillset/`, writes a mode-aware digest-version-2 receipt, validates the project, then mirrors that exact tree to `$TINK_HOME/skillsets/<name>-skillset/`; matching re-add is a no-op; skillsets-library drift is repaired from the valid project |
+| K1B | Skillset root `SKILL.md` router added after `skillset add` | Root router is ignored by the receipt digest, `skill check` stays clean, re-add mirrors the router to `$TINK_HOME/skillsets/`, and `skillset refresh` preserves the router while updating members |
+| K1C | Installed skillset with root `SKILL.md` deleted | `skill check` exits ≠ 0 citing missing router; clean `skillset refresh`/`add` restores the library router when present, otherwise regenerates a baseline; elevated routers survive member-clean restore |
+| K2 | `skillset remove <name>-skillset` after K1 | Removes only the project skillset tree; preserves the shared pin file and home skillsets copy; `skill remove` refuses the skillset root. Sensor: K1. |
+| K3 | `skillset list [--library]` after K1 | Groups each receipt-backed project or `$TINK_HOME/skillsets/` skillset with its member skill names without network or writes. Sensor: K1. |
 | K3B | Two skillsets; drift one tree; `skillset list` then `skill check` | List exits 0 and shows both trees (healthy members + mismatch on the dirty tree). Check prints valid counts then exits ≠ 0 with digest mismatch. Refresh of the clean tree still succeeds. |
 | K4 | Any skillset command receives an invalid skillset name | Exit ≠ 0; clear invalid-name error; no skillset tree written |
-| K5 | `skillset add` finds an ordinary or unowned library entry at the canonical name | Exit ≠ 0 before network/project publication; preserve the library entry |
+| K5 | `skillset add` finds an ordinary or unowned entry at `$TINK_HOME/skillsets/<name>-skillset/` | Exit ≠ 0 before network/project publication; preserve that skillsets-library entry |
 | K6 | `skillset remove` finds a missing or invalid receipt | Exit ≠ 0; preserve the complete project directory |
-| K7 | `skillset list` or `add` runs before project/catalog setup | List explains how to initialize; missing catalog leaves the project untouched |
+| K7 | `skillset list` or `add` runs before project/pin setup | List explains how to initialize; missing pin leaves the project untouched |
 | K8 | Re-add a valid unchanged project skillset while its remote is unavailable | Succeeds offline as unchanged and synchronizes the library from the project |
 | K9 | `skill check` / `skill list` with grouped members only | Check reports standalone, skillset, and member counts; list says there are no standalone skills and points to `skillset list` |
-| K10 | `skillset refresh <name>-skillset` after the pinned catalog definition changes | Stages and rename-replaces the clean project tree with best-effort rollback, then mirrors the validated result to the library; refuses local project modifications |
+| K10 | `skillset refresh <name>-skillset` after the pinned definition changes | Stages and rename-replaces the clean project tree with best-effort rollback, then mirrors the validated result to `$TINK_HOME/skillsets/`; refuses local project modifications |
 | K11 | A declared member folder and its `SKILL.md` name differ | Exit ≠ 0 before project or library publication; explain the name mismatch |
-| K12 | `skillset add <url> [name-skillset]` with inferred or explicit name | Create-only authors catalog meta.json with resolved immutable Git SHA; direct-boundary discovers members skipping non-skills; aborts on corrupt member frontmatter; generates verify-clean baseline router SKILL.md; mirrors to library; idempotent re-add reports Unchanged; read-only preview via `inspect` leaves project, catalog, and library untouched |
-| K13 | `skillset update [name]` to advance pinned catalog revision | Queries upstream remote; advances catalog meta.json to new immutable tip SHA; discovers new members; preserves router; replaces project tree; mirrors to library; reports Unchanged if already at tip; refuses on local modifications |
+| K12 | `skillset add <url> [name-skillset]` with inferred or explicit name | Create-only authors `$TINK_HOME/skillsets/<name>.json` with resolved immutable Git SHA; direct-boundary discovers members skipping non-skills; aborts on corrupt member frontmatter; generates verify-clean baseline router SKILL.md; mirrors to `$TINK_HOME/skillsets/`; idempotent re-add reports Unchanged; read-only preview via `inspect` leaves project, pin, and skillsets library untouched |
+| K13 | `skillset update [name]` to advance pinned revision | Queries upstream remote; advances `$TINK_HOME/skillsets/<name>.json` to new immutable tip SHA; discovers new members; preserves router; replaces project tree; mirrors to `$TINK_HOME/skillsets/`; reports Unchanged if already at tip; refuses on local modifications |
 
 ### GitHub inspection
 
@@ -213,8 +212,8 @@ Ids are stable. Tests must name or comment the id they prove.
 | M4 | `skill sync` after deleting locked embedded `manage-tink` | Restores the embedded skill; subsequent `skill verify` succeeds |
 | M5 | `skill sync` after a slash-containing local source disappears | Exit ≠ 0 as a missing local path; does not reinterpret it as GitHub shorthand |
 | M6 | `skill verify` without a project manifest | Exit ≠ 0; reports the missing manifest |
-| M7 | `skill sync` with a bad hash on a later locked skill | Exit ≠ 0 before any project, library, or catalog publication for earlier skills |
-| M8 | `skill sync` with a symlink or unsafe library target for a later locked skill | Exit ≠ 0 before publishing any earlier project, library, or catalog entry |
+| M7 | `skill sync` with a bad hash on a later locked skill | Exit ≠ 0 before any project, library, or publication for earlier skills |
+| M8 | `skill sync` with a symlink or unsafe library target for a later locked skill | Exit ≠ 0 before publishing any earlier project, library, or entry |
 | M9 | `skill verify` with a version-1 lockfile, followed by `skill lock` | Verify refuses the legacy ambiguous digest with an actionable relock instruction; lock rewrites version 2 and verify succeeds |
 
 ### List
@@ -223,16 +222,10 @@ Ids are stable. Tests must name or comment the id they prove.
 |---|---|---|
 | L1 | `skill list` after `init` | Exit 0; stdout includes `manage-tink` |
 | L2 | `skill list` without `.agents/skills` | Exit ≠ 0 |
-| L3 | `skill list --catalog` after init+add | Exit 0; header `project\\troot\\tskill` plus three-column TSV rows for cataloged skills |
-| L5 | `skill list --stash` or `skill list --home` | Exit ≠ 0; stderr mentions the flag or unexpected argument (removed in 0.3.0; use `--library` / `--catalog`) |
-| L6 | `skill list --catalog` with valid and malformed project metadata | Exit 0; lists valid rows and omits malformed entries |
+| L5 | `skill list --stash` or `skill list --home` | Exit ≠ 0; stderr mentions the flag or unexpected argument (removed; use `--library`) |
 | L7 | Insert a nested symlink into an installed standalone skill, then run `skill list` and `skill check` | Both exit ≠ 0 and mention the symlink; the installed tree is untouched |
-| L8 | `skill list --library` or `--catalog` with an existing non-empty unmarked `TINK_HOME` | Exit ≠ 0; refuses the unrelated directory and leaves it byte-identical |
-| L9 | `skill list --library` or `--catalog` when the corresponding direct home owner (`skills/` or `catalog/`) is a symlink | Exit ≠ 0; refuses the symlink without following or replacing it |
-| L10 | Two projects share a basename and use one Tink home | Both retain distinct catalog identities and appear with their own canonical root and skills |
-| L11 | A project directory name begins with `.` | Its hashed catalog identity remains visible in `skill list --catalog`; hidden project names are not mistaken for staging entries |
-| L12 | A cataloged project name or root contains tab, CR, LF, backslash, or another terminal control | `skill list --catalog` emits visible backslash escapes (including `\\t`, `\\r`, `\\n`, `\\\\`, and `\\x1b`); every data row remains exactly three TSV columns and contains no raw terminal controls |
-| L13 | `skill list --catalog` with no catalog entries | Exit 0; emits the TSV header and no data rows |
+| L8 | `skill list --library` with an existing non-empty unmarked `TINK_HOME` | Exit ≠ 0; refuses the unrelated directory and leaves it byte-identical |
+| L9 | `skill list --library` when `$TINK_HOME/skills/` is a symlink | Exit ≠ 0; refuses the symlink without following or replacing it |
 | L14 | Compare `library list` with `skill list --library` | Both exit 0 with identical stdout and stderr |
 
 ### Read
@@ -259,7 +252,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | Id | Action | Expect |
 |---|---|---|
 | H1 | `library list` after init+add | Exit 0; stdout includes library skill names (at least the added skill) |
-| H2 | `skill add <name>` when library has that skill and project lacks it | Exit 0; installs under `.agents/skills/<name>/`; catalogs name; **no** network; stdout notes library |
+| H2 | `skill add <name>` when library has that skill and project lacks it | Exit 0; installs under `.agents/skills/<name>/`; **no** network; stdout notes library |
 | H3 | `skill add <missing-bare-name>` | Exit ≠ 0; mentions library not found / missing; **no** GitHub network fetch |
 | H4 | `skill add <name>` when library has skill and project skill exists and differs | Exit ≠ 0; "Refusing to overwrite"; project target unchanged |
 | H5 | `skill harvest` with fixture `$HOME/.agents/skills` + `$HOME/.claude/skills` + `TINK_HOME` | Copies complete skill trees into `$TINK_HOME/skills/`; no project `.agents` skill writes from harvest |
@@ -283,7 +276,7 @@ Ids are stable. Tests must name or comment the id they prove.
 | V4 | Close stdout before a successful listing command writes | Exit 0; no panic and no exit 101 |
 | V5 | Close stderr while an underlying command fails | Exit 1; diagnostic delivery failure does not hide the command failure |
 | V6 | Close `install.sh` stdout after a verified installation reaches advisory reporting | Exit 0 with the verified destination intact; broken advisory output cannot turn completed installation into retry ambiguity |
-| V7 | Trigger a catalog failure from a path containing terminal control characters | Exit ≠ 0; stderr renders controls as visible escapes and remains one stable output row |
+| V7 | Trigger a home-owner failure from a path containing terminal control characters | Exit ≠ 0; stderr renders controls as visible escapes and remains one stable output row |
 
 ### Refresh
 
@@ -297,9 +290,9 @@ Ids are stable. Tests must name or comment the id they prove.
 | P6 | `skill refresh` when upstream revision moves but skill tree bytes match | Exit 0; bumps project + library receipts |
 | P7 | `skill refresh` when project already at HEAD but library is stale | Exit 0; repairs library from project |
 | P8 | `skill refresh` for all when a later imported skill has local modifications | Exit ≠ 0; no project skill is updated |
-| P9 | `skill refresh manage-tink` when the embedded copy is missing | Installs the active binary's copy; reconciles library and catalog; subsequent `skill check` passes |
-| P10 | `skill refresh manage-tink` when the embedded copy already matches the active binary | Exit 0 with `Unchanged`; reconciles library and catalog; project tree remains identical |
-| P11 | `skill refresh manage-tink` when a receipt-free reserved copy differs from the active binary | Atomically replaces it with the active binary's copy; reconciles library and catalog; subsequent `skill check` passes |
+| P9 | `skill refresh manage-tink` when the embedded copy is missing | Installs the active binary's copy; reconciles library; subsequent `skill check` passes |
+| P10 | `skill refresh manage-tink` when the embedded copy already matches the active binary | Exit 0 with `Unchanged`; reconciles library; project tree remains identical |
+| P11 | `skill refresh manage-tink` when a receipt-free reserved copy differs from the active binary | Atomically replaces it with the active binary's copy; reconciles library; subsequent `skill check` passes |
 | P12 | `skill refresh manage-tink` when the same-named skill has remote provenance | Exit ≠ 0; reports the provenance collision; user-owned tree remains byte-identical |
 | P13 | `skill refresh manage-tink` when the project copy is missing and the same-named library skill has remote provenance | Exit ≠ 0 before publication; project remains missing; library tree and receipt remain byte-identical |
 | P14 | `skill refresh manage-tink` when a current or stale receipt-free project copy exists and the same-named library skill has remote provenance | Exit ≠ 0 before publication; project trees plus library tree and receipt remain byte-identical |
@@ -342,22 +335,19 @@ Ids are stable. Tests must name or comment the id they prove.
 
 | Id | Action | Expect |
 |---|---|---|
-| X1 | `skill remove <name>` after init+add | Exit 0; project `.agents/skills/<name>/` gone; `skill list` omits name; library `$TINK_HOME/skills/<name>/` still present; `skill list --catalog` omits that skill for the project (siblings may remain) |
+| X1 | `skill remove <name>` after init+add | Exit 0; project `.agents/skills/<name>/` gone; `skill list` omits name; library `$TINK_HOME/skills/<name>/` still present |
 | X2 | `skill remove <missing>` | Exit ≠ 0; mentions not found / missing; nothing deleted |
 | X3 | `skill remove` when `.agents` is a symlink | Exit ≠ 0; mentions symlink; tree unchanged |
 | X4 | Successful `skill remove <name>` | Does **not** delete `$TINK_HOME/skills/<name>/` |
-| X5 | `init` installs `manage-tink` | Embedded skill covers standalone lifecycle, operation-specific proof and partial-state reporting, project-contained lock sources, session-versus-persistent completion authority, any-update refresh warning, library/catalog effects, skillsets, update, and destroy |
-| X6 | `skill remove <name>` when that project's catalog metadata is malformed | Exit ≠ 0; project and library skill trees remain intact |
-| X7 | `skill remove <name>` when `$TINK_HOME/catalog` is a symlink | Exit ≠ 0; mentions the symlink; project skill and external catalog target remain byte-identical |
+| X5 | `init` installs `manage-tink` | Embedded skill covers standalone lifecycle, operation-specific proof and partial-state reporting, project-contained lock sources, session-versus-persistent completion authority, any-update refresh warning, library effects, skillsets, update, and destroy |
 
 ### Destroy
 
 | Id | Action | Expect |
 |---|---|---|
-| D1 | `destroy --yes` after `init` (extra skill allowed) | Removes `.agents/skills/` and the now-empty `.agents/`; preserves `AGENTS.md` byte-for-byte; leaves library + `layout.json` intact; drops this project's catalog entry |
+| D1 | `destroy --yes` after `init` (extra skill allowed) | Removes `.agents/skills/` and the now-empty `.agents/`; preserves `AGENTS.md` byte-for-byte; leaves library + `layout.json` intact |
 | D2 | `destroy` without `--yes` (non-TTY) | Exit ≠ 0; refuses without confirmation; project files unchanged |
 | D3 | `destroy --yes` when `.agents` is a symlink | Exit ≠ 0; mentions symlink |
-| D4 | `destroy --yes` when `$TINK_HOME/catalog` is a symlink | Exit ≠ 0; mentions the symlink; project scaffolding and external catalog target remain byte-identical |
 | D5 | `destroy --yes` when `.agents/` contains an unrelated sibling | Removes `.agents/skills/`, preserves the sibling byte-for-byte, and leaves `.agents/` in place |
 
 ### Update (CLI binary)
