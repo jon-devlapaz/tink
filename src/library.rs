@@ -205,13 +205,13 @@ fn iter_library_skills(library: &Path) -> Result<Vec<Skill>, Error> {
         let path = entry.path();
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if name == BY_PROJECT || name.starts_with('.') || name == "README.md" {
+        if name == BY_PROJECT {
             continue;
         }
-        if path.is_symlink() || !path.is_dir() {
-            continue;
-        }
-        if crate::skillsets::has_receipt_entry(&path) {
+        if !matches!(
+            crate::skillsets::classify_entry(&path),
+            crate::skillsets::EntryClass::Standalone
+        ) {
             continue;
         }
         if let Ok(skill) = skills::read_skill(&path, true) {

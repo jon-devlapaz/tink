@@ -8,23 +8,20 @@ use crate::paths::{map_io, refuse_symlink};
 use crate::provenance;
 use crate::skills::{self, Skill};
 
-fn is_ignored_skill_entry(name: &str) -> bool {
-    name == "README.md" || name.starts_with('.')
-}
-
 fn read_skill_entry(path: &Path, strict_manage_tink: bool) -> Result<Option<Skill>, Error> {
     let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-    if is_ignored_skill_entry(name) {
-        return Ok(None);
-    }
-    if path.is_symlink() || !path.is_dir() {
-        return Err(Error::msg(format!(
-            "Unexpected entry in .agents/skills: {name}"
-        )));
-    }
-    if crate::skillsets::has_receipt_entry(path) {
-        crate::skillsets::validate_installed(path)?;
-        return Ok(None);
+    match crate::skillsets::classify_entry(path) {
+        crate::skillsets::EntryClass::Ignored => return Ok(None),
+        crate::skillsets::EntryClass::Unexpected => {
+            return Err(Error::msg(format!(
+                "Unexpected entry in .agents/skills: {name}"
+            )));
+        }
+        crate::skillsets::EntryClass::Skillset => {
+            crate::skillsets::validate_installed(path)?;
+            return Ok(None);
+        }
+        crate::skillsets::EntryClass::Standalone => {}
     }
     let skill = skills::read_skill(path, true)?;
     skills::validate_skill_tree(path)?;

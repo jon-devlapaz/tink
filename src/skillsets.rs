@@ -53,6 +53,40 @@ pub(crate) fn ensure_standalone_source(path: &Path, name: &str) -> Result<(), Er
     Ok(())
 }
 
+/// How one entry under a skills root classifies for standalone handling.
+///
+/// Classification only: ignored names stay silent in every listing, a receipt
+/// entry claims the root before its contents are trusted, and each caller maps
+/// `Unexpected` to its own outcome (refusal or skip) with its own message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EntryClass {
+    /// `README.md` or a dotfile: silently skipped by every listing.
+    Ignored,
+    /// Symlink or non-directory: refused by validation, skipped by listings.
+    Unexpected,
+    /// Skillset receipt entry: owned by the skillset lifecycle.
+    Skillset,
+    /// Candidate standalone skill directory.
+    Standalone,
+}
+
+pub(crate) fn classify_entry(path: &Path) -> EntryClass {
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
+    if name == "README.md" || name.starts_with('.') {
+        return EntryClass::Ignored;
+    }
+    if path.is_symlink() || !path.is_dir() {
+        return EntryClass::Unexpected;
+    }
+    if has_receipt_entry(path) {
+        return EntryClass::Skillset;
+    }
+    EntryClass::Standalone
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LibraryWrite {
     Created,
@@ -1108,20 +1142,21 @@ pub fn list_installed(project_root: &Path) -> Result<Vec<ListedSkillset>, Error>
             .file_name()
             .and_then(|value| value.to_str())
             .unwrap_or("");
-        if name == "README.md" || name.starts_with('.') {
-            continue;
-        }
-        if path.is_symlink() || !path.is_dir() {
-            return Err(Error::msg(format!(
-                "Unexpected entry in .agents/skills: {name}"
-            )));
-        }
-        if has_receipt_entry(&path) {
-            let installed = read_installed(&path)?;
-            skillsets.push(ListedSkillset {
-                name: installed.name,
-                members: installed.receipt.members,
-            });
+        match classify_entry(&path) {
+            EntryClass::Ignored => continue,
+            EntryClass::Unexpected => {
+                return Err(Error::msg(format!(
+                    "Unexpected entry in .agents/skills: {name}"
+                )));
+            }
+            EntryClass::Skillset => {
+                let installed = read_installed(&path)?;
+                skillsets.push(ListedSkillset {
+                    name: installed.name,
+                    members: installed.receipt.members,
+                });
+            }
+            EntryClass::Standalone => {}
         }
     }
     skillsets.sort_by(|left, right| left.name.cmp(&right.name));
@@ -1377,6 +1412,41 @@ mod tests {
         fs::remove_file(&receipt).unwrap();
         std::os::unix::fs::symlink(root.path().join("missing"), &receipt).unwrap();
         assert!(has_receipt_entry(root.path()));
+    }
+
+    #[test]
+    fn classify_entry_sorts_listing_entries() {
+        let root = tempfile::tempdir().unwrap();
+
+        assert_eq!(
+            classify_entry(&root.path().join("README.md")),
+            EntryClass::Ignored
+        );
+        assert_eq!(
+            classify_entry(&root.path().join(".hidden")),
+            EntryClass::Ignored
+        );
+
+        let file = root.path().join("notes.txt");
+        fs::write(&file, "notes").unwrap();
+        assert_eq!(classify_entry(&file), EntryClass::Unexpected);
+
+        let plain = root.path().join("demo-skill");
+        fs::create_dir(&plain).unwrap();
+        assert_eq!(classify_entry(&plain), EntryClass::Standalone);
+
+        let link = root.path().join("linked-skill");
+        std::os::unix::fs::symlink(&plain, &link).unwrap();
+        assert_eq!(classify_entry(&link), EntryClass::Unexpected);
+
+        let owned = root.path().join("demo-skillset");
+        fs::create_dir(&owned).unwrap();
+        fs::write(owned.join(RECEIPT_FILE), "receipt").unwrap();
+        assert_eq!(classify_entry(&owned), EntryClass::Skillset);
+
+        fs::remove_file(owned.join(RECEIPT_FILE)).unwrap();
+        std::os::unix::fs::symlink(owned.join("missing"), owned.join(RECEIPT_FILE)).unwrap();
+        assert_eq!(classify_entry(&owned), EntryClass::Skillset);
     }
 
     #[test]

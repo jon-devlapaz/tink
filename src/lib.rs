@@ -262,13 +262,10 @@ fn project_standalone_completion_names(cwd: &Path) -> Vec<String> {
         let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
             continue;
         };
-        if name == "README.md" || name.starts_with('.') {
-            continue;
-        }
-        if path.is_symlink() || !path.is_dir() {
-            continue;
-        }
-        if skillsets::has_receipt_entry(&path) {
+        if !matches!(
+            skillsets::classify_entry(&path),
+            skillsets::EntryClass::Standalone
+        ) {
             continue;
         }
         if skills::valid_skill_name(&name) {
