@@ -109,7 +109,13 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let skill = temp.path().join(".agents/skills/demo-skill");
         write_skill(&skill);
-        let _socket = std::os::unix::net::UnixListener::bind(skill.join("socket")).unwrap();
+        // FIFO, not a Unix socket: socket bind is denied in some sandboxes
+        // while mkfifo is allowed, and both hit the same "special file" branch.
+        let status = std::process::Command::new("mkfifo")
+            .arg(skill.join("fifo"))
+            .status()
+            .unwrap();
+        assert!(status.success(), "mkfifo fixture failed: {status}");
 
         let err = load_project_skills(temp.path()).unwrap_err();
 
