@@ -1566,9 +1566,7 @@ mod tests {
             fs::create_dir_all(&member_dir).unwrap();
             fs::write(
                 member_dir.join("SKILL.md"),
-                format!(
-                    "---\nname: {member}\ndescription: Fixture for {member}.\n---\n\n{body}\n"
-                ),
+                format!("---\nname: {member}\ndescription: Fixture for {member}.\n---\n\n{body}\n"),
             )
             .unwrap();
             let digest = skills::tree_digest(&root, DIGEST_ROOT_IGNORE).unwrap();
@@ -1584,9 +1582,7 @@ mod tests {
             fs::write(root.join(RECEIPT_FILE), format!("{text}\n")).unwrap();
             fs::write(
                 root.join(ROUTER_FILE),
-                format!(
-                    "---\nname: {name}\ndescription: Router for {name}.\n---\n\n# Router\n"
-                ),
+                format!("---\nname: {name}\ndescription: Router for {name}.\n---\n\n# Router\n"),
             )
             .unwrap();
             root
@@ -1605,7 +1601,11 @@ mod tests {
         assert!(listed[0].error.is_none(), "{:?}", listed[0]);
         assert_eq!(listed[0].name, "alpha-skillset");
         assert!(
-            listed[1].error.as_ref().unwrap().contains("digest mismatch"),
+            listed[1]
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("digest mismatch"),
             "{:?}",
             listed[1]
         );

@@ -7,9 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::error::Error;
-use crate::home::{
-    ensure_inventory_root, existing_inventory_root, skills_library_path,
-};
+use crate::home::{ensure_inventory_root, existing_inventory_root, skills_library_path};
 use crate::paths::{map_io, mkdir_p, refuse_symlink};
 use crate::provenance::{self, Provenance};
 use crate::skills::{self, PreflightOutcome, Skill};

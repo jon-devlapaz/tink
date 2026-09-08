@@ -53,7 +53,6 @@ impl Workspace {
         project.join(".agents").join("skills").join(name)
     }
 
-
     fn library_skill(&self, skill: &str) -> PathBuf {
         self.inventory.join("skills").join(skill)
     }
@@ -67,7 +66,6 @@ impl Workspace {
             .join("skillsets")
             .join(format!("{name}.json"))
     }
-
 }
 
 fn write_skill(path: &Path, name: &str, body: &str) {
@@ -621,7 +619,11 @@ fn a7_add_accepts_formerly_reserved_by_project_name() {
         .args(["skill", "add", source.to_str().unwrap()])
         .assert()
         .success();
-    assert!(Workspace::skill_path(&project, "by-project").join("SKILL.md").is_file());
+    assert!(
+        Workspace::skill_path(&project, "by-project")
+            .join("SKILL.md")
+            .is_file()
+    );
     assert!(ws.library_skill("by-project").join("SKILL.md").is_file());
 }
 
@@ -819,7 +821,6 @@ fn a13_add_uses_library_for_non_root_skill_without_cloning() {
             .is_file()
     );
 }
-
 
 #[test]
 fn a10_add_refuses_symlinked_skill_roots() {
@@ -1196,16 +1197,8 @@ fn k3b_skillset_list_and_check_report_all_trees_when_one_mismatches() {
 
     let repository = ws.root.join("skillset-repo");
     init_repo(&repository);
-    write_skill(
-        &repository.join("bundles/alpha/one"),
-        "one",
-        "alpha member",
-    );
-    write_skill(
-        &repository.join("bundles/zeta/two"),
-        "two",
-        "zeta member",
-    );
+    write_skill(&repository.join("bundles/alpha/one"), "one", "alpha member");
+    write_skill(&repository.join("bundles/zeta/two"), "two", "zeta member");
     let revision = commit_all(&repository, "skillsets");
     let source = "https://github.com/example/skillsets.git";
     write_skillset_meta(
@@ -1397,8 +1390,7 @@ fn k1c_missing_router_fails_check_and_is_restored_by_refresh() {
         .success();
 
     let installed = Workspace::skill_path(&project, "common-skillset");
-    let elevated =
-        "---\nname: common-skillset\ndescription: Elevated router for common-skillset.\n---\n\n# Elevated\n";
+    let elevated = "---\nname: common-skillset\ndescription: Elevated router for common-skillset.\n---\n\n# Elevated\n";
     fs::write(installed.join("SKILL.md"), elevated).unwrap();
     ws.cmd(&project)
         .args(["skillset", "add", "common-skillset"])
@@ -3821,11 +3813,6 @@ fn l2_skill_list_fails_without_skills_dir() {
         .stderr(predicate::str::contains(".agents/skills"));
 }
 
-
-
-
-
-
 #[test]
 fn l5_skill_list_rejects_removed_stash_and_home_flags() {
     let ws = Workspace::new();
@@ -3919,7 +3906,6 @@ fn l9_skill_list_refuses_symlinked_home_owner_directories() {
         assert!(outside.is_dir());
     }
 }
-
 
 // --- RD*: skill read ---
 
@@ -5662,7 +5648,6 @@ fn d3_destroy_refuses_agents_symlink() {
     assert!(project.join(".agents").is_symlink());
 }
 
-
 #[test]
 fn d5_destroy_preserves_unrelated_agents_siblings() {
     let ws = Workspace::new();
@@ -5940,8 +5925,6 @@ fn x5_manage_tink_documents_remove_and_lifecycle() {
         "commands.md must leave volatile harvest-root ownership with the CLI: {commands}"
     );
 }
-
-
 
 // --- S*: safety ---
 

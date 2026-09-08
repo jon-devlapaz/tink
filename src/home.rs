@@ -308,7 +308,9 @@ mod tests {
         );
         assert_ne!(
             pin,
-            skillsets_library_path(home).join("common-skillset").join("meta.json")
+            skillsets_library_path(home)
+                .join("common-skillset")
+                .join("meta.json")
         );
     }
 
