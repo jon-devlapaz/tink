@@ -297,11 +297,8 @@ pub(crate) fn refresh_all_at(home: Option<&Path>, root: &Path) -> Result<Vec<Str
     let mut refreshed = Vec::new();
     for plan in plans {
         let name = plan.name().to_string();
-        match apply_refresh(home, root, plan)? {
-            Some(true) => {
-                refreshed.push(name);
-            }
-            Some(false) | None => {}
+        if let Some(true) = apply_refresh(home, root, plan)? {
+            refreshed.push(name);
         }
     }
     Ok(refreshed)
