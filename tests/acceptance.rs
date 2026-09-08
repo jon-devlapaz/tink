@@ -3871,16 +3871,14 @@ fn l8_skill_list_refuses_unmarked_existing_home_without_writes() {
     fs::write(&readme, "# Important unrelated directory\n").unwrap();
     let before = fs::read(&readme).unwrap();
 
-    for mode in ["--library"] {
-        Command::cargo_bin("tink")
-            .unwrap()
-            .current_dir(&project)
-            .env("TINK_HOME", &home)
-            .args(["skill", "list", mode])
-            .assert()
-            .failure()
-            .stderr(predicate::str::contains("Tink home"));
-    }
+    Command::cargo_bin("tink")
+        .unwrap()
+        .current_dir(&project)
+        .env("TINK_HOME", &home)
+        .args(["skill", "list", "--library"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Tink home"));
 
     assert_eq!(fs::read(&readme).unwrap(), before);
     assert_eq!(fs::read_dir(&home).unwrap().count(), 1);
@@ -3888,23 +3886,21 @@ fn l8_skill_list_refuses_unmarked_existing_home_without_writes() {
 
 #[test]
 fn l9_skill_list_refuses_symlinked_home_owner_directories() {
-    for (owner, mode) in [("skills", "--library")] {
-        let ws = Workspace::new();
-        let project = ws.project("app");
-        ws.initialize_inventory();
-        let owned = ws.inventory.join(owner);
-        let outside = ws.root.join(format!("outside-{owner}"));
-        fs::rename(&owned, &outside).unwrap();
-        std::os::unix::fs::symlink(&outside, &owned).unwrap();
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.initialize_inventory();
+    let owned = ws.inventory.join("skills");
+    let outside = ws.root.join("outside-skills");
+    fs::rename(&owned, &outside).unwrap();
+    std::os::unix::fs::symlink(&outside, &owned).unwrap();
 
-        ws.cmd(&project)
-            .args(["skill", "list", mode])
-            .assert()
-            .failure()
-            .stderr(predicate::str::contains("symlink"));
-        assert!(owned.is_symlink());
-        assert!(outside.is_dir());
-    }
+    ws.cmd(&project)
+        .args(["skill", "list", "--library"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("symlink"));
+    assert!(owned.is_symlink());
+    assert!(outside.is_dir());
 }
 
 // --- RD*: skill read ---
