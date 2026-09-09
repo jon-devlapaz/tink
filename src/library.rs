@@ -51,16 +51,6 @@ pub struct PromotionOutcome {
 
 const PROMOTION_IGNORED_ROOTS: &[&str] = &[".git", provenance::SIDECAR_FILE, ".tink-skillset.json"];
 
-fn clear_path(target: &Path) -> Result<(), Error> {
-    refuse_symlink(target)?;
-    if target.is_dir() {
-        fs::remove_dir_all(target).map_err(|e| map_io(target, e))?;
-    } else if target.exists() {
-        fs::remove_file(target).map_err(|e| map_io(target, e))?;
-    }
-    Ok(())
-}
-
 fn library_root(home: Option<&Path>) -> Result<PathBuf, Error> {
     let (home, _) = ensure_inventory_root(home)?;
     let root = skills_library_path(&home);
@@ -216,6 +206,25 @@ fn iter_library_skills(library: &Path) -> Result<Vec<Skill>, Error> {
     Ok(skills)
 }
 
+/// Stage and atomically replace a divergent library entry via [`skills::publish_staged_tree`].
+fn repair_divergent_deposit(
+    library: &Path,
+    skill: &Skill,
+    provenance: Option<&Provenance>,
+    target: &Path,
+) -> Result<PathBuf, Error> {
+    let staging = tempfile::Builder::new()
+        .prefix(".tink-deposit-")
+        .tempdir_in(library)
+        .map_err(|e| Error::msg(format!("deposit staging dir: {e}")))?;
+    let staged = staging.path().join(&skill.name);
+    skills::copy_skill_tree(&skill.path, &staged, &[".git"])?;
+    if let Some(provenance) = provenance {
+        provenance::write_file(&staged.join(provenance::SIDECAR_FILE), provenance)?;
+    }
+    skills::publish_staged_tree(staging, staged, target)
+}
+
 /// Copy skill tree into `~/.tink/skills/<name>/`.
 ///
 /// Identical → noop; missing → create; divergent → replace (caller should warn).
@@ -246,8 +255,7 @@ pub(crate) fn deposit_at(
             Ok((path, LibraryWrite::Repaired))
         }
         PreflightOutcome::Divergent => {
-            clear_path(&library.join(&skill.name))?;
-            let (path, _) = skills::install_local(skill, &library, provenance)?;
+            let path = repair_divergent_deposit(&library, skill, provenance, &target)?;
             Ok((path, LibraryWrite::Repaired))
         }
     }
@@ -542,6 +550,19 @@ mod tests {
         provenance
     }
 
+    fn orphan_dirs_in(root: &Path) -> Vec<PathBuf> {
+        fs::read_dir(root)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with(".tink-orphan-"))
+            })
+            .collect()
+    }
+
     #[test]
     fn create_only_missing_creates() {
         let home = TempHome::new();
@@ -667,6 +688,93 @@ mod tests {
         assert_eq!(write, LibraryWrite::Repaired);
         assert!(skill_md(&path).contains("incoming body"));
         assert!(!skill_md(&path).contains("original body"));
+    }
+
+    #[test]
+    fn deposit_divergent_repair_restores_original_on_publish_failure() {
+        let home = TempHome::new();
+        let first = home.root.join("first").join("demo-skill");
+        let second = home.root.join("second").join("demo-skill");
+        let original = write_skill(&first, "demo-skill", "original body");
+        let incoming = write_skill(&second, "demo-skill", "incoming body");
+
+        assert_eq!(
+            deposit_at(Some(&home.home), &original, None).unwrap().1,
+            LibraryWrite::Created
+        );
+        let target = home.library_skill("demo-skill");
+        fs::write(target.join("payload.txt"), "original-bytes").unwrap();
+
+        let library = skills_library_path(&home.home);
+        let staging = tempfile::Builder::new()
+            .prefix(".tink-deposit-")
+            .tempdir_in(&library)
+            .unwrap();
+        let staged = staging.path().join("demo-skill");
+
+        let error = skills::publish_staged_tree(staging, staged, &target).unwrap_err();
+
+        assert!(
+            !error.to_string().contains("recovery backup"),
+            "rollback should restore the live library tree without an orphan: {error}"
+        );
+        assert_eq!(
+            fs::read(target.join("payload.txt")).unwrap(),
+            b"original-bytes"
+        );
+        assert!(skill_md(&target).contains("original body"));
+        assert!(!skill_md(&target).contains("incoming body"));
+        assert!(orphan_dirs_in(&library).is_empty(), "{error}");
+        let _ = incoming;
+    }
+
+    #[test]
+    fn deposit_divergent_repair_retains_orphan_on_double_failure() {
+        let home = TempHome::new();
+        ensure_inventory_root(Some(&home.home)).unwrap();
+        let target = home.library_skill("demo-skill");
+        write_skill(&target, "demo-skill", "original body");
+        fs::write(target.join("payload.txt"), "preserve me").unwrap();
+
+        let library = skills_library_path(&home.home);
+        let staging = tempfile::Builder::new()
+            .prefix(".tink-deposit-")
+            .tempdir_in(&library)
+            .unwrap();
+        let staging_path = staging.path().to_path_buf();
+        let backup = staging.path().join("old");
+        fs::rename(&target, &backup).unwrap();
+        fs::write(&target, "rollback blocker").unwrap();
+
+        let error = skills::test_rollback_or_retain_backup(
+            staging,
+            &backup,
+            &target,
+            std::io::Error::other("publish fixture"),
+        );
+
+        assert!(error.to_string().contains("recovery backup"), "{error}");
+        let orphans = orphan_dirs_in(&library);
+        assert_eq!(orphans.len(), 1, "{error}");
+        let orphan = &orphans[0];
+        assert!(
+            orphan
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(".tink-orphan-demo-skill-")),
+            "unexpected orphan name: {}",
+            orphan.display()
+        );
+        assert!(
+            error.to_string().contains(&orphan.display().to_string()),
+            "{error}"
+        );
+        assert_eq!(
+            fs::read(orphan.join("payload.txt")).unwrap(),
+            b"preserve me"
+        );
+        assert!(!staging_path.exists(), "temp staging dir should be removed");
+        assert!(!backup.exists(), "backup should move out of staging");
     }
 
     #[test]

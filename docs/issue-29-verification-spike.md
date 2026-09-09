@@ -13,7 +13,7 @@ Related: [#29](https://github.com/jon-devlapaz/tink/issues/29), [#26](https://gi
 | Stage beside destination | **Mitigated** — all tree replace paths use `tempdir_in` / `tempfile_in` beside the destination root |
 | Move live → backup before publish | **Mitigated** for replace paths via `publish_staged_tree` (`target → staging/old`) |
 | Publish staged → live | **Mitigated** — rename publish in `publish_staged_tree`, `install_local`, create-only paths |
-| On failure: restore; if restore fails, **keep** backup and name path | **Mitigated** for `publish_staged_tree`, `manifest::write_atomic`, and `update::replace_binary`; **Missing** for `library::deposit_at` divergent repair and first-install-only paths |
+| On failure: restore; if restore fails, **keep** backup and name path | **Mitigated** for `publish_staged_tree`, `manifest::write_atomic`, `update::replace_binary`, and `library::deposit_at` divergent repair; **Missing** for first-install-only paths |
 | Shared helper across call sites | **Missing** — three independent implementations remain |
 | Durable orphan names (`.tink-orphan-*`) | **Partial** — `publish_staged_tree` renames displaced originals to `.tink-orphan-*` on double failure; manifest/binary paths still use temp prefixes |
 
@@ -61,7 +61,7 @@ Legend: **Keep** = explicit `TempDir::keep()` / `NamedTempFile::keep()` / `TempP
 | File:line | Function | Pattern | Keep / Drop-risk |
 |---|---|---|---|
 | `src/library.rs:166` | `promote_at` (create) | single `rename(staged → target)` | **Drop-risk** (staging only; no prior live tree) |
-| `src/library.rs:249–250` | `deposit_at` (Divergent) | `clear_path` then `install_local` | **Missing** — removes live tree before install; no backup/keep |
+| `src/library.rs` | `deposit_at` (Divergent) via `repair_divergent_deposit` | `.tink-deposit-*` + `publish_staged_tree` | **Mitigated** — same restore-or-orphan semantics as other replace paths |
 | `src/skillsets.rs:448` | `install_from_checkout` | single rename; `_staging` dropped on success | **Drop-risk** for staging on failure before rename |
 | `src/skillsets.rs:1248` | `copy_project_tree` (create) | single rename | **Drop-risk** (staging only) |
 | `src/inventory.rs:38,57` | `publish` / `publish_from_library` | `install_local` | see `install_local` |
@@ -90,7 +90,7 @@ Design target: **stage beside dest → durable backup name → publish → resto
 |---|---|---|---|---|---|
 | `publish_staged_tree` (+ callers) | Mitigated | Mitigated (`.tink-orphan-*` on double failure) | Mitigated | Mitigated (orphan rename + named error) | **Partial** (shared helper deferred) |
 | `install_local` (Ready) | Mitigated | Missing (N/A — no live tree) | Mitigated | N/A | **Partial** (different shape; not #26-class) |
-| `library::deposit_at` (Divergent) | Missing | Missing | Partial (`install_local`) | Missing | **Missing** |
+| `library::deposit_at` (Divergent) | Mitigated | Mitigated (via `publish_staged_tree`) | Mitigated | Mitigated | **Partial** (shared helper deferred) |
 | `library::promote` create / skillset create paths | Mitigated | Missing | Mitigated | N/A | **Partial** |
 | `manifest::write_atomic` | Mitigated | Partial (temp backup file) | Mitigated | Mitigated (`keep()`) | **Partial** |
 | `update::replace_binary` | Mitigated | Partial (temp backup file) | Mitigated | Mitigated (`keep()`) | **Partial** (file not tree; acceptable per #29) |
@@ -102,6 +102,9 @@ Design target: **stage beside dest → durable backup name → publish → resto
 ```bash
 cargo test rollback_failure_retains_recovery_backup_at_durable_orphan_path -- --nocapture
 cargo test publish_staged_tree_restores_target_when_publish_fails -- --nocapture
+cargo test deposit_diverge_repairs -- --nocapture
+cargo test deposit_divergent_repair_restores_original_on_publish_failure -- --nocapture
+cargo test deposit_divergent_repair_retains_orphan_on_double_failure -- --nocapture
 cargo test write_atomic_restores_manifest_when_lock_publish_fails -- --nocapture
 cargo test replace_binary_retains_recovery_backup_when_rollback_fails -- --nocapture
 cargo test replace_binary_rolls_back_when_published_probe_fails -- --nocapture
@@ -121,7 +124,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 ### Not proven (honest gaps)
 
 - End-to-end double failure injected through full `replace_verified` rename window without calling `rollback_or_retain_backup` directly (would need concurrent target recreation or test hooks).
-- `library::deposit_at` divergent `clear_path` data-loss path (documented; no deterministic unit test without invasive hooks).
+- End-to-end double failure injected through full `deposit_at` rename window without calling rollback helpers directly (library tests characterize restore and orphan beside the library root).
 - Durable `.tink-orphan-*` naming for manifest/binary/update paths (tree swap done).
 - Windows, concurrent locks, cross-filesystem rename (explicitly out of v1).
 
@@ -130,7 +133,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 ## Residual risks
 
 1. **Temp-named recovery artifacts** — manifest/binary paths still use temp prefixes; tree swap uses `.tink-orphan-*`.
-2. **`deposit_at` divergent repair** — `clear_path` deletes the library tree before `install_local`; install failure leaves no recovery backup (#29 class gap, separate from #26).
+2. **`deposit_at` divergent repair** — mitigated via `repair_divergent_deposit` + `publish_staged_tree` (PR after spike).
 3. **Three parallel implementations** — behavior drift risk between `publish_staged_tree`, `write_atomic`, and `replace_binary`.
 4. **First-install staging** — failed rename drops staged new tree only; existing live content unaffected.
 5. **Concurrent target recreation** — documented; recovery depends on winning the race after rollback failure.
@@ -146,6 +149,6 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 3. Wire `replace_verified_inner`, `library::promote_at`, and skillset callers through the helper without changing staging prefix behavior on the happy path.
 4. Add one characterization test asserting orphan dir name pattern on double failure.
 
-**Defer:** manifest/binary unification, `install_local` / `deposit_at` divergent repair, shared crate-level abstraction across file vs tree shapes.
+**Defer:** manifest/binary unification, `install_local` first-install staging, shared crate-level abstraction across file vs tree shapes.
 
 **Alternative:** Close #29 as “safety done” and open `#29a` (orphan naming), `#29b` (shared helper), `#29c` (`deposit_at` divergent backup) — if maintainers prefer smaller tracked units.
