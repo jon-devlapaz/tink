@@ -1955,7 +1955,7 @@ fn k12_skillset_add_url_inferred_and_custom_name_baseline_router() {
     // Assert zero mutations
     assert!(
         !ws.skillset_meta(corrupt_name).exists(),
-        "catalog definition must not be written on corrupt member"
+        "pin file must not be written on corrupt member"
     );
     assert!(
         !Workspace::skill_path(&project, corrupt_name).exists(),
@@ -1966,7 +1966,7 @@ fn k12_skillset_add_url_inferred_and_custom_name_baseline_router() {
         "library tree must not be written on corrupt member"
     );
 
-    // 5. Inspecting before installing (read-only probe without modifying project, catalog, or library)
+    // 5. Inspecting before installing (read-only probe without modifying project, pin, or library)
     let repo4 = ws.root.join("repo-preview");
     init_repo(&repo4);
     write_skill(

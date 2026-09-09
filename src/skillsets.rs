@@ -2,7 +2,8 @@
 //!
 //! Receipt entry presence classifies a root as a skillset before receipt contents are
 //! trusted. The project tree is authoritative; `$TINK_HOME/skillsets/` copies are
-//! derived from a validated project tree.
+//! derived from a validated project tree. Grouped read-only views live in
+//! [`crate::skillset_list`].
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -114,29 +115,21 @@ struct SkillsetMeta {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-struct SkillsetReceipt {
+pub(crate) struct SkillsetReceipt {
     source: String,
     revision: String,
     #[serde(rename = "sourceRoot")]
     source_root: String,
-    members: Vec<String>,
+    pub(crate) members: Vec<String>,
     #[serde(rename = "digestVersion", default = "legacy_digest_version")]
     digest_version: u32,
     digest: String,
 }
 
 #[derive(Debug)]
-struct InstalledSkillset {
-    name: String,
-    receipt: SkillsetReceipt,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ListedSkillset {
-    pub name: String,
-    pub members: Vec<String>,
-    /// `None` when the tree matches its receipt; otherwise the validation error.
-    pub error: Option<String>,
+pub(crate) struct InstalledSkillset {
+    pub(crate) name: String,
+    pub(crate) receipt: SkillsetReceipt,
 }
 
 fn read_json<T: for<'de> Deserialize<'de>>(path: &Path, label: &str) -> Result<T, Error> {
@@ -288,7 +281,7 @@ fn receipt_meta(receipt: &SkillsetReceipt) -> SkillsetMeta {
     }
 }
 
-fn read_owned_receipt(path: &Path, label: &str) -> Result<SkillsetReceipt, Error> {
+pub(crate) fn read_owned_receipt(path: &Path, label: &str) -> Result<SkillsetReceipt, Error> {
     let receipt: SkillsetReceipt = read_json(&path.join(RECEIPT_FILE), label)?;
     validate_meta(&receipt_meta(&receipt))?;
     if receipt.digest_version != 1 && receipt.digest_version != DIGEST_VERSION {
@@ -1059,7 +1052,7 @@ pub(crate) fn update_skillset_at(
         let outcome = update_single_skillset_at(home, project_root, name)?;
         Ok(vec![outcome])
     } else {
-        let installed = list_installed(project_root)?;
+        let installed = crate::skillset_list::list_installed(project_root)?;
         if installed.is_empty() {
             return Ok(Vec::new());
         }
@@ -1176,7 +1169,7 @@ pub fn remove_skillset(project_root: &Path, name: &str) -> Result<PathBuf, Error
     Ok(target)
 }
 
-fn read_installed(path: &Path) -> Result<InstalledSkillset, Error> {
+pub(crate) fn read_installed(path: &Path) -> Result<InstalledSkillset, Error> {
     refuse_symlink(path)?;
     let name = path
         .file_name()
@@ -1197,80 +1190,6 @@ fn read_installed(path: &Path) -> Result<InstalledSkillset, Error> {
 /// Returns the receipt member count on success.
 pub fn validate_installed(path: &Path) -> Result<usize, Error> {
     read_installed(path).map(|installed| installed.receipt.members.len())
-}
-
-fn entry_name(path: &Path) -> String {
-    path.file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("")
-        .to_string()
-}
-
-/// List one receipt-backed root without failing the surrounding inventory walk.
-fn list_skillset_entry(path: &Path) -> ListedSkillset {
-    match read_installed(path) {
-        Ok(installed) => ListedSkillset {
-            name: installed.name,
-            members: installed.receipt.members,
-            error: None,
-        },
-        Err(error) => {
-            let members = read_owned_receipt(path, "installed skillset receipt")
-                .map(|receipt| receipt.members)
-                .unwrap_or_default();
-            ListedSkillset {
-                name: entry_name(path),
-                members,
-                error: Some(error.to_string()),
-            }
-        }
-    }
-}
-
-/// List receipt-backed skillsets installed in a project.
-///
-/// Structural project problems (missing skills root, unexpected entries) still
-/// fail the command. Per-tree validation errors are returned as row `error`
-/// values so one divergent skillset cannot blank the rest of the inventory.
-pub fn list_installed(project_root: &Path) -> Result<Vec<ListedSkillset>, Error> {
-    let agents = home::project_agents_path(project_root);
-    let skills_root = home::project_skills_path(project_root);
-    refuse_symlink(&agents)?;
-    refuse_symlink(&skills_root)?;
-    if !skills_root.is_dir() {
-        return Err(Error::msg(
-            "Not a Tink project (missing .agents/skills); run `tink init` first",
-        ));
-    }
-
-    let mut entries: Vec<_> = fs::read_dir(&skills_root)
-        .map_err(|e| map_io(&skills_root, e))?
-        .map(|entry| {
-            entry
-                .map(|entry| entry.path())
-                .map_err(|e| map_io(&skills_root, e))
-        })
-        .collect::<Result<_, _>>()?;
-    entries.sort();
-
-    let mut skillsets = Vec::new();
-    for path in entries {
-        let name = entry_name(&path);
-        match classify_entry(&path) {
-            EntryClass::Ignored => continue,
-            EntryClass::Unexpected => {
-                return Err(Error::msg(format!(
-                    "Unexpected entry in .agents/skills: {name}"
-                )));
-            }
-            EntryClass::Skillset => {
-                skillsets.push(list_skillset_entry(&path));
-            }
-            EntryClass::Standalone => {}
-        }
-    }
-    skillsets.sort_by(|left, right| left.name.cmp(&right.name));
-    Ok(skillsets)
 }
 
 fn validate_library_receipt(path: &Path) -> Result<(), Error> {
@@ -1353,49 +1272,6 @@ fn sync_library_from_project(home: Option<&Path>, project: &Path) -> Result<Libr
     }
     copy_project_tree(project, &library, &name, true)?;
     Ok(LibraryWrite::Repaired)
-}
-
-/// List receipt-backed skillsets in the home library without creating it.
-pub fn list_library(home_root: Option<&Path>) -> Result<Vec<ListedSkillset>, Error> {
-    let home = match home_root {
-        Some(path) => path.to_path_buf(),
-        None => home::resolve_home()?,
-    };
-    if !home.exists() {
-        return Ok(Vec::new());
-    }
-    refuse_symlink(&home)?;
-    let library = home::skillsets_library_path(&home);
-    if !library.exists() {
-        return Ok(Vec::new());
-    }
-    refuse_symlink(&library)?;
-    if !library.is_dir() {
-        return Err(Error::msg(format!(
-            "Refusing to read non-directory skillsets library: {}",
-            output::display_path(&library)
-        )));
-    }
-
-    let mut entries: Vec<_> = fs::read_dir(&library)
-        .map_err(|e| map_io(&library, e))?
-        .map(|entry| {
-            entry
-                .map(|entry| entry.path())
-                .map_err(|e| map_io(&library, e))
-        })
-        .collect::<Result<_, _>>()?;
-    entries.sort();
-    let mut skillsets = Vec::new();
-    for path in entries {
-        if path.is_symlink() || !path.is_dir() {
-            continue;
-        }
-        if has_receipt_entry(&path) {
-            skillsets.push(list_skillset_entry(&path));
-        }
-    }
-    Ok(skillsets)
 }
 
 #[cfg(test)]
@@ -1596,7 +1472,7 @@ mod tests {
         )
         .unwrap();
 
-        let listed = list_installed(project).unwrap();
+        let listed = crate::skillset_list::list_installed(project).unwrap();
         assert_eq!(listed.len(), 2);
         assert!(listed[0].error.is_none(), "{:?}", listed[0]);
         assert_eq!(listed[0].name, "alpha-skillset");

@@ -24,7 +24,7 @@
 - `skill lock [--source <name=source>]` / `sync` / `verify`: record, restore, verify manifest (`.tink/skills.toml` v1) + lockfile (`.tink/skills.lock` v2).
 - `skill refresh [name]` / `--dry-run` / `outdated` / `rollback`: clean GitHub imports only; refuse local edits; preview; staleness; one-generation undo.
 - `skill remove <name>`: delete project skill + project only (not library).
-- `skillset add <url> [name]` / `add <name>-skillset`: from tree URL (create-only definition) or pinned catalog definition; nested project tree + baseline router + library mirror.
+- `skillset add <url> [name]` / `add <name>-skillset`: from tree URL (create-only definition) or pinned `skillsets/<name>.json` definition; nested project tree + baseline router + library mirror.
 - `skillset list [--library]` / `refresh` / `update` / `remove`: grouped read-only view; clean replace; advance pinned revision; delete project tree only (definition + library preserved).
 - `inspect <GITHUB_URL>`: skills + inferred skillsets, no project/home writes.
 - `update`: replace binary with newer verified release (`curl` + `tar`).
@@ -56,7 +56,7 @@
 - I3 non-interactive / `--no-tink-skills`: no `ZEN.md`, no `.github/workflows/*` (manage-tink + AGENTS.md allowed).
 - I4 `TINK_HOME` set: creates home root + `layout.json` + `skills/` + `skillsets/` (no `catalog/`).
 - I5 `AGENTS.md` absent: writes Tink-manages-skills note; later init leaves existing file byte-identical.
-- I6 default: installs + catalogs `manage-tink`, copies to library.
+- I6 default: installs `.agents/skills/manage-tink/`, copies tree into library.
 - I7 `--no-manage-tink`: no manage-tink.
 - I8 relative `TINK_HOME` (e.g. `../home`): OK, absolutized sibling home, stdout shows absolute path.
 - I9 init twice unchanged: 2nd OK (`Ready`/`Already present`), files identical.
@@ -66,7 +66,7 @@
 
 ### Local add
 
-- A1 valid local dir: installs, catalogs, copies to library.
+- A1 valid local dir: installs, copies to library.
 - A2 identical re-add: OK noop, project + library unchanged.
 - A3 target exists and differs: FAIL "Refusing to overwrite", target unchanged.
 - A3B only divergence is stale `.tink-source.json`: OK, removes sidecar.
@@ -76,8 +76,8 @@
 - A6B stderr closed during A6 warn: OK, mutation complete, no retry ambiguity.
 - A7 name `by-project`: OK installs (reservation retired with catalog removal).
 - A8 same GitHub tip in library: OK from library, no clone, stdout notes it.
-- A10 direct symlink / symlinked child: FAIL mentions symlink, no project/library/catalog entry.
-- A11 project target is symlink: FAIL, symlink untouched, no library/catalog.
+- A10 direct symlink / symlinked child: FAIL mentions symlink, no project/library entry.
+- A11 project target is symlink: FAIL, symlink untouched, no library entry.
 - A12 `TINK_HOME` = unrelated non-empty dir: FAIL, dir identical.
 - A13 `owner/repo` with one non-root remote skill at same tip in library: OK no clone, installs from library.
 - A14 exec / non-exec files: portable 0o755/0o644 in project + library, strips special/umask-only bits.
@@ -97,7 +97,7 @@
 - R3 `./missing-skill` absent: FAIL "Path does not exist", no network fetch.
 - R4 `/abs/missing`: FAIL "Path does not exist".
 - R5 `SKILL.md` at repo root: receipt path `"."`, check passes, refresh tracks root.
-- R6 unique nested match under wrapper: installs match, receipt records exact rel path; catalog/library/check valid.
+- R6 unique nested match under wrapper: installs match, receipt records exact rel path; library/check valid.
 - R7 duplicate name matches: FAIL before writes, lists all rel paths.
 - R8 `--skill <rel-path>`: installs exactly that dir; refresh follows default branch there.
 - R9 cache holds one of several same-name remotes: name-only add still checks repo, refuses ambiguity.
@@ -119,7 +119,7 @@
 - K4 invalid skillset name: FAIL, no tree written.
 - K5 ordinary/unowned entry at `skillsets/<name>-skillset/`: FAIL before network/project publication, entry preserved.
 - K6 remove with missing/invalid receipt: FAIL, project dir preserved.
-- K7 before project/catalog setup: list explains init; missing catalog leaves project untouched.
+- K7 before project/pin setup: list explains init; missing pin leaves project untouched.
 - K8 re-add unchanged while remote down: OK offline, syncs library from project.
 - K9 only grouped members: check reports standalone + skillset + member counts; list says no standalone, points to `skillset list`.
 - K10 refresh after definition change: stages + rename-replaces clean tree (best-effort rollback), mirrors to `skillsets/`; refuses local mods.
@@ -195,7 +195,7 @@
 ### Library
 
 - H1 after init + add: OK includes added skill.
-- H2 add `<name>` library-hit, project missing: OK installs + catalogs, no network, stdout notes library.
+- H2 add `<name>` library-hit, project missing: OK installs, no network, stdout notes library.
 - H3 missing bare name: FAIL library-not-found, no network.
 - H4 library-hit but project exists and differs: FAIL "Refusing to overwrite", target unchanged.
 - H5 harvest (`~/.agents/skills` + `~/.claude/skills` + home): copies complete trees to library; no project writes.

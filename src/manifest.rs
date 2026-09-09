@@ -385,7 +385,7 @@ fn sync_at(root: &Path, home: Option<&Path>) -> Result<usize, Error> {
     }
 
     // Resolve exact source bytes, validate pins, and protect every existing
-    // project destination before the first project/library/catalog write.
+    // project destination before the first project/library write.
     let agents_root = crate::home::project_agents_path(root);
     let destination_root = crate::home::project_skills_path(root);
     crate::paths::require_directory(&agents_root)?;

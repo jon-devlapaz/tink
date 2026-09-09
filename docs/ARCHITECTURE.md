@@ -23,7 +23,7 @@ records intended CLI and on-disk behavior, the workflow files own delivery autom
 | `.tink-skillset.json` | `skillsets.rs` | Skillset ownership and digest evidence. Presence classifies; validated contents prove the installed tree. |
 
 Use the qualified terms **skillset definition**, **source receipt**, and
-**skillset receipt**. Bare “catalog” and “receipt” hide different owners and
+**skillset receipt**. Bare “receipt” hides different owners and
 should not carry architectural decisions.
 
 ## Module ownership
@@ -31,10 +31,10 @@ should not carry architectural decisions.
 | Area | Modules | Responsibility |
 |---|---|---|
 | Process edge | `main.rs`, `lib.rs`, `output.rs`, `style.rs`, `error.rs`, `process.rs` | Completion and argument parsing, command dispatch, fallible and control-safe output, user-facing failure/exit shape, and bounded subprocess-group supervision. |
-| Layout and persisted state | `home.rs`, `catalog.rs`, `manifest.rs`, `provenance.rs` | Project/home paths, project-name index, standalone manifest/lock, and source receipts. |
+| Layout and persisted state | `home.rs`, `manifest.rs`, `provenance.rs` | Project/home paths, standalone manifest/lock, and source receipts. |
 | Skill mechanisms | `skills.rs`, `sources.rs`, `git.rs`, `paths.rs`, `library.rs` | Skill discovery/validation/copy/digest, typed source classification, supervised Git checkout, filesystem refusals, and standalone library policy. |
 | Project workflows | `init.rs`, `add.rs`, `inventory.rs`, `check.rs`, `read.rs`, `refresh.rs`, `remove.rs`, `harvest.rs` | Bootstrap, standalone skill lifecycle (publish seam in `inventory.rs`), and read-only local skill inspection. |
-| Skillset workflow | `skillsets.rs` | Canonical names, definition validation, staged install/refresh, receipt validation, grouped listing, removal, and project-to-`$TINK_HOME/skillsets/` mirroring. |
+| Skillset workflow | `skillsets.rs`, `skillset_list.rs` | Canonical names, definition validation, staged install/refresh, receipt validation, removal, and project-to-`$TINK_HOME/skillsets/` mirroring; grouped read-only listing. |
 | Read-only source inspection | `inspect.rs` | GitHub structure inspection and source-defined skillset inference; no project or home writes. |
 | Supporting workflows | `destroy.rs`, `update.rs`, `manage_tink.rs` | Project teardown, binary update, and embedded `manage-tink`. |
 
@@ -72,12 +72,11 @@ visible as row errors without failing the list command.
    explicit `skill lock`; a legacy skillset receipt can migrate only through a clean
    `skillset refresh`.
 9. **Multi-owner publication is sequential and retryable, not transactional.**
-   Workflows such as `skill sync` explicitly preflight every expected project,
-   library, and catalog refusal before publishing the first skill. Standalone add
-   first ensures layout and preflights its project destination, but a later catalog
-   refusal can leave valid project/library writes in place; rerunning the idempotent
-   command repairs that derived index. Unexpected operational failures can still
-   interrupt later writes, and retry remains the recovery model.
+   Workflows such as `skill sync` explicitly preflight every expected project
+   and library refusal before publishing the first skill. Standalone add
+   first ensures layout and preflights its project destination. Unexpected
+   operational failures can still interrupt later writes, and retry remains
+   the recovery model.
 
 ## Standalone `skill add`
 
@@ -92,19 +91,18 @@ visible as row errors without failing the list command.
 For a local or GitHub source, the complete publication order is:
 
 1. Ensure the project layout and validate/select the source skill.
-2. Refuse a receipt-owned source before project, library, or catalog publication.
+2. Refuse a receipt-owned source before project or library publication.
 3. Reuse an exact standalone library match when available; skillset roots cannot be
    cache hits.
 4. Preflight the project target and refuse divergence.
 5. Deposit the source into the standalone library: create, no-op, or repair. A
    receipt-classified target refuses before mutation.
-6. Install the project tree and then update the project-name index.
+6. Install the project tree.
 
 A bare-name promotion starts from step 3 with the structurally validated library tree.
 Positive cache and repair behavior is intentional; receipt ownership is the boundary,
 not a ban on library reuse. The project destination is protected before library or
-project-tree publication, but catalog parsing/deposit follows those writes by design;
-acceptance A9 pins this resumable exception to full multi-owner preflight.
+project-tree publication.
 
 ## `skillset add`
 
@@ -133,12 +131,12 @@ remove` requires a valid owned receipt and deletes only the project tree.
 |---|---|
 | `skill list` / `skill check` | `check.rs` reads project entries, `skillsets.rs` validates receipt roots, and `lib.rs` owns grouped counts/output. Standalone listing excludes skillset roots; check validates both lifecycles. |
 | `skill read` | `read.rs` loads one standalone project or library tree, classifies its lifecycle, and prints description plus metadata. It does not glob skillset members. |
-| `skill refresh` | `refresh.rs` uses the source receipt to prove the project clean. At an unchanged upstream revision it repairs the library directly from the project; after an upstream move it preflights the library, replaces the project, then updates the library and project-name index. |
-| `skill remove` | `remove.rs` refuses skillset roots, withdraws the project-name index first, deletes the project tree, and preserves the library. |
+| `skill refresh` | `refresh.rs` uses the source receipt to prove the project clean. At an unchanged upstream revision it repairs the library directly from the project; after an upstream move it preflights the library, replaces the project, then updates the library. |
+| `skill remove` | `remove.rs` refuses skillset roots, deletes the project tree, and preserves the library. |
 | `skill harvest` | `harvest.rs` validates known harness trees and calls the create-only library path; it never writes a project. |
 | `skill lock` / `sync` / `verify` | `manifest.rs` records standalone intent and pins, installs missing pinned skills, and verifies declarations, pins, receipts, and tree hashes. |
 | `inspect` | `inspect.rs` reports GitHub structure without writing project or home state. |
-| `destroy` / `update` | `destroy.rs` removes `.agents/skills/`, removes `.agents/` only when empty, preserves project guidance/unrelated siblings, and drops the project name index. `update.rs` replaces only the verified CLI binary. |
+| `destroy` / `update` | `destroy.rs` removes `.agents/skills/`, removes `.agents/` only when empty, preserves project guidance/unrelated siblings. `update.rs` replaces only the verified CLI binary. |
 
 ## Project manifest publication
 
@@ -153,11 +151,11 @@ checked separately against the typed pin.
    GitHub, or embedded `manage-tink`.
 2. Snapshot local inputs, retain remote checkout guards, select the exact skill, and
    verify every version-2 digest.
-3. Preflight every project destination, then every library destination, then the
-   project catalog boundary. Expected divergence, symlink, collision, or malformed
-   catalog failures therefore occur before the first skill is published.
+3. Preflight every project destination, then every library destination. Expected
+   divergence, symlink, or collision failures therefore occur before the first
+   skill is published.
 4. Publish prepared skills one at a time in deterministic manifest-name order. Each
-   publish updates library, project, and catalog using the ordinary add lifecycle.
+   publish updates library, then project, using the ordinary add lifecycle.
 5. Run offline `skill verify` after the sequence.
 
 This is not cross-skill atomicity. An unexpected error such as permission loss or
@@ -170,5 +168,5 @@ remaining idempotent work.
 - Tink has no production inter-process library lock. Concurrent mutations are not a
   supported or proven operating mode for a project or shared Tink home.
 - Staging and same-directory rename reduce exposure to incomplete individual files or
-  trees, but no transaction spans project, library, catalog, or the two manifest files.
+  trees, but no transaction spans project, library, or the two manifest files.
 - CI and release sensors are documented in [`TESTING.md`](TESTING.md).

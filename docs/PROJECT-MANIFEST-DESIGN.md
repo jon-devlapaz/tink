@@ -8,8 +8,8 @@ is version 2 after the digest hardening migration.
 
 ## Outcome and authority
 
-Tink installs standalone skills into `.agents/skills/`, but the home library and
-by-project catalog are machine-local derived state. A repository needs committed intent
+Tink installs standalone skills into `.agents/skills/`, but the home library is
+machine-local derived state. A repository needs committed intent
 and exact pins so another checkout or CI job can reconstruct and verify the same live
 skill trees without treating `$TINK_HOME` as authority.
 
@@ -21,7 +21,7 @@ skill trees without treating `$TINK_HOME` as authority.
 ```
 
 Both project files are intended to be committed. `$TINK_HOME` remains a rebuildable
-library/catalog and never becomes an agent discovery root.
+library and never becomes an agent discovery root.
 
 ## Supported contract
 
@@ -129,13 +129,13 @@ Restore the complete locked set without pruning:
 4. Validate every candidate name, safe tree, receipt, and version-2 digest.
 5. Preflight every project destination and refuse divergence.
 6. Reject installed standalone skills that are not declared.
-7. Preflight every library destination and the by-project catalog boundary.
+7. Preflight every library destination.
 8. Publish prepared skills sequentially in manifest-name order through the ordinary
-   add lifecycle: library, project, then catalog.
+   add lifecycle: library, then project.
 9. Run offline verification after all publications.
 
-Expected bad hash, project divergence, unsafe library target, ownership collision, or
-malformed catalog failures occur before the first skill publication. Preparation also
+Expected bad hash, project divergence, unsafe library target, or ownership collision
+failures occur before the first skill publication. Preparation also
 prevents a local source from changing between validation and later publication in the
 same run.
 
@@ -145,18 +145,13 @@ earlier skill completely published and a later one absent. No success is reporte
 that run; rerunning `tink skill sync` is the supported recovery path and converges the
 idempotent completed steps.
 
-## Catalog and library effects
+## Library effects
 
 Each successfully published skill follows the existing add lifecycle. The reusable
 library is created, left identical, or repaired from the prepared source; the project
-tree is created or repaired only for receipt-only drift; then the project name is
-deposited in the by-project catalog. Catalog directories use a bounded project basename
-plus SHA-256 identity of the canonical project root, using raw bytes on Unix.
+tree is created or repaired only for receipt-only drift.
 
-The catalog and library are not part of the committed manifest authority. A catalog
-failure can happen after valid library/project copies exist in an ordinary single-skill
-add, and retry repairs the missing derived state. Manifest sync preflights predictable
-catalog refusals before its first publication.
+The library is not part of the committed manifest authority.
 
 ## Security and operating limits
 
@@ -168,7 +163,7 @@ catalog refusals before its first publication.
 - There is no daemon, database, cache protocol, inter-process lock, or concurrent
   mutation guarantee.
 - Same-directory staging/rename narrows individual write hazards; no atomicity claim
-  spans project, library, catalog, or both project files.
+  spans project, library, or both project files.
 
 ## Executable evidence
 
@@ -176,6 +171,6 @@ Acceptance rows M1-M9 cover empty verification, lock generation, local and embed
 restore, missing-local source classification, missing manifests, all-entry hash
 preflight, later library refusal before publication, and explicit v1-to-v2 relock.
 Focused unit tests additionally cover ambiguous digest framing, mode sensitivity,
-exact prepared local snapshots, project/library/catalog preflights, and the embedded
+exact prepared local snapshots, project/library preflights, and the embedded
 source path. See [`TESTING.md`](TESTING.md) for the complete gate and remaining fault-
 injection/concurrency gaps.

@@ -26,6 +26,7 @@ mod refresh;
 mod remove;
 mod rollback;
 mod skills;
+mod skillset_list;
 mod skillsets;
 mod sources;
 mod style;
@@ -513,65 +514,7 @@ fn dispatch_skill(cwd: &Path, command: SkillCommand) -> Result<(), Error> {
 
 fn dispatch_skillset(cwd: &Path, command: SkillsetCommand) -> Result<(), Error> {
     match command {
-        SkillsetCommand::List { library } => {
-            let style = CliStyle::auto_stdout();
-            let skillsets = if library {
-                skillsets::list_library(None)?
-            } else {
-                skillsets::list_installed(cwd)?
-            };
-            if skillsets.is_empty() {
-                let message = if library {
-                    "(no library skillsets)"
-                } else {
-                    "(no skillsets)"
-                };
-                println!("{}", style.muted(message));
-            } else {
-                for (index, skillset) in skillsets.iter().enumerate() {
-                    if index > 0 {
-                        println!();
-                    }
-                    let noun = if skillset.members.len() == 1 {
-                        "skill"
-                    } else {
-                        "skills"
-                    };
-                    match &skillset.error {
-                        None => {
-                            println!(
-                                "{} {}",
-                                style.skillset(&skillset.name),
-                                style.muted(format!("({} {noun})", skillset.members.len()))
-                            );
-                            for member in &skillset.members {
-                                println!("  {}", style.skill(member));
-                            }
-                        }
-                        Some(error) => {
-                            if skillset.members.is_empty() {
-                                println!(
-                                    "{} {}",
-                                    style.skillset(&skillset.name),
-                                    style.error(error)
-                                );
-                            } else {
-                                println!(
-                                    "{} {} {}",
-                                    style.skillset(&skillset.name),
-                                    style.muted(format!("({} {noun})", skillset.members.len())),
-                                    style.error(error)
-                                );
-                                for member in &skillset.members {
-                                    println!("  {}", style.skill(member));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            Ok(())
-        }
+        SkillsetCommand::List { library } => print_skillset_list(cwd, library),
         SkillsetCommand::Add { target, name } => {
             let style = CliStyle::auto_stdout();
             let outcome = skillsets::add_skillset(cwd, &target, name.as_deref())?;
@@ -683,6 +626,63 @@ fn dispatch_skillset(cwd: &Path, command: SkillsetCommand) -> Result<(), Error> 
             Ok(())
         }
     }
+}
+
+/// Fetch the grouped skillsets, then render one blank-line-separated row each.
+fn print_skillset_list(cwd: &Path, library: bool) -> Result<(), Error> {
+    let style = CliStyle::auto_stdout();
+    let skillsets = if library {
+        skillset_list::list_library(None)?
+    } else {
+        skillset_list::list_installed(cwd)?
+    };
+    if skillsets.is_empty() {
+        let message = if library {
+            "(no library skillsets)"
+        } else {
+            "(no skillsets)"
+        };
+        println!("{}", style.muted(message));
+        return Ok(());
+    }
+    for (index, skillset) in skillsets.iter().enumerate() {
+        if index > 0 {
+            println!();
+        }
+        print_skillset_row(&style, skillset)?;
+    }
+    Ok(())
+}
+
+/// Render one grouped skillset row: header line, then one line per member.
+fn print_skillset_row(
+    style: &CliStyle,
+    skillset: &skillset_list::ListedSkillset,
+) -> Result<(), Error> {
+    let header = {
+        let noun = if skillset.members.len() == 1 {
+            "skill"
+        } else {
+            "skills"
+        };
+        format!("({} {noun})", skillset.members.len())
+    };
+    match &skillset.error {
+        None => println!("{} {}", style.skillset(&skillset.name), style.muted(header)),
+        Some(error) if skillset.members.is_empty() => {
+            println!("{} {}", style.skillset(&skillset.name), style.error(error))
+        }
+        Some(error) => println!(
+            "{} {} {}",
+            style.skillset(&skillset.name),
+            style.muted(header),
+            style.error(error)
+        ),
+    }
+    for member in &skillset.members {
+        println!("  {}", style.skill(member));
+    }
+    Ok(())
 }
 
 fn dispatch_init(
@@ -835,7 +835,7 @@ fn dispatch_skill_list(cwd: &Path) -> Result<(), Error> {
     let out = CliStyle::auto_stdout();
     let skills = check::load_standalone_skills(cwd)?;
     if skills.is_empty() {
-        if skillsets::list_installed(cwd)?.is_empty() {
+        if skillset_list::list_installed(cwd)?.is_empty() {
             println!("{}", out.muted("(no skills)"));
         } else {
             println!(
