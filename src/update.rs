@@ -855,6 +855,43 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn replace_binary_retains_recovery_backup_when_rollback_fails() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let parent = temp.path();
+        let current = parent.join("installed-tink");
+        let candidate = temp.path().join("candidate-tink");
+        let original = b"#!/bin/sh\nprintf 'tink 0.3.14\\n'\n";
+        fs::write(&current, original).unwrap();
+        fs::set_permissions(&current, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(
+            &candidate,
+            b"#!/bin/sh\ncase \"$0\" in\n  */installed-tink)\n    chmod 000 \"$(dirname \"$0\")\" 2>/dev/null || true\n    printf 'tink 0.0.0\\n'\n    ;;\n  *) printf 'tink 99.0.0\\n' ;;\nesac\n",
+        )
+        .unwrap();
+        fs::set_permissions(&candidate, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let err = replace_binary(&current, &candidate, "99.0.0").unwrap_err();
+
+        assert!(
+            err.to_string().contains("recovery backup"),
+            "expected retained backup path in error: {err}"
+        );
+        assert!(
+            err.to_string().contains(".tink-backup-"),
+            "expected temp backup prefix in recovery path: {err}"
+        );
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_ne!(
+            fs::read(&current).unwrap(),
+            original,
+            "rollback failed; published candidate should remain at current"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn replace_binary_rolls_back_when_published_probe_fails() {
         use std::os::unix::fs::PermissionsExt;
 
