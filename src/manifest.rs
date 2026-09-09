@@ -3,10 +3,11 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use crate::error::Error;
+use crate::output;
 use crate::paths::{map_io, refuse_symlink};
 use crate::provenance;
 use crate::skills;
@@ -345,32 +346,52 @@ fn write_atomic(root: &Path, manifest: &str, lock: &str) -> Result<(), Error> {
     fs::rename(&manifest_temp_path, &manifest_path).map_err(|e| map_io(&manifest_path, e))?;
     if let Err(error) = fs::rename(&lock_temp_path, &lock_path) {
         // Roll the first rename back so the pair remains consistent.
-        let rollback = match previous_backup.as_ref() {
-            Some(backup) => fs::rename(backup.path(), &manifest_path),
-            None => fs::remove_file(&manifest_path),
-        };
-        if let Err(rollback_error) = rollback {
-            let recovery = match previous_backup.take() {
-                Some(backup) => match crate::paths::move_file_to_orphan(
-                    backup.path(),
+        let outcome = match previous_backup.as_ref() {
+            Some(backup) => {
+                let backup_path = backup.path().to_path_buf();
+                crate::paths::restore_or_orphan(
+                    || fs::rename(&backup_path, &manifest_path),
+                    &backup_path,
                     &directory,
                     &manifest_path,
-                ) {
-                    Ok(orphan) => orphan,
-                    Err(_) => backup
-                        .keep()
-                        .map(|(_, path)| path)
-                        .unwrap_or_else(|_| manifest_path.clone()),
+                    || {
+                        previous_backup
+                            .take()
+                            .expect("backup retained for orphan fallback")
+                            .keep()
+                            .map(|(_, path)| path)
+                            .unwrap_or_else(|_| manifest_path.clone())
+                    },
+                )
+            }
+            None => match fs::remove_file(&manifest_path) {
+                Ok(()) => crate::paths::RestoreOrOrphan::Restored,
+                Err(rollback_error) => crate::paths::RestoreOrOrphan::Retained {
+                    recovery: manifest_path.clone(),
+                    orphan_path: manifest_path.clone(),
+                    rollback_error,
+                    orphan_error: io::Error::other("no manifest backup to orphan"),
                 },
-                None => manifest_path.clone(),
-            };
-            return Err(Error::msg(format!(
-                "could not publish {} ({error}); manifest rollback failed ({rollback_error}); recovery backup: {}",
-                lock_path.display(),
-                recovery.display()
-            )));
+            },
+        };
+        match outcome {
+            crate::paths::RestoreOrOrphan::Restored => return Err(map_io(&lock_path, error)),
+            crate::paths::RestoreOrOrphan::Orphaned {
+                recovery,
+                rollback_error,
+            }
+            | crate::paths::RestoreOrOrphan::Retained {
+                recovery,
+                rollback_error,
+                ..
+            } => {
+                return Err(Error::msg(format!(
+                    "could not publish {} ({error}); manifest rollback failed ({rollback_error}); recovery backup: {}",
+                    output::display_path(&lock_path),
+                    output::display_path(&recovery)
+                )));
+            }
         }
-        return Err(map_io(&lock_path, error));
     }
     Ok(())
 }
@@ -779,14 +800,23 @@ mod tests {
             "fixture: manifest path must block rollback rename"
         );
 
-        let recovery =
-            match crate::paths::move_file_to_orphan(backup.path(), &directory, &manifest_path) {
-                Ok(orphan) => orphan,
-                Err(_) => backup
+        let backup_path = backup.path().to_path_buf();
+        let outcome = crate::paths::orphan_or_retain_after_restore_failure(
+            io::Error::other("rollback fixture"),
+            &backup_path,
+            &directory,
+            &manifest_path,
+            || {
+                backup
                     .keep()
                     .map(|(_, path)| path)
-                    .unwrap_or_else(|_| manifest_path.clone()),
-            };
+                    .unwrap_or_else(|_| manifest_path.clone())
+            },
+        );
+        let recovery = match outcome {
+            crate::paths::RestoreOrOrphan::Orphaned { recovery, .. } => recovery,
+            other => panic!("expected orphaned backup, got {other:?}"),
+        };
 
         let orphans = orphan_files_in(&directory);
         assert_eq!(orphans.len(), 1);

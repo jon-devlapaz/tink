@@ -765,33 +765,41 @@ fn rollback_or_retain_backup(
     target: &Path,
     publish_error: std::io::Error,
 ) -> Error {
-    match fs::rename(backup, target) {
-        Ok(()) => map_io(target, publish_error),
-        Err(rollback_error) => {
-            let destination_root = target.parent().unwrap_or_else(|| Path::new("."));
-            let orphan = crate::paths::orphan_recovery_path(destination_root, target);
-            match fs::rename(backup, &orphan) {
-                Ok(()) => Error::msg(format!(
-                    "could not publish {} ({publish_error}); rollback failed ({rollback_error}); recovery backup: {}",
-                    output::display_path(target),
-                    output::display_path(&orphan)
-                )),
-                Err(orphan_error) => {
-                    let recovery_root = staging.keep();
-                    let recovery = recovery_root.join(
-                        backup
-                            .file_name()
-                            .unwrap_or_else(|| std::ffi::OsStr::new("old")),
-                    );
-                    Error::msg(format!(
-                        "could not publish {} ({publish_error}); rollback failed ({rollback_error}); could not move recovery backup to {} ({orphan_error}); recovery backup: {}",
-                        output::display_path(target),
-                        output::display_path(&orphan),
-                        output::display_path(&recovery)
-                    ))
-                }
-            }
-        }
+    let destination_root = target.parent().unwrap_or_else(|| Path::new("."));
+    match crate::paths::restore_or_orphan(
+        || fs::rename(backup, target),
+        backup,
+        destination_root,
+        target,
+        || {
+            let recovery_root = staging.keep();
+            recovery_root.join(
+                backup
+                    .file_name()
+                    .unwrap_or_else(|| std::ffi::OsStr::new("old")),
+            )
+        },
+    ) {
+        crate::paths::RestoreOrOrphan::Restored => map_io(target, publish_error),
+        crate::paths::RestoreOrOrphan::Orphaned {
+            recovery,
+            rollback_error,
+        } => Error::msg(format!(
+            "could not publish {} ({publish_error}); rollback failed ({rollback_error}); recovery backup: {}",
+            output::display_path(target),
+            output::display_path(&recovery)
+        )),
+        crate::paths::RestoreOrOrphan::Retained {
+            recovery,
+            orphan_path,
+            rollback_error,
+            orphan_error,
+        } => Error::msg(format!(
+            "could not publish {} ({publish_error}); rollback failed ({rollback_error}); could not move recovery backup to {} ({orphan_error}); recovery backup: {}",
+            output::display_path(target),
+            output::display_path(&orphan_path),
+            output::display_path(&recovery)
+        )),
     }
 }
 

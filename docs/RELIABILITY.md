@@ -123,8 +123,9 @@ Manifest pair writes (`manifest::write_atomic`) and binary self-update
 (`update::replace_binary`) follow the same restore-or-orphan principle for file
 replacements: on double failure the recovery backup is renamed beside the destination
 root to `.tink-orphan-<file-name>-<unique>` (falling back to the temp backup path
-only when that durable rename fails). #29 tracks consolidating these independent
-implementations behind one shared swap helper.
+only when that durable rename fails). Tree and file paths share the policy via
+`paths::restore_or_orphan` and `paths::orphan_or_retain_after_restore_failure`;
+staging, publish, and backup capture stay with each owner.
 
 `tink destroy` removes only `.agents/skills/`, then removes `.agents/` if that
 directory is empty. It preserves files outside `.agents/` (including `AGENTS.md`),
