@@ -440,18 +440,37 @@ fn replace_binary(current: &Path, new_bin: &Path, expected_version: &str) -> Res
                 )))
             }
             Err(restore_error) => {
-                let cause = restore_error.error;
+                let rollback_error = restore_error.error;
                 let temp_path = restore_error.file.into_temp_path();
-                let recovery = match crate::paths::move_file_to_orphan(&temp_path, parent, current)
-                {
-                    Ok(orphan) => orphan,
-                    Err(_) => temp_path
-                        .keep()
-                        .map(|path| path.to_path_buf())
-                        .unwrap_or_else(|_| parent.join("unavailable")),
-                };
+                let recovery_path = temp_path.to_path_buf();
+                let (recovery, rollback_error) =
+                    match crate::paths::orphan_or_retain_after_restore_failure(
+                        rollback_error,
+                        &recovery_path,
+                        parent,
+                        current,
+                        || {
+                            temp_path
+                                .keep()
+                                .map(|path| path.to_path_buf())
+                                .unwrap_or_else(|_| parent.join("unavailable"))
+                        },
+                    ) {
+                        crate::paths::RestoreOrOrphan::Orphaned {
+                            recovery,
+                            rollback_error,
+                        }
+                        | crate::paths::RestoreOrOrphan::Retained {
+                            recovery,
+                            rollback_error,
+                            ..
+                        } => (recovery, rollback_error),
+                        crate::paths::RestoreOrOrphan::Restored => {
+                            unreachable!("rollback already failed before orphan-or-retain")
+                        }
+                    };
                 Err(Error::msg(format!(
-                    "published tink failed exact version verification ({probe_error}); rollback failed ({cause}); recovery backup: {}",
+                    "published tink failed exact version verification ({probe_error}); rollback failed ({rollback_error}); recovery backup: {}",
                     output::display_path(&recovery)
                 )))
             }

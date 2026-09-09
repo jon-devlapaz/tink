@@ -123,3 +123,152 @@ pub fn move_file_to_orphan(
     let orphan = orphan_recovery_path(destination_root, displaced);
     std::fs::rename(backup, &orphan).map(|()| orphan)
 }
+
+/// Outcome of attempting rollback, then orphaning the backup on rollback failure.
+#[derive(Debug)]
+pub enum RestoreOrOrphan {
+    /// Rollback restored the live path; caller should surface the publish failure.
+    Restored,
+    /// Rollback failed; backup moved to a durable `.tink-orphan-*` path.
+    Orphaned {
+        recovery: PathBuf,
+        rollback_error: io::Error,
+    },
+    /// Rollback and orphan move both failed; backup retained at `recovery`.
+    Retained {
+        recovery: PathBuf,
+        orphan_path: PathBuf,
+        rollback_error: io::Error,
+        orphan_error: io::Error,
+    },
+}
+
+fn orphan_or_retain(
+    backup: &Path,
+    destination_root: &Path,
+    displaced: &Path,
+    retain_backup: impl FnOnce() -> PathBuf,
+) -> Result<PathBuf, (PathBuf, io::Error)> {
+    match move_file_to_orphan(backup, destination_root, displaced) {
+        Ok(recovery) => Ok(recovery),
+        Err(orphan_error) => Err((retain_backup(), orphan_error)),
+    }
+}
+
+/// Try restoring `backup` over `displaced`; on failure move the backup to a durable
+/// orphan path beside `destination_root`, or retain it via `retain_backup` when the
+/// orphan rename fails.
+pub fn restore_or_orphan(
+    restore: impl FnOnce() -> Result<(), io::Error>,
+    backup: &Path,
+    destination_root: &Path,
+    displaced: &Path,
+    retain_backup: impl FnOnce() -> PathBuf,
+) -> RestoreOrOrphan {
+    match restore() {
+        Ok(()) => RestoreOrOrphan::Restored,
+        Err(rollback_error) => {
+            match orphan_or_retain(backup, destination_root, displaced, retain_backup) {
+                Ok(recovery) => RestoreOrOrphan::Orphaned {
+                    recovery,
+                    rollback_error,
+                },
+                Err((recovery, orphan_error)) => {
+                    let orphan_path = orphan_recovery_path(destination_root, displaced);
+                    RestoreOrOrphan::Retained {
+                        recovery,
+                        orphan_path,
+                        rollback_error,
+                        orphan_error,
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Like [`restore_or_orphan`] when rollback already failed and only orphan-or-retain
+/// remains (for example after a consuming restore attempt).
+pub fn orphan_or_retain_after_restore_failure(
+    rollback_error: io::Error,
+    backup: &Path,
+    destination_root: &Path,
+    displaced: &Path,
+    retain_backup: impl FnOnce() -> PathBuf,
+) -> RestoreOrOrphan {
+    match orphan_or_retain(backup, destination_root, displaced, retain_backup) {
+        Ok(recovery) => RestoreOrOrphan::Orphaned {
+            recovery,
+            rollback_error,
+        },
+        Err((recovery, orphan_error)) => RestoreOrOrphan::Retained {
+            recovery,
+            orphan_path: orphan_recovery_path(destination_root, displaced),
+            rollback_error,
+            orphan_error,
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn restore_or_orphan_restores_on_successful_rollback() {
+        let temp = TempDir::new().unwrap();
+        let backup = temp.path().join("backup.txt");
+        let target = temp.path().join("target.txt");
+        fs::write(&backup, "backup-bytes").unwrap();
+        fs::write(&target, "live-bytes").unwrap();
+
+        let outcome = restore_or_orphan(
+            || fs::rename(&backup, &target),
+            &backup,
+            temp.path(),
+            &target,
+            || temp.path().join("unused"),
+        );
+
+        assert!(matches!(outcome, RestoreOrOrphan::Restored));
+        assert_eq!(fs::read(&target).unwrap(), b"backup-bytes");
+        assert!(!backup.exists());
+    }
+
+    #[test]
+    fn restore_or_orphan_moves_backup_to_durable_orphan_on_double_failure() {
+        let temp = TempDir::new().unwrap();
+        let backup = temp.path().join("old");
+        fs::create_dir_all(&backup).unwrap();
+        fs::write(backup.join("payload.txt"), "preserve me").unwrap();
+        let target = temp.path().join("target");
+        fs::write(&target, "rollback blocker").unwrap();
+
+        let outcome = restore_or_orphan(
+            || fs::rename(&backup, &target),
+            &backup,
+            temp.path(),
+            &target,
+            || temp.path().join("fallback"),
+        );
+
+        let RestoreOrOrphan::Orphaned { recovery, .. } = outcome else {
+            panic!("expected orphaned backup, got {outcome:?}");
+        };
+        assert!(
+            recovery
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(".tink-orphan-target-")),
+            "unexpected orphan name: {}",
+            recovery.display()
+        );
+        assert_eq!(
+            fs::read(recovery.join("payload.txt")).unwrap(),
+            b"preserve me"
+        );
+        assert!(!backup.exists());
+    }
+}
