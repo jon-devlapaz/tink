@@ -112,6 +112,14 @@ destination-adjacent staging and rename, and some replacements attempt rollback,
 Tink does not claim atomicity across project trees, the library, skillset pins, or
 manifest/lock pairs.
 
+Skill refresh and other tree replacements that use `skills::publish_staged_tree`
+(`replace_verified`, library promotion) move the live tree into a staging backup,
+attempt the staged publish, and roll back on publish failure. If rollback also fails,
+the staging directory is kept with `TempDir::keep()` and the error names the recovery
+backup path (`old/` under a `.tink-update-*` or `.tink-promote-*` directory beside
+the destination). That path is temp-named and operator-visible rather than silently
+dropped; #29 tracks a shared durable helper for the same pattern elsewhere.
+
 `tink destroy` removes only `.agents/skills/`, then removes `.agents/` if that
 directory is empty. It preserves files outside `.agents/` (including `AGENTS.md`),
 unrelated `.agents/` siblings, and the library.

@@ -1014,6 +1014,15 @@ mod tests {
         );
     }
 
+    fn write_minimal_skill(dir: &Path, name: &str) {
+        fs::create_dir_all(dir).unwrap();
+        fs::write(
+            dir.join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: test skill\n---\n\nbody\n"),
+        )
+        .unwrap();
+    }
+
     #[test]
     fn rollback_failure_retains_recovery_backup() {
         let temp = TempDir::new().unwrap();
@@ -1040,6 +1049,31 @@ mod tests {
         assert_eq!(
             fs::read(staging_path.join("old/original")).unwrap(),
             b"preserve me"
+        );
+    }
+
+    #[test]
+    fn publish_staged_tree_restores_target_when_publish_fails() {
+        let dest = TempDir::new().unwrap();
+        let target = dest.path().join("demo-skill");
+        write_minimal_skill(&target, "demo-skill");
+        fs::write(target.join("payload.txt"), "original-bytes").unwrap();
+
+        let staging = tempfile::Builder::new()
+            .prefix(".tink-update-")
+            .tempdir_in(dest.path())
+            .unwrap();
+        let staged = staging.path().join("new");
+
+        let error = publish_staged_tree(staging, staged, &target).unwrap_err();
+
+        assert!(
+            !error.to_string().contains("recovery backup"),
+            "rollback should succeed without retaining a recovery backup: {error}"
+        );
+        assert_eq!(
+            fs::read(target.join("payload.txt")).unwrap(),
+            b"original-bytes"
         );
     }
 
