@@ -96,3 +96,30 @@ pub fn canonicalize_beneath(base: &Path, relative: &Path) -> Result<PathBuf, Err
 pub fn map_io(path: &Path, err: io::Error) -> Error {
     Error::msg(format!("{}: {err}", output::display_path(path)))
 }
+
+/// Durable recovery path beside `destination_root` for a displaced file or tree
+/// named like `displaced`.
+pub fn orphan_recovery_path(destination_root: &Path, displaced: &Path) -> PathBuf {
+    let name = displaced
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("artifact"));
+    let suffix = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0)
+    );
+    destination_root.join(format!(".tink-orphan-{}-{suffix}", name.to_string_lossy()))
+}
+
+/// Rename a recovery backup to a durable orphan path beside `destination_root`.
+pub fn move_file_to_orphan(
+    backup: &Path,
+    destination_root: &Path,
+    displaced: &Path,
+) -> Result<PathBuf, std::io::Error> {
+    let orphan = orphan_recovery_path(destination_root, displaced);
+    std::fs::rename(backup, &orphan).map(|()| orphan)
+}

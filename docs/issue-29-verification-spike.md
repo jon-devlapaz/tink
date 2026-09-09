@@ -15,7 +15,7 @@ Related: [#29](https://github.com/jon-devlapaz/tink/issues/29), [#26](https://gi
 | Publish staged → live | **Mitigated** — rename publish in `publish_staged_tree`, `install_local`, create-only paths |
 | On failure: restore; if restore fails, **keep** backup and name path | **Mitigated** for `publish_staged_tree`, `manifest::write_atomic`, `update::replace_binary`, and `library::deposit_at` divergent repair; **Missing** for first-install-only paths |
 | Shared helper across call sites | **Missing** — three independent implementations remain |
-| Durable orphan names (`.tink-orphan-*`) | **Partial** — `publish_staged_tree` renames displaced originals to `.tink-orphan-*` on double failure; manifest/binary paths still use temp prefixes |
+| Durable orphan names (`.tink-orphan-*`) | **Done** for replace paths — tree, manifest, and binary double failures rename recovery backups to `.tink-orphan-*` beside the destination root |
 
 **Recommendation:** Keep #29 open but **narrow the next implement PR** to `publish_staged_tree` only: introduce a small internal helper + durable orphan rename on double failure. Defer manifest/binary unification and `deposit_at` divergent repair to follow-up issues. Do **not** close #29 until consolidation scope is explicitly split or the first slice lands.
 
@@ -70,14 +70,14 @@ Legend: **Keep** = explicit `TempDir::keep()` / `NamedTempFile::keep()` / `TempP
 
 | Lines | Function | Stage | Backup | Publish | Rollback | Keep |
 |---|---|---|---|---|---|---|
-| 296–368 | `write_atomic` | `.skills-toml-*`, `.skills-lock-*` temps | `.skills-manifest-backup-*` temp file of prior manifest | rename manifest then lock | restore manifest from backup or remove new manifest | **Keep** backup temp on manifest rollback failure; error names `recovery state` |
+| 296–368 | `write_atomic` | `.skills-toml-*`, `.skills-lock-*` temps | `.skills-manifest-backup-*` temp file of prior manifest | rename manifest then lock | restore manifest from backup or remove new manifest | **Orphan** backup at `.tink-orphan-skills.toml-*` on manifest rollback failure (`keep()` fallback); error names `recovery backup` |
 | 256 | `lock` (caller) | — | — | calls `write_atomic` | — | — |
 
 ### Binary update (`src/update.rs`)
 
 | Lines | Function | Stage | Backup | Publish | Rollback | Keep |
 |---|---|---|---|---|---|---|
-| 375–454 | `replace_binary` | `.tink-update-*` temp file | `.tink-backup-*` copy of current | `TempPath::persist` | `backup.persist(current)` on probe failure | **Keep** backup temp on restore failure; error names `recovery backup` |
+| 375–454 | `replace_binary` | `.tink-update-*` temp file | `.tink-backup-*` copy of current | `TempPath::persist` | `backup.persist(current)` on probe failure | **Orphan** backup at `.tink-orphan-<binary-name>-*` on restore failure (`keep()` fallback); error names `recovery backup` |
 | 492 | `verify_and_replace` | — | — | calls `replace_binary` | — | — |
 
 ---
@@ -92,8 +92,8 @@ Design target: **stage beside dest → durable backup name → publish → resto
 | `install_local` (Ready) | Mitigated | Missing (N/A — no live tree) | Mitigated | N/A | **Partial** (different shape; not #26-class) |
 | `library::deposit_at` (Divergent) | Mitigated | Mitigated (via `publish_staged_tree`) | Mitigated | Mitigated | **Partial** (shared helper deferred) |
 | `library::promote` create / skillset create paths | Mitigated | Missing | Mitigated | N/A | **Partial** |
-| `manifest::write_atomic` | Mitigated | Partial (temp backup file) | Mitigated | Mitigated (`keep()`) | **Partial** |
-| `update::replace_binary` | Mitigated | Partial (temp backup file) | Mitigated | Mitigated (`keep()`) | **Partial** (file not tree; acceptable per #29) |
+| `manifest::write_atomic` | Mitigated | Mitigated (`.tink-orphan-*` on double failure) | Mitigated | Mitigated (orphan rename + named error) | **Partial** (shared helper deferred) |
+| `update::replace_binary` | Mitigated | Mitigated (`.tink-orphan-*` on double failure) | Mitigated | Mitigated (orphan rename + named error) | **Partial** (shared helper deferred) |
 
 ---
 
@@ -106,6 +106,7 @@ cargo test deposit_diverge_repairs -- --nocapture
 cargo test deposit_divergent_repair_restores_original_on_publish_failure -- --nocapture
 cargo test deposit_divergent_repair_retains_orphan_on_double_failure -- --nocapture
 cargo test write_atomic_restores_manifest_when_lock_publish_fails -- --nocapture
+cargo test write_atomic_retains_orphan_on_double_failure -- --nocapture
 cargo test replace_binary_retains_recovery_backup_when_rollback_fails -- --nocapture
 cargo test replace_binary_rolls_back_when_published_probe_fails -- --nocapture
 cargo test --workspace --all-targets --locked
@@ -118,25 +119,25 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 | `skills::tests::rollback_failure_retains_recovery_backup_at_durable_orphan_path` | Tree double failure: orphan rename + recovery path in error |
 | `skills::tests::publish_staged_tree_restores_target_when_publish_fails` (#68) | Single failure: rollback restores live bytes; no orphan |
 | `manifest::tests::write_atomic_restores_manifest_when_lock_publish_fails` (this spike) | Manifest pair: lock publish failure rolls back manifest |
-| `update::tests::replace_binary_retains_recovery_backup_when_rollback_fails` (this spike) | Binary double failure: `keep()` + recovery path in error |
+| `manifest::tests::write_atomic_retains_orphan_on_double_failure` | Manifest double failure: orphan rename + recovery path |
+| `update::tests::replace_binary_retains_recovery_backup_when_rollback_fails` | Binary double failure: orphan rename + recovery path in error |
 | `update::tests::replace_binary_rolls_back_when_published_probe_fails` | Binary single failure: successful rollback |
 
 ### Not proven (honest gaps)
 
 - End-to-end double failure injected through full `replace_verified` rename window without calling `rollback_or_retain_backup` directly (would need concurrent target recreation or test hooks).
 - End-to-end double failure injected through full `deposit_at` rename window without calling rollback helpers directly (library tests characterize restore and orphan beside the library root).
-- Durable `.tink-orphan-*` naming for manifest/binary/update paths (tree swap done).
+- Shared helper unifying tree, manifest, and binary swap implementations.
 - Windows, concurrent locks, cross-filesystem rename (explicitly out of v1).
 
 ---
 
 ## Residual risks
 
-1. **Temp-named recovery artifacts** — manifest/binary paths still use temp prefixes; tree swap uses `.tink-orphan-*`.
+1. **Three parallel implementations** — tree, manifest, and binary paths share orphan naming but not a single swap helper.
 2. **`deposit_at` divergent repair** — mitigated via `repair_divergent_deposit` + `publish_staged_tree` (PR after spike).
-3. **Three parallel implementations** — behavior drift risk between `publish_staged_tree`, `write_atomic`, and `replace_binary`.
-4. **First-install staging** — failed rename drops staged new tree only; existing live content unaffected.
-5. **Concurrent target recreation** — documented; recovery depends on winning the race after rollback failure.
+3. **First-install staging** — failed rename drops staged new tree only; existing live content unaffected.
+4. **Concurrent target recreation** — documented; recovery depends on winning the race after rollback failure.
 
 ---
 
