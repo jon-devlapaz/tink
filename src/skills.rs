@@ -749,24 +749,6 @@ pub fn install_local(
     }
 }
 
-fn orphan_recovery_path(destination_root: &Path, target: &Path) -> PathBuf {
-    let skill_name = target
-        .file_name()
-        .unwrap_or_else(|| std::ffi::OsStr::new("skill"));
-    let suffix = format!(
-        "{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_nanos())
-            .unwrap_or(0)
-    );
-    destination_root.join(format!(
-        ".tink-orphan-{}-{suffix}",
-        skill_name.to_string_lossy()
-    ))
-}
-
 #[cfg(test)]
 pub(crate) fn test_rollback_or_retain_backup(
     staging: tempfile::TempDir,
@@ -787,7 +769,7 @@ fn rollback_or_retain_backup(
         Ok(()) => map_io(target, publish_error),
         Err(rollback_error) => {
             let destination_root = target.parent().unwrap_or_else(|| Path::new("."));
-            let orphan = orphan_recovery_path(destination_root, target);
+            let orphan = crate::paths::orphan_recovery_path(destination_root, target);
             match fs::rename(backup, &orphan) {
                 Ok(()) => Error::msg(format!(
                     "could not publish {} ({publish_error}); rollback failed ({rollback_error}); recovery backup: {}",

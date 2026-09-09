@@ -351,14 +351,21 @@ fn write_atomic(root: &Path, manifest: &str, lock: &str) -> Result<(), Error> {
         };
         if let Err(rollback_error) = rollback {
             let recovery = match previous_backup.take() {
-                Some(backup) => backup
-                    .keep()
-                    .map(|(_, path)| path)
-                    .unwrap_or_else(|_| manifest_path.clone()),
+                Some(backup) => match crate::paths::move_file_to_orphan(
+                    backup.path(),
+                    &directory,
+                    &manifest_path,
+                ) {
+                    Ok(orphan) => orphan,
+                    Err(_) => backup
+                        .keep()
+                        .map(|(_, path)| path)
+                        .unwrap_or_else(|_| manifest_path.clone()),
+                },
                 None => manifest_path.clone(),
             };
             return Err(Error::msg(format!(
-                "could not publish {} ({error}); manifest rollback failed ({rollback_error}); recovery state: {}",
+                "could not publish {} ({error}); manifest rollback failed ({rollback_error}); recovery backup: {}",
                 lock_path.display(),
                 recovery.display()
             )));
@@ -727,11 +734,74 @@ mod tests {
             "expected lock publish failure: {error}"
         );
         assert!(
-            !error.to_string().contains("recovery state"),
+            !error.to_string().contains("recovery backup"),
             "manifest rollback should succeed without retaining a recovery backup: {error}"
+        );
+        assert!(
+            orphan_files_in(&directory).is_empty(),
+            "successful rollback must not leave orphan files: {error}"
         );
         assert_eq!(
             fs::read_to_string(&manifest_path).unwrap(),
+            "version = 1\n\nskills = []\n"
+        );
+    }
+
+    fn orphan_files_in(root: &Path) -> Vec<PathBuf> {
+        fs::read_dir(root)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with(".tink-orphan-"))
+            })
+            .map(|entry| entry.path())
+            .collect()
+    }
+
+    #[test]
+    fn write_atomic_retains_orphan_on_double_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        let directory = temp.path().join(DIRECTORY);
+        fs::create_dir_all(&directory).unwrap();
+        let manifest_path = directory.join(MANIFEST_FILE);
+        fs::create_dir_all(&manifest_path).unwrap();
+        let mut backup = tempfile::Builder::new()
+            .prefix(".skills-manifest-backup-")
+            .tempfile_in(&directory)
+            .unwrap();
+        backup.write_all(b"version = 1\n\nskills = []\n").unwrap();
+        assert!(
+            fs::rename(backup.path(), &manifest_path).is_err(),
+            "fixture: manifest path must block rollback rename"
+        );
+
+        let recovery =
+            match crate::paths::move_file_to_orphan(backup.path(), &directory, &manifest_path) {
+                Ok(orphan) => orphan,
+                Err(_) => backup
+                    .keep()
+                    .map(|(_, path)| path)
+                    .unwrap_or_else(|_| manifest_path.clone()),
+            };
+
+        let orphans = orphan_files_in(&directory);
+        assert_eq!(orphans.len(), 1);
+        let orphan = &orphans[0];
+        assert!(
+            orphan
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(".tink-orphan-skills.toml-")),
+            "unexpected orphan name: {}",
+            orphan.display()
+        );
+        assert_eq!(recovery, *orphan);
+        assert_eq!(
+            fs::read_to_string(orphan).unwrap(),
             "version = 1\n\nskills = []\n"
         );
     }

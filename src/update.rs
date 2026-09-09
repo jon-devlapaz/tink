@@ -441,12 +441,18 @@ fn replace_binary(current: &Path, new_bin: &Path, expected_version: &str) -> Res
             }
             Err(restore_error) => {
                 let cause = restore_error.error;
-                let recovery = restore_error.file.into_temp_path().keep().ok();
-                let recovery = recovery
-                    .as_deref()
-                    .map_or_else(|| "unavailable".to_string(), output::display_path);
+                let temp_path = restore_error.file.into_temp_path();
+                let recovery = match crate::paths::move_file_to_orphan(&temp_path, parent, current)
+                {
+                    Ok(orphan) => orphan,
+                    Err(_) => temp_path
+                        .keep()
+                        .map(|path| path.to_path_buf())
+                        .unwrap_or_else(|_| parent.join("unavailable")),
+                };
                 Err(Error::msg(format!(
-                    "published tink failed exact version verification ({probe_error}); rollback failed ({cause}); recovery backup: {recovery}"
+                    "published tink failed exact version verification ({probe_error}); rollback failed ({cause}); recovery backup: {}",
+                    output::display_path(&recovery)
                 )))
             }
         };
@@ -867,7 +873,7 @@ mod tests {
         fs::set_permissions(&current, fs::Permissions::from_mode(0o755)).unwrap();
         fs::write(
             &candidate,
-            b"#!/bin/sh\ncase \"$0\" in\n  */installed-tink)\n    chmod 000 \"$(dirname \"$0\")\" 2>/dev/null || true\n    printf 'tink 0.0.0\\n'\n    ;;\n  *) printf 'tink 99.0.0\\n' ;;\nesac\n",
+            b"#!/bin/sh\ncase \"$0\" in\n  */installed-tink)\n    rm -f \"$0\"\n    mkdir \"$0\"\n    printf 'tink 0.0.0\\n'\n    ;;\n  *) printf 'tink 99.0.0\\n' ;;\nesac\n",
         )
         .unwrap();
         fs::set_permissions(&candidate, fs::Permissions::from_mode(0o755)).unwrap();
@@ -879,15 +885,27 @@ mod tests {
             "expected retained backup path in error: {err}"
         );
         assert!(
-            err.to_string().contains(".tink-backup-"),
-            "expected temp backup prefix in recovery path: {err}"
+            err.to_string().contains(".tink-orphan-"),
+            "expected durable orphan prefix in recovery path: {err}"
         );
-        fs::set_permissions(parent, fs::Permissions::from_mode(0o755)).unwrap();
-        assert_ne!(
-            fs::read(&current).unwrap(),
-            original,
-            "rollback failed; published candidate should remain at current"
+        assert!(
+            current.is_dir(),
+            "fixture: published path must block rollback persist"
         );
+        let orphans = fs::read_dir(parent)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with(".tink-orphan-"))
+            })
+            .map(|entry| entry.path())
+            .collect::<Vec<_>>();
+        assert_eq!(orphans.len(), 1, "{err}");
+        assert_eq!(fs::read(&orphans[0]).unwrap(), original);
     }
 
     #[cfg(unix)]
@@ -911,10 +929,27 @@ mod tests {
         let err = replace_binary(&current, &candidate, "99.0.0").unwrap_err();
 
         assert!(err.to_string().contains("published"));
+        assert!(
+            !err.to_string().contains("recovery backup"),
+            "successful rollback must not retain a recovery backup: {err}"
+        );
         assert_eq!(fs::read(&current).unwrap(), original);
         assert_eq!(
             fs::metadata(&current).unwrap().permissions().mode() & 0o777,
             0o755
+        );
+        assert!(
+            fs::read_dir(temp.path())
+                .into_iter()
+                .flatten()
+                .flatten()
+                .all(|entry| {
+                    !entry
+                        .file_name()
+                        .to_str()
+                        .is_some_and(|name| name.starts_with(".tink-orphan-"))
+                }),
+            "successful rollback must not leave orphan files"
         );
     }
 
