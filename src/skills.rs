@@ -749,6 +749,24 @@ pub fn install_local(
     }
 }
 
+fn orphan_recovery_path(destination_root: &Path, target: &Path) -> PathBuf {
+    let skill_name = target
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("skill"));
+    let suffix = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0)
+    );
+    destination_root.join(format!(
+        ".tink-orphan-{}-{suffix}",
+        skill_name.to_string_lossy()
+    ))
+}
+
 fn rollback_or_retain_backup(
     staging: tempfile::TempDir,
     backup: &Path,
@@ -758,23 +776,36 @@ fn rollback_or_retain_backup(
     match fs::rename(backup, target) {
         Ok(()) => map_io(target, publish_error),
         Err(rollback_error) => {
-            let recovery_root = staging.keep();
-            let recovery = recovery_root.join(
-                backup
-                    .file_name()
-                    .unwrap_or_else(|| std::ffi::OsStr::new("old")),
-            );
-            Error::msg(format!(
-                "could not publish {} ({publish_error}); rollback failed ({rollback_error}); recovery backup: {}",
-                output::display_path(target),
-                output::display_path(&recovery)
-            ))
+            let destination_root = target.parent().unwrap_or_else(|| Path::new("."));
+            let orphan = orphan_recovery_path(destination_root, target);
+            match fs::rename(backup, &orphan) {
+                Ok(()) => Error::msg(format!(
+                    "could not publish {} ({publish_error}); rollback failed ({rollback_error}); recovery backup: {}",
+                    output::display_path(target),
+                    output::display_path(&orphan)
+                )),
+                Err(orphan_error) => {
+                    let recovery_root = staging.keep();
+                    let recovery = recovery_root.join(
+                        backup
+                            .file_name()
+                            .unwrap_or_else(|| std::ffi::OsStr::new("old")),
+                    );
+                    Error::msg(format!(
+                        "could not publish {} ({publish_error}); rollback failed ({rollback_error}); could not move recovery backup to {} ({orphan_error}); recovery backup: {}",
+                        output::display_path(target),
+                        output::display_path(&orphan),
+                        output::display_path(&recovery)
+                    ))
+                }
+            }
         }
     }
 }
 
 /// Rename a fully staged replacement over an existing tree. If publication and
-/// rollback both fail, retain the only original at an explicit recovery path.
+/// rollback both fail, retain the displaced original at a durable `.tink-orphan-*`
+/// path beside the destination root.
 pub(crate) fn publish_staged_tree(
     staging: tempfile::TempDir,
     staged: PathBuf,
@@ -1023,8 +1054,21 @@ mod tests {
         .unwrap();
     }
 
+    fn orphan_dirs_in(root: &Path) -> Vec<PathBuf> {
+        fs::read_dir(root)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with(".tink-orphan-"))
+            })
+            .collect()
+    }
+
     #[test]
-    fn rollback_failure_retains_recovery_backup() {
+    fn rollback_failure_retains_recovery_backup_at_durable_orphan_path() {
         let temp = TempDir::new().unwrap();
         let staging = tempfile::Builder::new()
             .prefix(".rollback-fixture-")
@@ -1045,11 +1089,24 @@ mod tests {
         );
 
         assert!(error.to_string().contains("recovery backup"), "{error}");
-        assert!(error.to_string().contains(&backup.display().to_string()));
-        assert_eq!(
-            fs::read(staging_path.join("old/original")).unwrap(),
-            b"preserve me"
+        let orphans = orphan_dirs_in(temp.path());
+        assert_eq!(orphans.len(), 1, "{error}");
+        let orphan = &orphans[0];
+        assert!(
+            orphan
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(".tink-orphan-target-")),
+            "unexpected orphan name: {}",
+            orphan.display()
         );
+        assert!(
+            error.to_string().contains(&orphan.display().to_string()),
+            "{error}"
+        );
+        assert_eq!(fs::read(orphan.join("original")).unwrap(), b"preserve me");
+        assert!(!staging_path.exists(), "temp staging dir should be removed");
+        assert!(!backup.exists(), "backup should move out of staging");
     }
 
     #[test]
@@ -1074,6 +1131,10 @@ mod tests {
         assert_eq!(
             fs::read(target.join("payload.txt")).unwrap(),
             b"original-bytes"
+        );
+        assert!(
+            orphan_dirs_in(dest.path()).is_empty(),
+            "successful rollback must not leave orphan dirs"
         );
     }
 

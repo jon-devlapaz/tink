@@ -195,7 +195,8 @@ records deliberate bundled coverage; `Sensor: manual` records an unresolved proo
   sequential project, library, and catalog publications. Expected validation and
   ownership refusals are preflighted; retry is the operational recovery model.
 - Skill refresh double-failure retention (`publish_staged_tree` publish + rollback
-  both fail) is covered by `skills::tests::rollback_failure_retains_recovery_backup`
+  both fail) is covered by
+  `skills::tests::rollback_failure_retains_recovery_backup_at_durable_orphan_path`
   plus a successful-rollback characterization in
   `publish_staged_tree_restores_target_when_publish_fails`. A deterministic
   end-to-end double-failure injection through the full rename window is not

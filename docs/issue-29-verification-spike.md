@@ -15,7 +15,7 @@ Related: [#29](https://github.com/jon-devlapaz/tink/issues/29), [#26](https://gi
 | Publish staged → live | **Mitigated** — rename publish in `publish_staged_tree`, `install_local`, create-only paths |
 | On failure: restore; if restore fails, **keep** backup and name path | **Mitigated** for `publish_staged_tree`, `manifest::write_atomic`, and `update::replace_binary`; **Missing** for `library::deposit_at` divergent repair and first-install-only paths |
 | Shared helper across call sites | **Missing** — three independent implementations remain |
-| Durable orphan names (`.tink-orphan-*`) | **Missing** — recovery dirs/files keep temp prefixes (`.tink-update-*`, `.skills-manifest-backup-*`, `.tink-backup-*`) |
+| Durable orphan names (`.tink-orphan-*`) | **Partial** — `publish_staged_tree` renames displaced originals to `.tink-orphan-*` on double failure; manifest/binary paths still use temp prefixes |
 
 **Recommendation:** Keep #29 open but **narrow the next implement PR** to `publish_staged_tree` only: introduce a small internal helper + durable orphan rename on double failure. Defer manifest/binary unification and `deposit_at` divergent repair to follow-up issues. Do **not** close #29 until consolidation scope is explicitly split or the first slice lands.
 
@@ -88,7 +88,7 @@ Design target: **stage beside dest → durable backup name → publish → resto
 
 | Site | Stage | Durable backup | Publish | Restore-or-keep | Overall |
 |---|---|---|---|---|---|
-| `publish_staged_tree` (+ callers) | Mitigated | Partial (backup under temp dir, not `.tink-orphan-*`) | Mitigated | Mitigated (`keep()` + named error) | **Partial** |
+| `publish_staged_tree` (+ callers) | Mitigated | Mitigated (`.tink-orphan-*` on double failure) | Mitigated | Mitigated (orphan rename + named error) | **Partial** (shared helper deferred) |
 | `install_local` (Ready) | Mitigated | Missing (N/A — no live tree) | Mitigated | N/A | **Partial** (different shape; not #26-class) |
 | `library::deposit_at` (Divergent) | Missing | Missing | Partial (`install_local`) | Missing | **Missing** |
 | `library::promote` create / skillset create paths | Mitigated | Missing | Mitigated | N/A | **Partial** |
@@ -100,7 +100,7 @@ Design target: **stage beside dest → durable backup name → publish → resto
 ## Executable proof (tests run on spike branch)
 
 ```bash
-cargo test rollback_failure_retains_recovery_backup -- --nocapture
+cargo test rollback_failure_retains_recovery_backup_at_durable_orphan_path -- --nocapture
 cargo test publish_staged_tree_restores_target_when_publish_fails -- --nocapture
 cargo test write_atomic_restores_manifest_when_lock_publish_fails -- --nocapture
 cargo test replace_binary_retains_recovery_backup_when_rollback_fails -- --nocapture
@@ -112,7 +112,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 
 | Test | Proves |
 |---|---|
-| `skills::tests::rollback_failure_retains_recovery_backup` (#68) | Tree double failure: `keep()` + recovery path in error |
+| `skills::tests::rollback_failure_retains_recovery_backup_at_durable_orphan_path` | Tree double failure: orphan rename + recovery path in error |
 | `skills::tests::publish_staged_tree_restores_target_when_publish_fails` (#68) | Single failure: rollback restores live bytes; no orphan |
 | `manifest::tests::write_atomic_restores_manifest_when_lock_publish_fails` (this spike) | Manifest pair: lock publish failure rolls back manifest |
 | `update::tests::replace_binary_retains_recovery_backup_when_rollback_fails` (this spike) | Binary double failure: `keep()` + recovery path in error |
@@ -122,14 +122,14 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 
 - End-to-end double failure injected through full `replace_verified` rename window without calling `rollback_or_retain_backup` directly (would need concurrent target recreation or test hooks).
 - `library::deposit_at` divergent `clear_path` data-loss path (documented; no deterministic unit test without invasive hooks).
-- Durable `.tink-orphan-*` naming (not implemented).
+- Durable `.tink-orphan-*` naming for manifest/binary/update paths (tree swap done).
 - Windows, concurrent locks, cross-filesystem rename (explicitly out of v1).
 
 ---
 
 ## Residual risks
 
-1. **Temp-named recovery artifacts** — operator must discover `.tink-update-*` / `.tink-promote-*` dirs beside the skills root; not renamed to a stable orphan name.
+1. **Temp-named recovery artifacts** — manifest/binary paths still use temp prefixes; tree swap uses `.tink-orphan-*`.
 2. **`deposit_at` divergent repair** — `clear_path` deletes the library tree before `install_local`; install failure leaves no recovery backup (#29 class gap, separate from #26).
 3. **Three parallel implementations** — behavior drift risk between `publish_staged_tree`, `write_atomic`, and `replace_binary`.
 4. **First-install staging** — failed rename drops staged new tree only; existing live content unaffected.
