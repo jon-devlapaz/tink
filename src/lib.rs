@@ -155,8 +155,13 @@ pub enum SkillCommand {
     /// Verify project skills against `.tink/skills.toml` and `.tink/skills.lock`
     Verify,
     /// Generate `.tink/skills.toml` and `.tink/skills.lock` from installed skills
+    ///
+    /// Remote and embedded skills resolve from their receipts automatically;
+    /// only local skills need an explicit mapping, e.g.
+    /// `tink skill lock --source myskill=vendor/myskill`
     Lock {
-        /// Source mapping for local skills (`NAME=PATH`); repeatable
+        /// Source mapping for local skills (`NAME=PATH`); repeatable.
+        /// Remote and embedded skills need no mapping.
         #[arg(long = "source", value_name = "NAME=PATH")]
         source: Vec<String>,
     },
