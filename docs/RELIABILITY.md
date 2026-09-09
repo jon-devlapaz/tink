@@ -115,10 +115,11 @@ manifest/lock pairs.
 Skill refresh and other tree replacements that use `skills::publish_staged_tree`
 (`replace_verified`, library promotion) move the live tree into a staging backup,
 attempt the staged publish, and roll back on publish failure. If rollback also fails,
-the staging directory is kept with `TempDir::keep()` and the error names the recovery
-backup path (`old/` under a `.tink-update-*` or `.tink-promote-*` directory beside
-the destination). That path is temp-named and operator-visible rather than silently
-dropped; #29 tracks a shared durable helper for the same pattern elsewhere.
+the displaced original tree is renamed beside the destination root to
+`.tink-orphan-<skill-name>-<unique>` and the error names that recovery path. The
+temp staging directory is dropped when the orphan move succeeds. Manifest and binary
+replace paths still retain temp-prefixed recovery artifacts; #29 tracks unifying those
+call sites.
 
 `tink destroy` removes only `.agents/skills/`, then removes `.agents/` if that
 directory is empty. It preserves files outside `.agents/` (including `AGENTS.md`),
