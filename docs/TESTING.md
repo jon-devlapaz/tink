@@ -149,7 +149,12 @@ The most important ownership sensors are:
   case-insensitive SHA-256 metadata, URL
   redaction/policy, bounded candidate probes and output capture, exact published
   version probes, terminal-safe update output, and preservation or rollback of an
-  existing binary.
+  existing binary. `update.rs` unit tests also cover binary rollback failure with
+  an explicit retained recovery backup path; see
+  [`issue-29-verification-spike.md`](issue-29-verification-spike.md).
+- `skills.rs` unit tests cover tree publish rollback success and double-failure
+  recovery backup retention (#68). `manifest.rs` unit tests cover manifest/lock
+  pair rollback when lock publication fails.
 - G9-G10 pin Git process-group cleanup on parent-only termination and visible escaping
   of terminal controls in untrusted repository paths.
 - L10-L13 and `catalog.rs` unit tests cover hashed catalog identity, bounded

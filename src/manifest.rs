@@ -703,6 +703,40 @@ mod tests {
     }
 
     #[test]
+    fn write_atomic_restores_manifest_when_lock_publish_fails() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path();
+        let directory = project.join(DIRECTORY);
+        fs::create_dir_all(&directory).unwrap();
+        let manifest_path = directory.join(MANIFEST_FILE);
+        let lock_path = directory.join(LOCK_FILE);
+        fs::write(&manifest_path, "version = 1\n\nskills = []\n").unwrap();
+        fs::write(&lock_path, "version = 2\n\nskills = []\n").unwrap();
+        fs::remove_file(&lock_path).unwrap();
+        fs::create_dir_all(&lock_path).unwrap();
+
+        let error = write_atomic(
+            project,
+            "version = 1\n\n[[skills]]\nname = \"alpha\"\nsource = \"sources/alpha\"\n",
+            "version = 2\n\n[[skills]]\nname = \"alpha\"\nsource = \"sources/alpha\"\nsha256 = \"0000000000000000000000000000000000000000000000000000000000000000\"\n",
+        )
+        .unwrap_err();
+
+        assert!(
+            error.to_string().contains("skills.lock"),
+            "expected lock publish failure: {error}"
+        );
+        assert!(
+            !error.to_string().contains("recovery state"),
+            "manifest rollback should succeed without retaining a recovery backup: {error}"
+        );
+        assert_eq!(
+            fs::read_to_string(&manifest_path).unwrap(),
+            "version = 1\n\nskills = []\n"
+        );
+    }
+
+    #[test]
     fn sync_preflights_and_publishes_embedded_skill() {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path().join("project");
