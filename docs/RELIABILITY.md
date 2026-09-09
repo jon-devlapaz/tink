@@ -113,13 +113,13 @@ Tink does not claim atomicity across project trees, the library, skillset pins, 
 manifest/lock pairs.
 
 Skill refresh and other tree replacements that use `skills::publish_staged_tree`
-(`replace_verified`, library promotion) move the live tree into a staging backup,
-attempt the staged publish, and roll back on publish failure. If rollback also fails,
-the displaced original tree is renamed beside the destination root to
-`.tink-orphan-<skill-name>-<unique>` and the error names that recovery path. The
-temp staging directory is dropped when the orphan move succeeds. Manifest and binary
-replace paths still retain temp-prefixed recovery artifacts; #29 tracks unifying those
-call sites.
+(`replace_verified`, library promotion, divergent library deposit repair) move the
+live tree into a staging backup, attempt the staged publish, and roll back on publish
+failure. If rollback also fails, the displaced original tree is renamed beside the
+destination root to `.tink-orphan-<skill-name>-<unique>` and the error names that
+recovery path. The temp staging directory is dropped when the orphan move succeeds.
+Manifest and binary replace paths still retain temp-prefixed recovery artifacts; #29
+tracks unifying those call sites.
 
 `tink destroy` removes only `.agents/skills/`, then removes `.agents/` if that
 directory is empty. It preserves files outside `.agents/` (including `AGENTS.md`),

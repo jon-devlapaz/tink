@@ -767,6 +767,16 @@ fn orphan_recovery_path(destination_root: &Path, target: &Path) -> PathBuf {
     ))
 }
 
+#[cfg(test)]
+pub(crate) fn test_rollback_or_retain_backup(
+    staging: tempfile::TempDir,
+    backup: &Path,
+    target: &Path,
+    publish_error: std::io::Error,
+) -> Error {
+    rollback_or_retain_backup(staging, backup, target, publish_error)
+}
+
 fn rollback_or_retain_backup(
     staging: tempfile::TempDir,
     backup: &Path,
