@@ -19,6 +19,10 @@ ends the turn: report it and stop.
 Use this workflow only for the Tink request that triggered the skill. Treat
 inspection authority and mutation authority as separate grants.
 
+When the user asks which skill fits a task and no mutation is authorized yet,
+load [references/tink-jev.md](references/tink-jev.md) and follow it instead of
+Step 2. Step 2 stays mutation-only.
+
 ## Inputs
 
 - The current project root.
@@ -147,7 +151,8 @@ provenance is refused.
 ## Related Skills
 
 - `skill-scout` — Scout candidate skills with evidence before choosing one to
-  add through Tink.
+  add through Tink. When both apply, scout first, then Jev Choice over the
+  scouted set (see `references/tink-jev.md`).
 
 ## Authority
 
