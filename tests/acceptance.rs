@@ -298,13 +298,6 @@ fn i6_init_installs_manage_tink_and_catalogs_name() {
     let skill = Workspace::skill_path(&project, "manage-tink");
     assert!(skill.join("SKILL.md").is_file());
     assert!(skill.join("references").join("commands.md").is_file());
-    assert!(
-        skill
-            .join("references")
-            .join("skillset-router.md")
-            .is_file()
-    );
-    assert!(skill.join("scripts").join("list-members.mjs").is_file());
 }
 
 #[test]
@@ -1390,8 +1383,8 @@ fn k1c_missing_router_fails_check_and_is_restored_by_refresh() {
         .success();
 
     let installed = Workspace::skill_path(&project, "common-skillset");
-    let elevated = "---\nname: common-skillset\ndescription: Elevated router for common-skillset.\n---\n\n# Elevated\n";
-    fs::write(installed.join("SKILL.md"), elevated).unwrap();
+    let custom = "---\nname: common-skillset\ndescription: Custom router for common-skillset.\n---\n\n# Custom\n";
+    fs::write(installed.join("SKILL.md"), custom).unwrap();
     ws.cmd(&project)
         .args(["skillset", "add", "common-skillset"])
         .envs(redirect.clone())
@@ -1399,7 +1392,7 @@ fn k1c_missing_router_fails_check_and_is_restored_by_refresh() {
         .success();
     assert_eq!(
         fs::read_to_string(ws.library_skillset("common-skillset").join("SKILL.md")).unwrap(),
-        elevated
+        custom
     );
 
     fs::remove_file(installed.join("SKILL.md")).unwrap();
@@ -1417,8 +1410,8 @@ fn k1c_missing_router_fails_check_and_is_restored_by_refresh() {
         .stdout(predicate::str::contains("Unchanged"));
     assert_eq!(
         fs::read_to_string(installed.join("SKILL.md")).unwrap(),
-        elevated,
-        "refresh must restore the elevated library router when project router is missing"
+        custom,
+        "refresh must restore the library router when project router is missing"
     );
     ws.cmd(&project).args(["skill", "check"]).assert().success();
 
@@ -1759,12 +1752,6 @@ fn k12_skillset_add_url_inferred_and_custom_name_baseline_router() {
     assert!(stdout.contains(&format!(
         "  Router:   .agents/skills/{inferred_name}/SKILL.md (baseline generated)"
     )));
-    assert!(stdout.contains(
-        "To elevate this router with semantic coordinators and custom roles, prompt your agent:"
-    ));
-    assert!(stdout.contains(&format!(
-        "  \"Use manage-tink to create a skillset router for {inferred_name}\""
-    )));
 
     // Catalog definition authored create-only with immutable 40-char commit SHA
     let meta_path = ws.skillset_meta(inferred_name);
@@ -1797,22 +1784,6 @@ fn k12_skillset_add_url_inferred_and_custom_name_baseline_router() {
     assert!(library1.join("alpha/SKILL.md").is_file());
     assert!(library1.join("beta/SKILL.md").is_file());
     assert!(library1.join("SKILL.md").is_file());
-
-    // Verify baseline router with verify-router.mjs if node is present
-    let node_status = std::process::Command::new("node")
-        .arg(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("skills/manage-tink/scripts/verify-router.mjs"),
-        )
-        .arg(&installed1)
-        .env("TINK_HOME", &ws.inventory)
-        .status();
-    if let Ok(status) = node_status {
-        assert!(
-            status.success(),
-            "verify-router.mjs failed on baseline router"
-        );
-    }
 
     // skill check and skillset list
     ws.cmd(&project).args(["skill", "check"]).assert().success();
@@ -5401,19 +5372,19 @@ fn p11_refresh_manage_tink_replaces_differing_reserved_copy() {
     );
     ws.cmd(&project).args(["skill", "check"]).assert().success();
 
-    // Simulate an existing pre-v1.0.9 workspace with legacy Step 4b instructions
+    // Simulate an existing workspace with a legacy Step 5 heading
     let skill_md_path = installed.join("SKILL.md");
     let current_skill_md = fs::read_to_string(&skill_md_path).expect("read SKILL.md");
     assert!(
-        current_skill_md.contains("Step 4b: Elevate skillset router on ask"),
-        "embedded SKILL.md must contain v1.0.9+ Step 4b"
+        current_skill_md.contains("### Step 5: Refresh manage-tink when separately authorized"),
+        "embedded SKILL.md must contain Step 5"
     );
 
     let legacy_skill_md = current_skill_md.replace(
-        "### Step 4b: Elevate skillset router on ask",
-        "### Step 4b: Create a skillset router after add",
+        "### Step 5: Refresh manage-tink when separately authorized",
+        "### Step 5: Legacy refresh step",
     );
-    fs::write(&skill_md_path, legacy_skill_md).expect("write legacy pre-v1.0.9 SKILL.md");
+    fs::write(&skill_md_path, legacy_skill_md).expect("write legacy SKILL.md");
 
     // Before refresh, skill check refuses the differing embedded skill
     ws.cmd(&project)
@@ -5424,7 +5395,7 @@ fn p11_refresh_manage_tink_replaces_differing_reserved_copy() {
             "manage-tink differs from this Tink binary; run `tink skill refresh manage-tink`",
         ));
 
-    // Refreshing updates the project's local manage-tink to v1.0.9+ instructions
+    // Refreshing updates the project's local manage-tink to the current instructions
     ws.cmd(&project)
         .args(["skill", "refresh", "manage-tink"])
         .assert()
@@ -5433,12 +5404,12 @@ fn p11_refresh_manage_tink_replaces_differing_reserved_copy() {
 
     let refreshed_skill_md = fs::read_to_string(&skill_md_path).expect("read refreshed SKILL.md");
     assert!(
-        refreshed_skill_md.contains("### Step 4b: Elevate skillset router on ask"),
-        "refreshed SKILL.md must contain Step 4b: Elevate skillset router on ask"
+        refreshed_skill_md.contains("### Step 5: Refresh manage-tink when separately authorized"),
+        "refreshed SKILL.md must contain Step 5"
     );
     assert!(
-        !refreshed_skill_md.contains("### Step 4b: Create a skillset router after add"),
-        "refreshed SKILL.md must not contain legacy Step 4b"
+        !refreshed_skill_md.contains("### Step 5: Legacy refresh step"),
+        "refreshed SKILL.md must not contain legacy Step 5"
     );
     ws.cmd(&project).args(["skill", "check"]).assert().success();
 }

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Tink"
-  short_description: "Project skills and skillsets via Tink CLI"
-  default_prompt: "Use $manage-tink to manage this project's skills, skillsets, and Tink library safely."

@@ -358,7 +358,7 @@ fn member_descriptions_from_installed(
 
 /// Restore a missing project router without touching member digests.
 ///
-/// Prefers an existing `$TINK_HOME/skillsets/` router (may be elevated), otherwise
+/// Prefers an existing `$TINK_HOME/skillsets/` router, otherwise
 /// writes a fresh baseline from installed member descriptions.
 fn ensure_project_router(
     home: Option<&Path>,

@@ -550,14 +550,6 @@ fn dispatch_skillset(cwd: &Path, command: SkillsetCommand) -> Result<(), Error> 
                     "    Router:   {} (baseline generated)",
                     style.accent(rel_router)
                 );
-                println!();
-                println!(
-                    "  To elevate this router with semantic coordinators and custom roles, prompt your agent:"
-                );
-                println!(
-                    "    \"Use manage-tink to create a skillset router for {}\"",
-                    outcome.name
-                );
             } else {
                 println!(
                     "{} {}",
