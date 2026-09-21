@@ -11,6 +11,7 @@ use crate::skills::{self, Skill};
 
 const SKILL_MD: &str = include_str!("../skills/manage-tink/SKILL.md");
 const COMMANDS_MD: &str = include_str!("../skills/manage-tink/references/commands.md");
+const TINK_JEV_MD: &str = include_str!("../skills/manage-tink/references/tink-jev.md");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RefreshOutcome {
@@ -24,6 +25,7 @@ const EMBEDDED_DIRS: &[&str] = &["references"];
 const EMBEDDED_FILES: &[(&str, &[u8])] = &[
     ("SKILL.md", SKILL_MD.as_bytes()),
     ("references/commands.md", COMMANDS_MD.as_bytes()),
+    ("references/tink-jev.md", TINK_JEV_MD.as_bytes()),
 ];
 
 /// Materialize the embedded tree for installation or refresh publication.
@@ -40,6 +42,8 @@ pub(crate) fn prepare_manage_tink() -> Result<(tempfile::TempDir, Skill), Error>
         .map_err(|e| map_io(&skill_root.join("SKILL.md"), e))?;
     std::fs::write(references.join("commands.md"), COMMANDS_MD)
         .map_err(|e| map_io(&references.join("commands.md"), e))?;
+    std::fs::write(references.join("tink-jev.md"), TINK_JEV_MD)
+        .map_err(|e| map_io(&references.join("tink-jev.md"), e))?;
     let skill = skills::read_skill(&skill_root, true)?;
     Ok((staging, skill))
 }
