@@ -85,7 +85,7 @@ tink skill list
 tink skill check
 ```
 
-On a TTY, `init` asks whether to install `skill-scout` and `triangulate-me`
+On a TTY, `init` asks whether to install `skill-scout` and `grill-me-with-jev`
 from [tink-skills](https://github.com/jon-devlapaz/tink-skills). Accept that
 prompt to install both live skill directories under `.agents/skills/`.
 Non-interactive runs skip the optional bundle unless you pass

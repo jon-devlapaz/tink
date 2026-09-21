@@ -79,7 +79,7 @@ pub struct Cli {
 pub enum Command {
     /// Create `.agents/skills/` and ensure the home inventory root exists
     Init {
-        /// Add skill-scout and triangulate-me from GitHub (tink-skills)
+        /// Add skill-scout and grill-me-with-jev from GitHub (tink-skills)
         #[arg(long = "with-tink-skills", group = "tink_skills")]
         with_tink_skills: bool,
         /// Skip tink-skills bundle

@@ -60,7 +60,7 @@
 - I7 `--no-manage-tink`: no manage-tink.
 - I8 relative `TINK_HOME` (e.g. `../home`): OK, absolutized sibling home, stdout shows absolute path.
 - I9 init twice unchanged: 2nd OK (`Ready`/`Already present`), files identical.
-- I10 `--with-tink-skills` vs incomplete bundle: 1st FAILS preserving setup; after repair 2nd OK with manage-tink + skill-scout + triangulate-me.
+- I10 `--with-tink-skills` vs incomplete bundle: 1st FAILS preserving setup; after repair 2nd OK with manage-tink + skill-scout + grill-me-with-jev.
 - I11 `TINK_HOME` = non-empty project dir: FAIL, project identical.
 - I12 marker-only partial home: OK, rebuilds skills/skillsets, valid inventory.
 
