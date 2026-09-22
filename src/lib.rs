@@ -2,6 +2,7 @@
 //!
 //! Acceptance boundary: [`../ACCEPTANCE.md`](../ACCEPTANCE.md).
 
+mod active_skills;
 mod add;
 mod check;
 mod destroy;
@@ -108,7 +109,12 @@ pub enum Command {
         command: SkillsetCommand,
     },
     /// Inspect skills and source-defined skillsets in a public GitHub URL
-    Inspect { url: String },
+    Inspect {
+        url: String,
+        /// Emit stable JSON for downstream catalog generation
+        #[arg(long)]
+        json: bool,
+    },
     /// Remove `.agents/skills/`, an empty `.agents/`, and leave guidance/library untouched
     Destroy {
         /// Skip the confirmation prompt
@@ -336,7 +342,7 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
             LibraryCommand::List => dispatch_skill_list_library(),
         },
         Command::Skillset { command } => dispatch_skillset(&cwd, command),
-        Command::Inspect { url } => dispatch_inspect(&url),
+        Command::Inspect { url, json } => dispatch_inspect(&url, json),
         Command::Destroy { yes } => {
             let style = CliStyle::auto_stdout();
             let report = destroy::destroy_project(&cwd, yes)?;
@@ -391,78 +397,99 @@ fn dispatch_doctor(cwd: &Path) -> Result<(), Error> {
     }
 }
 
-fn dispatch_inspect(url: &str) -> Result<(), Error> {
-    let style = CliStyle::auto_stdout();
+fn dispatch_inspect(url: &str, json: bool) -> Result<(), Error> {
     let report = inspect::inspect(url)?;
+    if json {
+        let text = serde_json::to_string_pretty(&report)
+            .map_err(|error| Error::msg(format!("serialize inspect report: {error}")))?;
+        println!("{text}");
+        return Ok(());
+    }
+
+    let style = CliStyle::auto_stdout();
     println!("Source");
     println!("  Repository: {}", style.accent(&report.repository));
     println!("  Revision:   {}", style.accent(&report.revision));
     println!("  Boundary:   {}", style.accent(&report.boundary));
     println!();
-    let member_count: usize = report
+
+    let installable: Vec<_> = report
         .skillsets
         .iter()
-        .map(|skillset| skillset.members)
+        .filter(|skillset| skillset.installable)
+        .collect();
+    let structural: Vec<_> = report
+        .skillsets
+        .iter()
+        .filter(|skillset| !skillset.installable)
+        .collect();
+    let installable_members: usize = installable
+        .iter()
+        .map(|skillset| skillset.member_count())
         .sum();
     println!(
-        "Skillsets ({}, {} member skills)",
-        report.skillsets.len(),
-        member_count
+        "Installable skillsets ({}, {} member skills)",
+        installable.len(),
+        installable_members
     );
-    let mut grouped_paths = BTreeSet::new();
-    for (index, skillset) in report.skillsets.iter().enumerate() {
+    for (index, skillset) in installable.iter().enumerate() {
         if index > 0 {
             println!();
         }
         let name = skillset.name.as_deref().unwrap_or("(unnamed proposal)");
         let padded_name = format!("{name:<28}");
-        let displayed_name = if skillset.name.is_some() {
-            style.skillset(padded_name)
-        } else {
-            padded_name
-        };
-        let source_path = if skillset.path == "." {
+        let source_path = if skillset.source_root == "." {
             "./".to_string()
         } else {
-            format!("{}/", skillset.path)
+            format!("{}/", skillset.source_root)
         };
-        let noun = if skillset.members == 1 {
+        let noun = if skillset.member_count() == 1 {
             "skill"
         } else {
             "skills"
         };
         println!(
             "  {} ({} {})  {}",
-            displayed_name,
-            skillset.members,
+            style.skillset(padded_name),
+            skillset.member_count(),
             noun,
             style.accent(source_path)
         );
-        if skillset.members == 0 {
-            println!("    (empty structural candidate)");
-            continue;
+        for member in &skillset.member_names {
+            println!("    {}", style.skill(member));
         }
-        let prefix = if skillset.path == "." {
-            None
-        } else {
-            Some(format!("{}/", skillset.path))
-        };
-        for skill in &report.skills {
-            if prefix
-                .as_ref()
-                .map(|prefix| skill.path.starts_with(prefix))
-                .unwrap_or(true)
-            {
-                println!("    {}", style.skill(&skill.name));
-                grouped_paths.insert(skill.path.as_str());
+    }
+
+    if !structural.is_empty() {
+        println!();
+        println!("Structural candidates ({})", structural.len());
+        for skillset in structural {
+            let label = skillset.name.as_deref().unwrap_or("(unnamed proposal)");
+            println!("  {}  {}", label, style.accent(&skillset.source_root));
+            if skillset.member_names.is_empty() {
+                println!("    (empty structural candidate)");
+            } else {
+                for member in &skillset.member_names {
+                    println!("    {}", style.skill(member));
+                }
+            }
+            for reason in &skillset.exclusion_reasons {
+                println!("    {}", style.muted(reason));
             }
         }
     }
+
     println!();
     let standalone: Vec<_> = report
         .skills
         .iter()
-        .filter(|skill| !grouped_paths.contains(skill.path.as_str()))
+        .filter(|skill| {
+            !report.skillsets.iter().any(|skillset| {
+                skillset.member_names.iter().any(|member| {
+                    skill.path.ends_with(&format!("/{member}")) || skill.path == *member
+                })
+            })
+        })
         .collect();
     println!("Standalone skills ({})", standalone.len());
     for skill in standalone {
