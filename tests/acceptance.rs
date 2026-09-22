@@ -1884,13 +1884,23 @@ fn k12_skillset_add_url_inferred_and_custom_name_baseline_router() {
         .success();
 
     // 3. Refusal on catalog collision with differing metadata
-    // Try to add to existing custom_name with different URL or sourceRoot
+    // Remove the inferred skillset so member names do not collide during preflight.
+    ws.cmd(&project)
+        .args(["skillset", "remove", inferred_name])
+        .assert()
+        .success();
+    let pin_before = fs::read_to_string(ws.skillset_meta(custom_name)).unwrap();
     ws.cmd(&project)
         .args(["skillset", "add", &tree_url1, custom_name])
         .envs(redirect1.clone())
         .assert()
         .failure()
         .stderr(predicate::str::contains("differing metadata"));
+    assert_eq!(
+        fs::read_to_string(ws.skillset_meta(custom_name)).unwrap(),
+        pin_before,
+        "pin collision must not mutate the existing home pin"
+    );
 
     // 4. Refusal on corrupt member in remote tree (fail-fast abort, zero mutations)
     let repo3 = ws.root.join("repo-corrupt");
@@ -7676,6 +7686,64 @@ fn skillset_namespace_rejects_cross_skillset_member_collision() {
             "Active skill name conflict for alpha",
         ));
     assert!(!Workspace::skill_path(&project, "b-skillset").exists());
+    assert!(
+        !ws.skillset_meta("b-skillset").exists(),
+        "namespace collision must not leave an orphan home pin"
+    );
+}
+
+#[test]
+fn skillset_update_rejects_namespace_collision_on_new_members() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let repo = ws.root.join("update-namespace-repo");
+    init_repo(&repo);
+    write_skill(&repo.join("bundle/alpha"), "alpha", "Bundle alpha");
+    let rev1 = commit_all(&repo, "bundle v1");
+    let branch = current_branch(&repo);
+    let public = "https://github.com/example/update-namespace.git";
+    let redirect = github_redirect(&repo, public);
+    let tree_url = format!("https://github.com/example/update-namespace/tree/{branch}/bundle");
+
+    ws.cmd(&project)
+        .args(["skillset", "add", &tree_url])
+        .envs(redirect.clone())
+        .assert()
+        .success();
+
+    write_skill(
+        &project.join(".agents/skills/collide"),
+        "collide",
+        "Standalone",
+    );
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
+
+    write_skill(&repo.join("bundle/collide"), "collide", "Bundle collide");
+    commit_all(&repo, "bundle v2 with collide member");
+
+    ws.cmd(&project)
+        .args(["skillset", "update", "bundle-skillset"])
+        .envs(redirect.clone())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Active skill name conflict for collide",
+        ));
+
+    let meta: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(ws.skillset_meta("bundle-skillset")).unwrap())
+            .unwrap();
+    assert_eq!(meta["revision"], rev1);
+    assert!(
+        !Workspace::skill_path(&project, "bundle-skillset")
+            .join("collide/SKILL.md")
+            .is_file()
+    );
 }
 
 #[test]
@@ -7756,6 +7824,95 @@ fn skillset_add_rejects_descendant_skill_md_before_publication() {
         .stderr(predicate::str::contains("nested skill").and(predicate::str::contains("parent")));
     assert!(!Workspace::skill_path(&project, "bundle-skillset").exists());
     assert!(!ws.library_skillset("bundle-skillset").exists());
+    assert!(
+        !ws.skillset_meta("bundle-skillset").exists(),
+        "descendant rejection must not leave an orphan home pin"
+    );
+}
+
+#[test]
+fn inspect_lists_standalone_skills_outside_skillset_source_root() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    let repo = ws.root.join("inspect-scope-repo");
+    init_repo(&repo);
+    write_skill(
+        &repo.join("plugins/acme/skills/api"),
+        "api",
+        "Plugin API skill",
+    );
+    write_skill(
+        &repo.join("other/deep/api"),
+        "other-api",
+        "Unrelated API skill",
+    );
+    commit_all(&repo, "inspect scope fixture");
+    let public = "https://github.com/example/inspect-scope.git";
+    let redirect = github_redirect(&repo, public);
+
+    ws.cmd(&project)
+        .args([
+            "inspect",
+            "https://github.com/example/inspect-scope/tree/master",
+        ])
+        .envs(redirect)
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("other/deep/api").and(predicate::str::contains("other-api")),
+        );
+}
+
+#[test]
+fn inspect_marks_deep_nested_category_non_installable() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    let repo = ws.root.join("inspect-deep-nested-repo");
+    init_repo(&repo);
+    write_skill(&repo.join("sets/clean/alpha"), "alpha", "Clean member");
+    write_skill(&repo.join("sets/nested/alpha"), "alpha", "Nested member");
+    write_skill(
+        &repo.join("sets/nested/deep/nested/beta"),
+        "beta",
+        "Deep nested beta",
+    );
+    commit_all(&repo, "deep nested fixture");
+    let public = "https://github.com/example/inspect-deep-nested.git";
+    let redirect = github_redirect(&repo, public);
+
+    let output = ws
+        .cmd(&project)
+        .args([
+            "inspect",
+            "https://github.com/example/inspect-deep-nested/tree/master",
+            "--json",
+        ])
+        .envs(redirect)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let skillsets = report["skillsets"].as_array().unwrap();
+    let nested = skillsets
+        .iter()
+        .find(|skillset| skillset["source_root"] == "sets/nested")
+        .expect("expected nested skillset candidate");
+    assert_eq!(nested["installable"], false);
+    assert_eq!(nested["member_names"], serde_json::json!(["alpha"]));
+    let reasons = nested["exclusion_reasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(
+        reasons
+            .iter()
+            .any(|reason| reason.contains("nested category directories")),
+        "expected nested category exclusion, got {reasons:?}"
+    );
 }
 
 #[test]

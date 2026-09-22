@@ -884,9 +884,9 @@ fn add_skillset_url_at(
     };
 
     preflight_library_target(home, &name)?;
+    preflight_active_members(project_root, &repository, &candidate_meta, &name, None)?;
     let (resolved_home, _) = home::ensure_inventory_root(home)?;
     ensure_skillset_pin(&resolved_home, &name, &candidate_meta)?;
-    preflight_active_members(project_root, &repository, &candidate_meta, &name, None)?;
 
     init::ensure_project_layout_at(home, project_root)?;
     let target_dir = home::project_skills_path(project_root).join(&name);
@@ -1167,6 +1167,7 @@ pub(crate) fn update_single_skillset_at(
         members: member_names,
     };
 
+    preflight_active_members(project_root, &repository, &new_meta, name, Some(name))?;
     let installed = replace_from_checkout(&repository, &new_meta, &skills_root, name)?;
 
     let (resolved_home, _) = home::ensure_inventory_root(home)?;

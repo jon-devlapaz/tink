@@ -388,10 +388,7 @@ fn analyze_skillset_directory(
             }
             continue;
         }
-        if regular_children(&child)?
-            .iter()
-            .any(|nested| nested.join("SKILL.md").is_file())
-        {
+        if skills::find_descendant_skill_md(&child)?.is_some() {
             has_nested_category = true;
         }
     }
@@ -553,6 +550,37 @@ mod tests {
                 .exclusion_reasons
                 .iter()
                 .any(|reason| reason.contains("fixture"))
+        );
+    }
+
+    #[test]
+    fn analyze_skillset_marks_deep_nested_category_non_installable() {
+        let temp = tempfile::tempdir().unwrap();
+        let checkout = temp.path();
+        let bundle = checkout.join("bundle");
+        let alpha = bundle.join("alpha");
+        fs::create_dir_all(&alpha).unwrap();
+        fs::write(
+            alpha.join("SKILL.md"),
+            "---\nname: alpha\ndescription: Alpha skill.\n---\n",
+        )
+        .unwrap();
+        let deep = bundle.join("deep/nested/beta");
+        fs::create_dir_all(&deep).unwrap();
+        fs::write(
+            deep.join("SKILL.md"),
+            "---\nname: beta\ndescription: Beta skill.\n---\n",
+        )
+        .unwrap();
+
+        let skillset = analyze_skillset_directory(checkout, &bundle).unwrap();
+        assert!(!skillset.installable);
+        assert_eq!(skillset.member_names, vec!["alpha"]);
+        assert!(
+            skillset
+                .exclusion_reasons
+                .iter()
+                .any(|reason| reason.contains("nested category directories"))
         );
     }
 

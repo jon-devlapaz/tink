@@ -397,6 +397,21 @@ fn dispatch_doctor(cwd: &Path) -> Result<(), Error> {
     }
 }
 
+fn skillset_member_path(source_root: &str, member: &str) -> String {
+    if source_root == "." || source_root.is_empty() {
+        member.to_string()
+    } else {
+        format!("{source_root}/{member}")
+    }
+}
+
+fn skill_is_skillset_member(skill_path: &str, skillset: &inspect::InferredSkillset) -> bool {
+    skillset.member_names.iter().any(|member| {
+        let member_path = skillset_member_path(&skillset.source_root, member);
+        skill_path == member_path || skill_path.starts_with(&format!("{member_path}/"))
+    })
+}
+
 fn dispatch_inspect(url: &str, json: bool) -> Result<(), Error> {
     let report = inspect::inspect(url)?;
     if json {
@@ -484,11 +499,10 @@ fn dispatch_inspect(url: &str, json: bool) -> Result<(), Error> {
         .skills
         .iter()
         .filter(|skill| {
-            !report.skillsets.iter().any(|skillset| {
-                skillset.member_names.iter().any(|member| {
-                    skill.path.ends_with(&format!("/{member}")) || skill.path == *member
-                })
-            })
+            !report
+                .skillsets
+                .iter()
+                .any(|skillset| skill_is_skillset_member(&skill.path, skillset))
         })
         .collect();
     println!("Standalone skills ({})", standalone.len());
