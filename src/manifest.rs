@@ -25,6 +25,8 @@ const LOCK_VERSION: u32 = 2;
 pub struct Manifest {
     pub version: u32,
     pub skills: Vec<ManifestSkill>,
+    #[serde(default)]
+    pub skillsets: Vec<ManifestSkillset>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -37,9 +39,21 @@ pub struct ManifestSkill {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ManifestSkillset {
+    pub name: String,
+    pub source: String,
+    #[serde(rename = "sourceRoot")]
+    pub source_root: String,
+    pub members: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Lockfile {
     pub version: u32,
     pub skills: Vec<LockedSkill>,
+    #[serde(default)]
+    pub skillsets: Vec<LockedSkillset>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,9 +66,29 @@ pub struct LockedSkill {
     pub sha256: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LockedSkillset {
+    pub name: String,
+    pub source: String,
+    pub revision: String,
+    #[serde(rename = "sourceRoot")]
+    pub source_root: String,
+    pub members: Vec<String>,
+    pub sha256: String,
+}
+
 #[derive(Debug)]
 struct ResolvedLockfile {
     skills: Vec<ResolvedLockedSkill>,
+    skillsets: Vec<ResolvedLockedSkillset>,
+}
+
+#[derive(Debug)]
+struct ResolvedLockedSkillset {
+    name: String,
+    meta: crate::skillsets::SkillsetMeta,
+    sha256: String,
 }
 
 #[derive(Debug)]
@@ -118,12 +152,55 @@ fn validate_name(name: &str, kind: &str, names: &mut BTreeMap<String, ()>) -> Re
     Ok(())
 }
 
+fn validate_manifest_skillset(
+    entry: &ManifestSkillset,
+    names: &mut BTreeMap<String, ()>,
+) -> Result<(), Error> {
+    crate::skillsets::canonicalize_skillset_name(&entry.name)?;
+    validate_name(&entry.name, "project manifest skillset", names)?;
+    if entry.source.is_empty() {
+        return Err(Error::msg(format!(
+            "Invalid skillset source in project manifest: {}",
+            entry.name
+        )));
+    }
+    if entry.source_root.is_empty()
+        || entry.source_root.starts_with('/')
+        || entry.source_root.contains('\\')
+        || entry.source_root.contains("..")
+    {
+        return Err(Error::msg(format!(
+            "Invalid skillset sourceRoot in project manifest: {}",
+            entry.name
+        )));
+    }
+    if entry.members.is_empty() {
+        return Err(Error::msg(format!(
+            "Skillset members must not be empty in project manifest: {}",
+            entry.name
+        )));
+    }
+    let mut member_names = BTreeMap::new();
+    for member in &entry.members {
+        validate_name(
+            member,
+            "project manifest skillset member",
+            &mut member_names,
+        )?;
+    }
+    Ok(())
+}
+
 fn validate_manifest(manifest: &Manifest) -> Result<(), Error> {
     validate_manifest_version(manifest.version)?;
     let mut names = BTreeMap::new();
     for skill in &manifest.skills {
         validate_name(&skill.name, "project manifest", &mut names)?;
         sources::validate_manifest_source(&skill.name, &skill.source, skill.path.as_deref())?;
+    }
+    let mut skillset_names = BTreeMap::new();
+    for skillset in &manifest.skillsets {
+        validate_manifest_skillset(skillset, &mut skillset_names)?;
     }
     Ok(())
 }
@@ -163,7 +240,43 @@ fn resolve_lock(root: &Path, lock: Lockfile) -> Result<ResolvedLockfile, Error> 
             sha256: skill.sha256,
         });
     }
-    Ok(ResolvedLockfile { skills })
+    let mut skillset_names = BTreeMap::new();
+    let mut skillsets = Vec::with_capacity(lock.skillsets.len());
+    for skillset in lock.skillsets {
+        validate_name(
+            &skillset.name,
+            "project lockfile skillset",
+            &mut skillset_names,
+        )?;
+        crate::skillsets::canonicalize_skillset_name(&skillset.name)?;
+        if skillset.sha256.len() != 64 || !skillset.sha256.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(Error::msg(format!(
+                "Invalid SHA-256 for project lockfile skillset: {}",
+                skillset.name
+            )));
+        }
+        let meta = crate::skillsets::SkillsetMeta {
+            source: skillset.source.clone(),
+            revision: skillset.revision.clone(),
+            source_root: skillset.source_root.clone(),
+            members: skillset.members.clone(),
+        };
+        validate_manifest_skillset(
+            &ManifestSkillset {
+                name: skillset.name.clone(),
+                source: meta.source.clone(),
+                source_root: meta.source_root.clone(),
+                members: meta.members.clone(),
+            },
+            &mut BTreeMap::new(),
+        )?;
+        skillsets.push(ResolvedLockedSkillset {
+            name: skillset.name,
+            meta,
+            sha256: skillset.sha256,
+        });
+    }
+    Ok(ResolvedLockfile { skills, skillsets })
 }
 
 pub fn lock(root: &Path, source_args: &[String]) -> Result<usize, Error> {
@@ -236,30 +349,76 @@ pub fn lock(root: &Path, source_args: &[String]) -> Result<usize, Error> {
         )));
     }
     entries.sort_by(|a, b| a.name.cmp(&b.name));
-    let manifest = if entries.is_empty() {
-        "skills = []\n".to_string()
+
+    let mut skillset_entries = Vec::new();
+    for (name, meta, sha256) in crate::skillsets::list_lockable_skillsets(root)? {
+        skillset_entries.push(LockedSkillset {
+            name,
+            source: meta.source,
+            revision: meta.revision,
+            source_root: meta.source_root,
+            members: meta.members,
+            sha256,
+        });
+    }
+    skillset_entries.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let manifest = format_manifest_document(&entries, &skillset_entries);
+    let lock = format_lock_document(&entries, &skillset_entries);
+    write_atomic(root, &manifest, &lock)?;
+    Ok(entries.len() + skillset_entries.len())
+}
+
+fn format_manifest_document(skills: &[LockedSkill], skillsets: &[LockedSkillset]) -> String {
+    let mut text = format!("version = {MANIFEST_VERSION}\n\n");
+    if skills.is_empty() {
+        text.push_str("skills = []\n");
     } else {
-        entries
-            .iter()
-            .map(format_manifest_entry)
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    let lock = if entries.is_empty() {
-        "skills = []\n".to_string()
+        text.push_str(
+            &skills
+                .iter()
+                .map(format_manifest_entry)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
+    if !skillsets.is_empty() {
+        text.push('\n');
+        text.push_str(
+            &skillsets
+                .iter()
+                .map(format_manifest_skillset_entry)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
+    text
+}
+
+fn format_lock_document(skills: &[LockedSkill], skillsets: &[LockedSkillset]) -> String {
+    let mut text = format!("version = {LOCK_VERSION}\n\n");
+    if skills.is_empty() {
+        text.push_str("skills = []\n");
     } else {
-        entries
-            .iter()
-            .map(format_lock_entry)
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    write_atomic(
-        root,
-        &format!("version = {MANIFEST_VERSION}\n\n{manifest}"),
-        &format!("version = {LOCK_VERSION}\n\n{lock}"),
-    )?;
-    Ok(entries.len())
+        text.push_str(
+            &skills
+                .iter()
+                .map(format_lock_entry)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
+    if !skillsets.is_empty() {
+        text.push('\n');
+        text.push_str(
+            &skillsets
+                .iter()
+                .map(format_lock_skillset_entry)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
+    text
 }
 
 fn format_manifest_entry(entry: &LockedSkill) -> String {
@@ -272,6 +431,33 @@ fn format_manifest_entry(entry: &LockedSkill) -> String {
         text.push_str(&format!("path = {}\n", quote(path)));
     }
     text
+}
+
+fn format_manifest_skillset_entry(entry: &LockedSkillset) -> String {
+    format!(
+        "[[skillsets]]\nname = {}\nsource = {}\nsourceRoot = {}\nmembers = {}\n",
+        quote(&entry.name),
+        quote(&entry.source),
+        quote(&entry.source_root),
+        quote_members(&entry.members),
+    )
+}
+
+fn format_lock_skillset_entry(entry: &LockedSkillset) -> String {
+    format!(
+        "[[skillsets]]\nname = {}\nsource = {}\nrevision = {}\nsourceRoot = {}\nmembers = {}\nsha256 = {}\n",
+        quote(&entry.name),
+        quote(&entry.source),
+        quote(&entry.revision),
+        quote(&entry.source_root),
+        quote_members(&entry.members),
+        quote(&entry.sha256),
+    )
+}
+
+fn quote_members(members: &[String]) -> String {
+    let items: Vec<String> = members.iter().map(|member| quote(member)).collect();
+    format!("[{}]", items.join(", "))
 }
 
 fn format_lock_entry(entry: &LockedSkill) -> String {
@@ -411,6 +597,25 @@ fn sync_at(root: &Path, home: Option<&Path>) -> Result<usize, Error> {
             "Project manifest and lockfile skill sets differ",
         ));
     }
+    let skillset_declarations: BTreeMap<_, _> = manifest
+        .skillsets
+        .iter()
+        .map(|entry| (&entry.name, entry))
+        .collect();
+    let skillset_pins: BTreeMap<_, _> = lock
+        .skillsets
+        .iter()
+        .map(|entry| (&entry.name, entry))
+        .collect();
+    if skillset_declarations.len() != skillset_pins.len()
+        || skillset_declarations
+            .keys()
+            .any(|name| !skillset_pins.contains_key(name))
+    {
+        return Err(Error::msg(
+            "Project manifest and lockfile skillset sets differ",
+        ));
+    }
 
     // Resolve exact source bytes, validate pins, and protect every existing
     // project destination before the first project/library write.
@@ -438,6 +643,21 @@ fn sync_at(root: &Path, home: Option<&Path>) -> Result<usize, Error> {
         prepared.push(candidate);
     }
 
+    let mut prepared_skillsets = Vec::with_capacity(skillset_declarations.len());
+    for (name, declaration) in &skillset_declarations {
+        let pin = skillset_pins[name];
+        if pin.meta.source != declaration.source
+            || pin.meta.source_root != declaration.source_root
+            || pin.meta.members != declaration.members
+        {
+            return Err(Error::msg(format!(
+                "Project lockfile does not match manifest skillset: {name}"
+            )));
+        }
+        validate_locked_skillset_pin(name, &pin.meta, &pin.sha256)?;
+        prepared_skillsets.push(((*name).clone(), pin.meta.clone()));
+    }
+
     if destination_root.is_dir() {
         for installed in crate::check::load_project_skills(root)? {
             if !declarations.contains_key(&installed.name) {
@@ -447,7 +667,16 @@ fn sync_at(root: &Path, home: Option<&Path>) -> Result<usize, Error> {
                 )));
             }
         }
+        for (name, _, _) in crate::skillsets::list_lockable_skillsets(root)? {
+            if !skillset_declarations.contains_key(&name) {
+                return Err(Error::msg(format!(
+                    "Installed skillset is not declared in manifest: {name}"
+                )));
+            }
+        }
     }
+
+    preflight_locked_namespace(root, &prepared, &prepared_skillsets)?;
 
     // Library refusals are predictable and must be discovered before
     // publishing the first prepared project skill. Operational failures
@@ -456,9 +685,15 @@ fn sync_at(root: &Path, home: Option<&Path>) -> Result<usize, Error> {
     for candidate in &prepared {
         crate::library::preflight_deposit_at(home, candidate.skill(), candidate.provenance())?;
     }
+    for (name, _) in &prepared_skillsets {
+        crate::skillsets::preflight_library_target(home, name)?;
+    }
 
     for candidate in prepared {
         candidate.publish_at(root, home)?;
+    }
+    for (name, meta) in &prepared_skillsets {
+        crate::skillsets::sync_locked_skillset_at(home, root, name, meta)?;
     }
     verify(root)
 }
@@ -474,6 +709,25 @@ pub fn verify(root: &Path) -> Result<usize, Error> {
             "Project manifest and lockfile skill sets differ",
         ));
     }
+    let skillset_declarations: BTreeMap<_, _> = manifest
+        .skillsets
+        .iter()
+        .map(|entry| (&entry.name, entry))
+        .collect();
+    let skillset_pins: BTreeMap<_, _> = lock
+        .skillsets
+        .iter()
+        .map(|entry| (&entry.name, entry))
+        .collect();
+    if skillset_declarations.len() != skillset_pins.len()
+        || skillset_declarations
+            .keys()
+            .any(|name| !skillset_pins.contains_key(name))
+    {
+        return Err(Error::msg(
+            "Project manifest and lockfile skillset sets differ",
+        ));
+    }
     for (name, declaration) in &declarations {
         let pin = pins[name];
         if pin.source.declared() != declaration.source
@@ -481,6 +735,17 @@ pub fn verify(root: &Path) -> Result<usize, Error> {
         {
             return Err(Error::msg(format!(
                 "Project lockfile does not match manifest: {name}"
+            )));
+        }
+    }
+    for (name, declaration) in &skillset_declarations {
+        let pin = skillset_pins[name];
+        if pin.meta.source != declaration.source
+            || pin.meta.source_root != declaration.source_root
+            || pin.meta.members != declaration.members
+        {
+            return Err(Error::msg(format!(
+                "Project lockfile does not match manifest skillset: {name}"
             )));
         }
     }
@@ -519,7 +784,113 @@ pub fn verify(root: &Path) -> Result<usize, Error> {
             )));
         }
     }
-    Ok(manifest.skills.len())
+    let installed_skillsets = crate::skillsets::list_lockable_skillsets(root)?;
+    let installed_skillsets: BTreeMap<_, _> = installed_skillsets
+        .into_iter()
+        .map(|(name, meta, digest)| (name, (meta, digest)))
+        .collect();
+    for (name, pin) in skillset_pins {
+        let (meta, digest) = installed_skillsets
+            .get(name)
+            .ok_or_else(|| Error::msg(format!("Manifest skillset is not installed: {name}")))?;
+        if meta.source != pin.meta.source
+            || meta.revision != pin.meta.revision
+            || meta.source_root != pin.meta.source_root
+            || meta.members != pin.meta.members
+        {
+            return Err(Error::msg(format!(
+                "Skillset receipt does not match lockfile: {name}"
+            )));
+        }
+        if !digest.eq_ignore_ascii_case(&pin.sha256) {
+            return Err(Error::msg(format!(
+                "Skillset content hash mismatch: {name}"
+            )));
+        }
+    }
+    for name in installed_skillsets.keys() {
+        if !skillset_declarations.contains_key(name) {
+            return Err(Error::msg(format!(
+                "Installed skillset is not declared in manifest: {name}"
+            )));
+        }
+    }
+    Ok(manifest.skills.len() + manifest.skillsets.len())
+}
+
+fn validate_locked_skillset_pin(
+    name: &str,
+    meta: &crate::skillsets::SkillsetMeta,
+    sha256: &str,
+) -> Result<(), Error> {
+    let remote = crate::sources::RemoteSource {
+        display: meta.source.clone(),
+        url: meta.source.clone(),
+    };
+    let (_clone, repository, tip) = crate::git::checkout(&remote)?;
+    let (_old_checkout, checkout) = if tip == meta.revision {
+        (None, repository)
+    } else {
+        let (temp, checkout) = crate::git::checkout_revision(&repository, &meta.revision)?;
+        (Some(temp), checkout)
+    };
+    let digest = crate::skillsets::locked_digest_at_checkout(&checkout, meta, name)?;
+    if digest != sha256.to_ascii_lowercase() {
+        return Err(Error::msg(format!(
+            "Skillset content hash mismatch: {name}"
+        )));
+    }
+    Ok(())
+}
+
+fn preflight_locked_namespace(
+    root: &Path,
+    prepared: &[crate::add::PreparedLockedSkill],
+    prepared_skillsets: &[(String, crate::skillsets::SkillsetMeta)],
+) -> Result<(), Error> {
+    let mut owners = BTreeMap::<String, crate::active_skills::SkillOwner>::new();
+    for candidate in prepared {
+        let name = candidate.skill().name.clone();
+        let owner = crate::active_skills::SkillOwner::Standalone {
+            path: crate::home::project_skills_path(root).join(&name),
+        };
+        if let Some(existing) = owners.insert(name.clone(), owner.clone()) {
+            return Err(crate::active_skills::conflict_between(
+                &name, &existing, &owner,
+            ));
+        }
+    }
+    for (skillset_name, meta) in prepared_skillsets {
+        let member_pairs = crate::skillsets::member_skill_names_for_meta(meta, skillset_name)?;
+        for (skill_name, member_dir) in member_pairs {
+            let owner = crate::active_skills::SkillOwner::Member {
+                skillset: skillset_name.clone(),
+                member_dir,
+            };
+            if let Some(existing) = owners.insert(skill_name.clone(), owner.clone()) {
+                return Err(crate::active_skills::conflict_between(
+                    &skill_name,
+                    &existing,
+                    &owner,
+                ));
+            }
+        }
+    }
+    let index = crate::active_skills::ActiveSkillIndex::build(root)?;
+    for (name, owner) in owners {
+        let exclude = match &owner {
+            crate::active_skills::SkillOwner::Member { skillset, .. }
+                if prepared_skillsets
+                    .iter()
+                    .any(|(candidate, _)| candidate == skillset) =>
+            {
+                Some(skillset.as_str())
+            }
+            _ => None,
+        };
+        index.ensure_available(&name, &owner, exclude)?;
+    }
+    Ok(())
 }
 
 fn tree_sha256(root: &Path) -> Result<String, Error> {

@@ -11,6 +11,7 @@ use crate::skills;
 use crate::sources::{
     RemoteSource, github_part_ok, github_tree_segment_ok, is_public_github_https, url_lite,
 };
+use serde::Serialize;
 
 #[derive(Debug)]
 struct ParsedUrl {
@@ -20,20 +21,29 @@ struct ParsedUrl {
     boundary_display: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DiscoveredSkill {
     pub name: String,
     pub path: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct InferredSkillset {
     pub name: Option<String>,
-    pub path: String,
-    pub members: usize,
+    pub source_root: String,
+    pub member_names: Vec<String>,
+    pub installable: bool,
+    pub exclusion_reasons: Vec<String>,
+    pub provenance: String,
 }
 
-#[derive(Debug, Clone)]
+impl InferredSkillset {
+    pub fn member_count(&self) -> usize {
+        self.member_names.len()
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct InspectionReport {
     pub repository: String,
     pub revision: String,
@@ -110,10 +120,10 @@ pub fn inspect(url: &str) -> Result<InspectionReport, Error> {
     diagnostics.extend(overlap_diagnostics(&discovered));
     let skillsets = infer_skillsets(&checkout, &boundary, &discovered, &mut diagnostics)?;
     for skillset in &skillsets {
-        if skillset.name.is_none() && skillset.path != "." {
+        if skillset.name.is_none() && skillset.source_root != "." {
             diagnostics.push(format!(
                 "no valid canonical skillset name for {}",
-                skillset.path
+                skillset.source_root
             ));
         }
     }
@@ -260,6 +270,158 @@ fn overlap_diagnostics(skills: &[DiscoveredSkill]) -> Vec<String> {
     diagnostics
 }
 
+fn is_fixture_peer(name: &str) -> bool {
+    matches!(
+        name,
+        "deprecated"
+            | "test"
+            | "tests"
+            | "fixture"
+            | "fixtures"
+            | "example"
+            | "examples"
+            | "docs"
+            | "documentation"
+            | "empty"
+    )
+}
+
+fn sanitize_for_skill_name(raw: &str) -> String {
+    let mut result = String::with_capacity(raw.len());
+    let mut last_was_hyphen = false;
+    for c in raw.chars() {
+        if c.is_ascii_alphanumeric() {
+            result.push(c.to_ascii_lowercase());
+            last_was_hyphen = false;
+        } else if !last_was_hyphen {
+            result.push('-');
+            last_was_hyphen = true;
+        }
+    }
+    result.trim_matches('-').to_string()
+}
+
+fn skillset_name_for_directory(checkout: &Path, directory: &Path) -> Option<String> {
+    if directory == checkout {
+        return None;
+    }
+    let source_root = relative_posix(checkout, directory);
+    let folder = directory
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
+    let base = if folder == "skills" {
+        if source_root == "skills" {
+            return None;
+        }
+        source_root
+            .trim_end_matches("/skills")
+            .rsplit('/')
+            .next()
+            .map(sanitize_for_skill_name)?
+    } else if skills::valid_skill_name(folder) {
+        sanitize_for_skill_name(folder)
+    } else {
+        return None;
+    };
+    if base.is_empty() {
+        return None;
+    }
+    let candidate = if base.ends_with("-skillset") {
+        base
+    } else {
+        format!("{base}-skillset")
+    };
+    skills::valid_skill_name(&candidate).then_some(candidate)
+}
+
+fn analyze_skillset_directory(
+    checkout: &Path,
+    directory: &Path,
+) -> Result<InferredSkillset, Error> {
+    let source_root = if directory == checkout {
+        ".".to_string()
+    } else {
+        relative_posix(checkout, directory)
+    };
+    let folder = directory
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_string();
+    let mut exclusion_reasons = Vec::new();
+    if is_fixture_peer(&folder) {
+        exclusion_reasons.push(format!("fixture or documentation peer: {folder}"));
+    }
+
+    let mut member_names = Vec::new();
+    let mut has_nested_category = false;
+    for child in regular_children(directory)? {
+        let member_dir = child
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("")
+            .to_string();
+        let skill_file = child.join("SKILL.md");
+        if skill_file.is_file() {
+            match skills::read_skill(&child, true) {
+                Ok(skill) => {
+                    if skill.name != member_dir {
+                        exclusion_reasons.push(format!(
+                            "member directory {member_dir} does not match skill name {}",
+                            skill.name
+                        ));
+                    } else if let Some(descendant) = skills::find_descendant_skill_md(&child)? {
+                        exclusion_reasons.push(format!(
+                            "member {} contains nested SKILL.md at {}",
+                            output::escape_untrusted(&member_dir),
+                            output::escape_untrusted(&descendant.to_string_lossy())
+                        ));
+                    } else {
+                        member_names.push(member_dir);
+                    }
+                }
+                Err(error) => exclusion_reasons.push(format!(
+                    "invalid member skill at {}: {error}",
+                    output::escape_untrusted(&member_dir)
+                )),
+            }
+            continue;
+        }
+        if skills::find_descendant_skill_md(&child)?.is_some() {
+            has_nested_category = true;
+        }
+    }
+    member_names.sort();
+
+    if member_names.is_empty() {
+        exclusion_reasons.push("no immediate installable member directories".to_string());
+    }
+    if has_nested_category {
+        exclusion_reasons.push(
+            "nested category directories remain below sourceRoot; inspect a narrower tree URL"
+                .to_string(),
+        );
+    }
+
+    let name = skillset_name_for_directory(checkout, directory);
+    if name.is_none() && source_root != "." {
+        exclusion_reasons.push(format!(
+            "no valid canonical skillset name for {source_root}"
+        ));
+    }
+
+    let installable = name.is_some() && !member_names.is_empty() && exclusion_reasons.is_empty();
+    Ok(InferredSkillset {
+        name,
+        source_root,
+        member_names,
+        installable,
+        exclusion_reasons,
+        provenance: "structural-inference".to_string(),
+    })
+}
+
 fn infer_skillsets(
     checkout: &Path,
     boundary: &Path,
@@ -284,14 +446,14 @@ fn infer_skillsets(
         })
         .collect();
     if !direct.is_empty() {
-        if boundary.file_name().and_then(|name| name.to_str()) == Some("skills") {
+        if boundary_prefix == "skills" {
             return Ok(Vec::new());
         }
         let has_nested_collection = regular_children(boundary)?.iter().any(|child| {
             let child_path = relative_posix(checkout, child);
-            skills
-                .iter()
-                .any(|skill| skill.path.starts_with(&(child_path.clone() + "/")))
+            skills.iter().any(|skill| {
+                skill.path.starts_with(&(child_path.clone() + "/")) && skill.path != child_path
+            })
         });
         if has_nested_collection {
             diagnostics.push(
@@ -300,7 +462,7 @@ fn infer_skillsets(
             );
             return Ok(Vec::new());
         }
-        return Ok(vec![make_skillset(checkout, boundary, skills)]);
+        return Ok(vec![analyze_skillset_directory(checkout, boundary)?]);
     }
     let mut children = regular_children(boundary)?;
     children.sort();
@@ -310,18 +472,15 @@ fn infer_skillsets(
             let child_path = relative_posix(checkout, child);
             skills.iter().any(|skill| {
                 skill.path == child_path || skill.path.starts_with(&(child_path.clone() + "/"))
-            })
+            }) || child.join("SKILL.md").is_file()
         })
         .cloned()
         .collect();
     if descendants.len() >= 2 {
-        return Ok(children
+        return children
             .iter()
-            .map(|child| {
-                let child_relative = relative_posix(checkout, child);
-                make_skillset(checkout, child, &skills_for_prefix(skills, &child_relative))
-            })
-            .collect());
+            .map(|child| analyze_skillset_directory(checkout, child))
+            .collect();
     }
     if descendants.len() == 1 {
         let child = descendants
@@ -332,49 +491,6 @@ fn infer_skillsets(
     }
     diagnostics.push("skillsets could not be inferred from this boundary".to_string());
     Ok(Vec::new())
-}
-
-fn skills_for_prefix(skills: &[DiscoveredSkill], prefix: &str) -> Vec<DiscoveredSkill> {
-    skills
-        .iter()
-        .filter(|skill| skill.path == prefix || skill.path.starts_with(&(prefix.to_string() + "/")))
-        .cloned()
-        .collect()
-}
-
-fn make_skillset(
-    checkout: &Path,
-    directory: &Path,
-    members: &[DiscoveredSkill],
-) -> InferredSkillset {
-    if directory == checkout {
-        return InferredSkillset {
-            name: None,
-            path: ".".to_string(),
-            members: members.len(),
-        };
-    }
-    let path = relative_posix(checkout, directory);
-    let folder = directory
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("")
-        .to_string();
-    let name = if skills::valid_skill_name(&folder) {
-        let candidate = if folder.ends_with("-skillset") {
-            folder.clone()
-        } else {
-            format!("{folder}-skillset")
-        };
-        skills::valid_skill_name(&candidate).then_some(candidate)
-    } else {
-        None
-    };
-    InferredSkillset {
-        name,
-        path,
-        members: members.len(),
-    }
 }
 
 fn regular_children(directory: &Path) -> Result<Vec<PathBuf>, Error> {
@@ -401,6 +517,7 @@ fn regular_children(directory: &Path) -> Result<Vec<PathBuf>, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[cfg(unix)]
     #[test]
@@ -416,5 +533,81 @@ mod tests {
             .expect_err("ancestor symlink must be refused");
 
         assert!(error.to_string().contains("symlink"), "{error}");
+    }
+
+    #[test]
+    fn analyze_skillset_marks_fixture_peer_non_installable() {
+        let temp = tempfile::tempdir().unwrap();
+        let checkout = temp.path();
+        let deprecated = checkout.join("skills/deprecated");
+        fs::create_dir_all(&deprecated).unwrap();
+        fs::write(deprecated.join("README.md"), "empty\n").unwrap();
+
+        let skillset = analyze_skillset_directory(checkout, &deprecated).unwrap();
+        assert!(!skillset.installable);
+        assert!(
+            skillset
+                .exclusion_reasons
+                .iter()
+                .any(|reason| reason.contains("fixture"))
+        );
+    }
+
+    #[test]
+    fn analyze_skillset_marks_deep_nested_category_non_installable() {
+        let temp = tempfile::tempdir().unwrap();
+        let checkout = temp.path();
+        let bundle = checkout.join("bundle");
+        let alpha = bundle.join("alpha");
+        fs::create_dir_all(&alpha).unwrap();
+        fs::write(
+            alpha.join("SKILL.md"),
+            "---\nname: alpha\ndescription: Alpha skill.\n---\n",
+        )
+        .unwrap();
+        let deep = bundle.join("deep/nested/beta");
+        fs::create_dir_all(&deep).unwrap();
+        fs::write(
+            deep.join("SKILL.md"),
+            "---\nname: beta\ndescription: Beta skill.\n---\n",
+        )
+        .unwrap();
+
+        let skillset = analyze_skillset_directory(checkout, &bundle).unwrap();
+        assert!(!skillset.installable);
+        assert_eq!(skillset.member_names, vec!["alpha"]);
+        assert!(
+            skillset
+                .exclusion_reasons
+                .iter()
+                .any(|reason| reason.contains("nested category directories"))
+        );
+    }
+
+    #[test]
+    fn analyze_plugin_skills_directory_uses_creator_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let checkout = temp.path();
+        let root = checkout.join("plugins/acme/skills/alpha");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("SKILL.md"),
+            "---\nname: alpha\ndescription: Alpha skill.\n---\n",
+        )
+        .unwrap();
+        let beta = checkout.join("plugins/acme/skills/beta");
+        fs::create_dir_all(&beta).unwrap();
+        fs::write(
+            beta.join("SKILL.md"),
+            "---\nname: beta\ndescription: Beta skill.\n---\n",
+        )
+        .unwrap();
+
+        let skillset =
+            analyze_skillset_directory(checkout, &checkout.join("plugins/acme/skills")).unwrap();
+        assert!(skillset.installable);
+        assert_eq!(skillset.name.as_deref(), Some("acme-skillset"));
+        assert_eq!(skillset.source_root, "plugins/acme/skills");
+        assert_eq!(skillset.member_names, vec!["alpha", "beta"]);
     }
 }

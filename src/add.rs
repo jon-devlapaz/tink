@@ -69,6 +69,14 @@ fn place_skill(
     provenance: Option<&Provenance>,
 ) -> Result<AddOutcome, Error> {
     crate::skillsets::ensure_standalone_source(&skill.path, &skill.name)?;
+    let index = crate::active_skills::ActiveSkillIndex::build(project_root)?;
+    index.ensure_available(
+        &skill.name,
+        &crate::active_skills::SkillOwner::Standalone {
+            path: crate::home::project_skills_path(project_root).join(&skill.name),
+        },
+        None,
+    )?;
     let published = inventory::publish(home, project_root, skill, provenance)?;
     if published.library_write == LibraryWrite::Repaired {
         let err = CliStyle::auto_stderr();
@@ -188,6 +196,14 @@ fn place_from_library(
     skill: &Skill,
 ) -> Result<AddOutcome, Error> {
     crate::skillsets::ensure_standalone_source(&skill.path, &skill.name)?;
+    let index = crate::active_skills::ActiveSkillIndex::build(project_root)?;
+    index.ensure_available(
+        &skill.name,
+        &crate::active_skills::SkillOwner::Standalone {
+            path: crate::home::project_skills_path(project_root).join(&skill.name),
+        },
+        None,
+    )?;
     let published = inventory::publish_from_library(home, project_root, skill)?;
     Ok(AddOutcome {
         name: published.name,

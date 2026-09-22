@@ -1851,51 +1851,56 @@ fn k12_skillset_add_url_inferred_and_custom_name_baseline_router() {
             .is_file()
     );
 
-    // Inferred non-generic name (bundles/analytics -> analytics-skillset)
-    let non_generic_inferred = "analytics-skillset";
+    // A second skillset from the same source cannot reuse active member names (#40).
     ws.cmd(&project)
         .args(["skillset", "add", &tree_url2])
         .envs(redirect2.clone())
         .assert()
-        .success()
-        .stdout(predicate::str::contains(format!(
-            "✓ Installed skillset: {non_generic_inferred} (2 members)"
-        )));
-    assert!(ws.skillset_meta(non_generic_inferred).is_file());
-    assert!(
-        Workspace::skill_path(&project, non_generic_inferred)
-            .join("metrics/SKILL.md")
-            .is_file()
-    );
+        .failure()
+        .stderr(predicate::str::contains(
+            "Active skill name conflict for metrics",
+        ));
 
     // Refresh and remove with bare name without -skillset suffix
     ws.cmd(&project)
-        .args(["skillset", "refresh", "analytics"])
+        .args(["skillset", "refresh", "custom-analytics"])
         .envs(redirect2.clone())
         .assert()
         .success()
-        .stdout(predicate::str::contains("Unchanged analytics-skillset"));
+        .stdout(predicate::str::contains(
+            "Unchanged custom-analytics-skillset",
+        ));
     ws.cmd(&project)
-        .args(["skillset", "remove", "analytics"])
+        .args(["skillset", "remove", "custom-analytics"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Removed"));
-    assert!(!Workspace::skill_path(&project, non_generic_inferred).exists());
+    assert!(!Workspace::skill_path(&project, custom_name).exists());
     // Re-add to restore state
     ws.cmd(&project)
-        .args(["skillset", "add", &tree_url2])
+        .args(["skillset", "add", &tree_url2, "custom-analytics"])
         .envs(redirect2.clone())
         .assert()
         .success();
 
     // 3. Refusal on catalog collision with differing metadata
-    // Try to add to existing custom_name with different URL or sourceRoot
+    // Remove the inferred skillset so member names do not collide during preflight.
+    ws.cmd(&project)
+        .args(["skillset", "remove", inferred_name])
+        .assert()
+        .success();
+    let pin_before = fs::read_to_string(ws.skillset_meta(custom_name)).unwrap();
     ws.cmd(&project)
         .args(["skillset", "add", &tree_url1, custom_name])
         .envs(redirect1.clone())
         .assert()
         .failure()
         .stderr(predicate::str::contains("differing metadata"));
+    assert_eq!(
+        fs::read_to_string(ws.skillset_meta(custom_name)).unwrap(),
+        pin_before,
+        "pin collision must not mutate the existing home pin"
+    );
 
     // 4. Refusal on corrupt member in remote tree (fail-fast abort, zero mutations)
     let repo3 = ws.root.join("repo-corrupt");
@@ -7227,8 +7232,9 @@ fn g1_inspect_repository_reports_groups_empty_peers_and_sorted_skills() {
         cmd.env(key, value);
     }
     cmd.assert().success().stdout(
-        predicate::str::contains("Skillsets (5, 5 member skills)")
-            .and(predicate::str::contains("deprecated-skillset"))
+        predicate::str::contains("Installable skillsets (4, 5 member skills)")
+            .and(predicate::str::contains("Structural candidates (1)"))
+            .and(predicate::str::contains("skills/deprecated"))
             .and(predicate::str::contains("empty structural candidate"))
             .and(predicate::str::contains("engineering-skillset"))
             .and(predicate::str::contains("skills/engineering/"))
@@ -7254,7 +7260,7 @@ fn g2_inspect_group_tree_limits_boundary() {
         cmd.env(key, value);
     }
     cmd.assert().success().stdout(
-        predicate::str::contains("Skillsets (1, 1 member skills)")
+        predicate::str::contains("Installable skillsets (1, 1 member skills)")
             .and(predicate::str::contains("productivity-skillset"))
             .and(predicate::str::contains("skills/productivity/"))
             .and(predicate::str::contains("    epsilon"))
@@ -7276,7 +7282,7 @@ fn g3_inspect_skill_tree_reports_one_skill_and_no_skillset() {
         cmd.env(key, value);
     }
     cmd.assert().success().stdout(
-        predicate::str::contains("Skillsets (0, 0 member skills)")
+        predicate::str::contains("Installable skillsets (0, 0 member skills)")
             .and(predicate::str::contains("Standalone skills (1)"))
             .and(predicate::str::contains("epsilon")),
     );
@@ -7307,7 +7313,7 @@ fn g4_inspect_infers_wrapper_without_skills_convention() {
         cmd.env(key, value);
     }
     cmd.assert().success().stdout(
-        predicate::str::contains("Skillsets (2, 2 member skills)")
+        predicate::str::contains("Installable skillsets (2, 2 member skills)")
             .and(predicate::str::contains("one-skillset"))
             .and(predicate::str::contains("two-skillset")),
     );
@@ -7330,7 +7336,7 @@ fn g4b_inspect_flat_repository_does_not_expose_checkout_directory_name() {
         cmd.env(key, value);
     }
     cmd.assert().success().stdout(
-        predicate::str::contains("Skillsets (1, 2 member skills)")
+        predicate::str::contains("Structural candidates (1)")
             .and(predicate::str::contains("(unnamed proposal)"))
             .and(predicate::str::contains("repository-skillset").not())
             .and(predicate::str::contains("invalid skillset folder name").not()),
@@ -7355,7 +7361,7 @@ fn g4c_inspect_mixed_root_refuses_to_collapse_unrelated_levels() {
         cmd.env(key, value);
     }
     cmd.assert().success().stdout(
-        predicate::str::contains("Skillsets (0, 0 member skills)")
+        predicate::str::contains("Installable skillsets (0, 0 member skills)")
             .and(predicate::str::contains("Standalone skills (3)"))
             .and(predicate::str::contains("mixed skill layout"))
             .and(predicate::str::contains("narrower GitHub tree URL")),
@@ -7384,7 +7390,7 @@ fn g4d_inspect_reserves_skills_as_a_collection_root() {
             cmd.env(key, value);
         }
         cmd.assert().success().stdout(
-            predicate::str::contains("Skillsets (0, 0 member skills)")
+            predicate::str::contains("Installable skillsets (0, 0 member skills)")
                 .and(predicate::str::contains("Standalone skills (2)"))
                 .and(predicate::str::contains("skills-skillset").not()),
         );
@@ -7477,7 +7483,7 @@ fn g6_inspect_empty_boundary_succeeds() {
         cmd.env(key, value);
     }
     cmd.assert().success().stdout(
-        predicate::str::contains("Skillsets (0, 0 member skills)")
+        predicate::str::contains("Installable skillsets (0, 0 member skills)")
             .and(predicate::str::contains("Standalone skills (0)"))
             .and(predicate::str::contains("Diagnostics (1)"))
             .and(predicate::str::contains("no valid skills found"))
@@ -7634,5 +7640,322 @@ fn g10_inspect_escapes_terminal_controls_in_remote_paths() {
     assert!(
         stdout.contains("evil\\x1b[31m\\nrow\\tpart"),
         "escaped path missing from stdout: {stdout:?}"
+    );
+}
+
+// --- P0 skillset integrity (#40, #41, #43, #42) ---
+
+#[test]
+fn skillset_namespace_rejects_cross_skillset_member_collision() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let repo = ws.root.join("namespace-repo");
+    init_repo(&repo);
+    write_skill(&repo.join("sets/a/alpha"), "alpha", "Set A");
+    write_skill(&repo.join("sets/b/alpha"), "alpha", "Set B");
+    commit_all(&repo, "namespace fixture");
+    let branch = current_branch(&repo);
+    let public = "https://github.com/example/namespace.git";
+    let redirect = github_redirect(&repo, public);
+
+    ws.cmd(&project)
+        .args([
+            "skillset",
+            "add",
+            &format!("https://github.com/example/namespace/tree/{branch}/sets/a"),
+        ])
+        .envs(redirect.clone())
+        .assert()
+        .success();
+
+    ws.cmd(&project)
+        .args([
+            "skillset",
+            "add",
+            &format!("https://github.com/example/namespace/tree/{branch}/sets/b"),
+        ])
+        .envs(redirect)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Active skill name conflict for alpha",
+        ));
+    assert!(!Workspace::skill_path(&project, "b-skillset").exists());
+    assert!(
+        !ws.skillset_meta("b-skillset").exists(),
+        "namespace collision must not leave an orphan home pin"
+    );
+}
+
+#[test]
+fn skillset_update_rejects_namespace_collision_on_new_members() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let repo = ws.root.join("update-namespace-repo");
+    init_repo(&repo);
+    write_skill(&repo.join("bundle/alpha"), "alpha", "Bundle alpha");
+    let rev1 = commit_all(&repo, "bundle v1");
+    let branch = current_branch(&repo);
+    let public = "https://github.com/example/update-namespace.git";
+    let redirect = github_redirect(&repo, public);
+    let tree_url = format!("https://github.com/example/update-namespace/tree/{branch}/bundle");
+
+    ws.cmd(&project)
+        .args(["skillset", "add", &tree_url])
+        .envs(redirect.clone())
+        .assert()
+        .success();
+
+    write_skill(
+        &project.join(".agents/skills/collide"),
+        "collide",
+        "Standalone",
+    );
+    ws.cmd(&project).args(["skill", "check"]).assert().success();
+
+    write_skill(&repo.join("bundle/collide"), "collide", "Bundle collide");
+    commit_all(&repo, "bundle v2 with collide member");
+
+    ws.cmd(&project)
+        .args(["skillset", "update", "bundle-skillset"])
+        .envs(redirect.clone())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Active skill name conflict for collide",
+        ));
+
+    let meta: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(ws.skillset_meta("bundle-skillset")).unwrap())
+            .unwrap();
+    assert_eq!(meta["revision"], rev1);
+    assert!(
+        !Workspace::skill_path(&project, "bundle-skillset")
+            .join("collide/SKILL.md")
+            .is_file()
+    );
+}
+
+#[test]
+fn manifest_lock_sync_verify_includes_skillsets() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let repo = ws.root.join("lock-skillset-repo");
+    init_repo(&repo);
+    write_skill(&repo.join("bundle/alpha"), "alpha", "Alpha");
+    write_skill(&repo.join("bundle/beta"), "beta", "Beta");
+    commit_all(&repo, "lock skillset fixture");
+    let branch = current_branch(&repo);
+    let public = "https://github.com/example/lock-skillset.git";
+    let redirect = github_redirect(&repo, public);
+    let tree_url = format!("https://github.com/example/lock-skillset/tree/{branch}/bundle");
+
+    ws.cmd(&project)
+        .args(["skillset", "add", &tree_url])
+        .envs(redirect.clone())
+        .assert()
+        .success();
+
+    ws.cmd(&project).args(["skill", "lock"]).assert().success();
+
+    let manifest = fs::read_to_string(project.join(".tink/skills.toml")).unwrap();
+    let lock = fs::read_to_string(project.join(".tink/skills.lock")).unwrap();
+    assert!(manifest.contains("[[skillsets]]"));
+    assert!(manifest.contains("bundle-skillset"));
+    assert!(lock.contains("sha256"));
+
+    let installed = Workspace::skill_path(&project, "bundle-skillset");
+    fs::remove_dir_all(&installed).unwrap();
+    ws.cmd(&project)
+        .args(["skill", "sync"])
+        .envs(redirect.clone())
+        .assert()
+        .success();
+    assert!(installed.join("alpha/SKILL.md").is_file());
+    ws.cmd(&project)
+        .args(["skill", "verify"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn skillset_add_rejects_descendant_skill_md_before_publication() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let repo = ws.root.join("nested-skill-repo");
+    init_repo(&repo);
+    write_skill(&repo.join("bundle/parent"), "parent", "Parent member");
+    write_skill(
+        &repo.join("bundle/parent/child"),
+        "nested-skill",
+        "Nested skill",
+    );
+    commit_all(&repo, "nested skill fixture");
+    let branch = current_branch(&repo);
+    let public = "https://github.com/example/nested-skill.git";
+    let redirect = github_redirect(&repo, public);
+    let tree_url = format!("https://github.com/example/nested-skill/tree/{branch}/bundle");
+
+    ws.cmd(&project)
+        .args(["skillset", "add", &tree_url])
+        .envs(redirect)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("nested skill").and(predicate::str::contains("parent")));
+    assert!(!Workspace::skill_path(&project, "bundle-skillset").exists());
+    assert!(!ws.library_skillset("bundle-skillset").exists());
+    assert!(
+        !ws.skillset_meta("bundle-skillset").exists(),
+        "descendant rejection must not leave an orphan home pin"
+    );
+}
+
+#[test]
+fn inspect_lists_standalone_skills_outside_skillset_source_root() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    let repo = ws.root.join("inspect-scope-repo");
+    init_repo(&repo);
+    write_skill(
+        &repo.join("plugins/acme/skills/api"),
+        "api",
+        "Plugin API skill",
+    );
+    write_skill(
+        &repo.join("other/deep/api"),
+        "other-api",
+        "Unrelated API skill",
+    );
+    commit_all(&repo, "inspect scope fixture");
+    let public = "https://github.com/example/inspect-scope.git";
+    let redirect = github_redirect(&repo, public);
+
+    ws.cmd(&project)
+        .args([
+            "inspect",
+            "https://github.com/example/inspect-scope/tree/master",
+        ])
+        .envs(redirect)
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("other/deep/api").and(predicate::str::contains("other-api")),
+        );
+}
+
+#[test]
+fn inspect_marks_deep_nested_category_non_installable() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    let repo = ws.root.join("inspect-deep-nested-repo");
+    init_repo(&repo);
+    write_skill(&repo.join("sets/clean/alpha"), "alpha", "Clean member");
+    write_skill(&repo.join("sets/nested/alpha"), "alpha", "Nested member");
+    write_skill(
+        &repo.join("sets/nested/deep/nested/beta"),
+        "beta",
+        "Deep nested beta",
+    );
+    commit_all(&repo, "deep nested fixture");
+    let public = "https://github.com/example/inspect-deep-nested.git";
+    let redirect = github_redirect(&repo, public);
+
+    let output = ws
+        .cmd(&project)
+        .args([
+            "inspect",
+            "https://github.com/example/inspect-deep-nested/tree/master",
+            "--json",
+        ])
+        .envs(redirect)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let skillsets = report["skillsets"].as_array().unwrap();
+    let nested = skillsets
+        .iter()
+        .find(|skillset| skillset["source_root"] == "sets/nested")
+        .expect("expected nested skillset candidate");
+    assert_eq!(nested["installable"], false);
+    assert_eq!(nested["member_names"], serde_json::json!(["alpha"]));
+    let reasons = nested["exclusion_reasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(
+        reasons
+            .iter()
+            .any(|reason| reason.contains("nested category directories")),
+        "expected nested category exclusion, got {reasons:?}"
+    );
+}
+
+#[test]
+fn inspect_emits_installable_plugin_skillset_json() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    let repo = ws.root.join("plugin-repo");
+    init_repo(&repo);
+    write_skill(
+        &repo.join("plugins/acme/skills/alpha"),
+        "alpha",
+        "Alpha plugin skill",
+    );
+    write_skill(
+        &repo.join("plugins/acme/skills/beta"),
+        "beta",
+        "Beta plugin skill",
+    );
+    commit_all(&repo, "plugin fixture");
+    let public = "https://github.com/example/plugin.git";
+    let redirect = github_redirect(&repo, public);
+
+    let output = ws
+        .cmd(&project)
+        .args([
+            "inspect",
+            "https://github.com/example/plugin/tree/master/plugins/acme/skills",
+            "--json",
+        ])
+        .envs(redirect)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let skillsets = report["skillsets"].as_array().unwrap();
+    assert_eq!(skillsets.len(), 1);
+    assert_eq!(skillsets[0]["name"], "acme-skillset");
+    assert_eq!(skillsets[0]["source_root"], "plugins/acme/skills");
+    assert_eq!(skillsets[0]["installable"], true);
+    assert_eq!(
+        skillsets[0]["member_names"],
+        serde_json::json!(["alpha", "beta"])
     );
 }

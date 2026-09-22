@@ -240,6 +240,47 @@ pub fn discover_recursive(source: &Path) -> Result<RecursiveDiscovery, Error> {
     Ok(discovery)
 }
 
+/// Return the first descendant `SKILL.md` below a member root, excluding the root itself.
+pub fn find_descendant_skill_md(member_root: &Path) -> Result<Option<PathBuf>, Error> {
+    fn walk(directory: &Path, member_root: &Path) -> Result<Option<PathBuf>, Error> {
+        let mut children = Vec::new();
+        for entry in fs::read_dir(directory).map_err(|error| map_io(directory, error))? {
+            let entry = entry.map_err(|error| map_io(directory, error))?;
+            let path = entry.path();
+            if path.file_name().and_then(|name| name.to_str()) == Some(".git") {
+                continue;
+            }
+            let metadata = fs::symlink_metadata(&path).map_err(|error| map_io(&path, error))?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                continue;
+            }
+            children.push(path);
+        }
+        children.sort();
+        for child in children {
+            let skill_file = child.join("SKILL.md");
+            if skill_file.is_file() {
+                return Ok(Some(
+                    child
+                        .strip_prefix(member_root)
+                        .map(|relative| relative.to_path_buf())
+                        .unwrap_or_else(|_| child.to_path_buf()),
+                ));
+            }
+            if let Some(found) = walk(&child, member_root)? {
+                return Ok(Some(found));
+            }
+        }
+        Ok(None)
+    }
+
+    refuse_symlink(member_root)?;
+    if !member_root.is_dir() {
+        return Ok(None);
+    }
+    walk(member_root, member_root)
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum EntryKind {
     Dir,

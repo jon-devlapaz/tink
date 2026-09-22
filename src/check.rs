@@ -89,6 +89,11 @@ pub fn load_standalone_skills(root: &Path) -> Result<Vec<Skill>, Error> {
 pub fn check_project(root: &Path) -> Result<ProjectCheck, Error> {
     let entries = skill_entries(root)?;
     let mut report = ProjectCheck::default();
+    report
+        .failures
+        .extend(crate::active_skills::ActiveSkillIndex::collect_conflicts(
+            root,
+        )?);
     for path in entries {
         let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
         match crate::skillsets::classify_entry(&path) {
