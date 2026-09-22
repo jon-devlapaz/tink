@@ -105,12 +105,12 @@ pub struct SkillsetAddOutcome {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-struct SkillsetMeta {
-    source: String,
-    revision: String,
+pub(crate) struct SkillsetMeta {
+    pub(crate) source: String,
+    pub(crate) revision: String,
     #[serde(rename = "sourceRoot")]
-    source_root: String,
-    members: Vec<String>,
+    pub(crate) source_root: String,
+    pub(crate) members: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -294,6 +294,23 @@ pub(crate) fn read_owned_receipt(path: &Path, label: &str) -> Result<SkillsetRec
     Ok(receipt)
 }
 
+fn preflight_active_members(
+    project_root: &Path,
+    checkout: &Path,
+    meta: &SkillsetMeta,
+    skillset_name: &str,
+    exclude_skillset: Option<&str>,
+) -> Result<(), Error> {
+    let mut member_pairs = Vec::with_capacity(meta.members.len());
+    for member_dir in &meta.members {
+        let (source, _) = source_member_root(checkout, meta, member_dir)?;
+        let skill = skills::read_skill(&source, true)?;
+        member_pairs.push((skill.name, member_dir.clone()));
+    }
+    let index = crate::active_skills::ActiveSkillIndex::build(project_root)?;
+    index.ensure_members_available(&member_pairs, skillset_name, exclude_skillset)
+}
+
 fn validate_member_trees(path: &Path, receipt: &SkillsetReceipt) -> Result<(), Error> {
     for member in &receipt.members {
         let member_path = path.join(member);
@@ -302,6 +319,12 @@ fn validate_member_trees(path: &Path, receipt: &SkillsetReceipt) -> Result<(), E
             return Err(Error::msg(format!("Missing skillset member: {member}")));
         }
         skills::read_skill(&member_path, true)?;
+        if let Some(descendant) = skills::find_descendant_skill_md(&member_path)? {
+            let descendant_display = output::display_path(&descendant);
+            return Err(Error::msg(format!(
+                "Skillset member {member} contains nested skill at {descendant_display}; split at a different sourceRoot or use explicit nested members"
+            )));
+        }
     }
     Ok(())
 }
@@ -426,6 +449,12 @@ fn source_member_root(
         return Err(Error::msg(format!("Skillset member not found: {member}")));
     }
     let (_skill, desc) = skills::read_skill_and_description(&member_root, true)?;
+    if let Some(descendant) = skills::find_descendant_skill_md(&member_root)? {
+        let descendant_display = output::display_path(&descendant);
+        return Err(Error::msg(format!(
+            "Skillset member {member} contains nested skill at {descendant_display}; split at a different sourceRoot or use explicit nested members"
+        )));
+    }
     Ok((member_root, desc))
 }
 
@@ -857,6 +886,7 @@ fn add_skillset_url_at(
     preflight_library_target(home, &name)?;
     let (resolved_home, _) = home::ensure_inventory_root(home)?;
     ensure_skillset_pin(&resolved_home, &name, &candidate_meta)?;
+    preflight_active_members(project_root, &repository, &candidate_meta, &name, None)?;
 
     init::ensure_project_layout_at(home, project_root)?;
     let target_dir = home::project_skills_path(project_root).join(&name);
@@ -962,6 +992,7 @@ fn add_skillset_name_at(
         let (temp, checkout) = git::checkout_revision(&repository, &meta.revision)?;
         (Some(temp), checkout)
     };
+    preflight_active_members(project_root, &checkout, &meta, name, None)?;
     let (installed, created) = install_from_checkout(
         &checkout,
         &meta,
@@ -1022,6 +1053,7 @@ pub(crate) fn refresh_skillset_at(
         let (temp, checkout) = git::checkout_revision(&repository, &meta.revision)?;
         (Some(temp), checkout)
     };
+    preflight_active_members(project_root, &checkout, &meta, name, Some(name))?;
     let installed = replace_from_checkout(&checkout, &meta, &skills_root, name)?;
     sync_library_from_project(home, &installed)?;
     Ok(true)
@@ -1201,7 +1233,7 @@ fn library_root(home: Option<&Path>) -> Result<PathBuf, Error> {
     Ok(home::skillsets_library_path(&home))
 }
 
-fn preflight_library_target(home: Option<&Path>, name: &str) -> Result<(), Error> {
+pub(crate) fn preflight_library_target(home: Option<&Path>, name: &str) -> Result<(), Error> {
     let target = library_root(home)?.join(name);
     if !target.exists() && !target.is_symlink() {
         return Ok(());
@@ -1250,6 +1282,128 @@ fn copy_project_tree(
     }
 
     skills::publish_staged_tree(staging, staged, &target).map(|_| ())
+}
+
+pub(crate) fn member_skill_names_for_meta(
+    meta: &SkillsetMeta,
+    skillset_name: &str,
+) -> Result<Vec<(String, String)>, Error> {
+    let remote = parse_source(&meta.source)?;
+    let (_clone, repository, tip) = git::checkout(&remote)?;
+    let (_old_checkout, checkout) = if tip == meta.revision {
+        (None, repository)
+    } else {
+        let (temp, checkout) = git::checkout_revision(&repository, &meta.revision)?;
+        (Some(temp), checkout)
+    };
+    let mut member_pairs = Vec::with_capacity(meta.members.len());
+    for member_dir in &meta.members {
+        let (source, _) = source_member_root(&checkout, meta, member_dir)?;
+        let skill = skills::read_skill(&source, true)?;
+        member_pairs.push((skill.name, member_dir.clone()));
+    }
+    let _ = skillset_name;
+    Ok(member_pairs)
+}
+
+pub(crate) fn meta_from_receipt(receipt: &SkillsetReceipt) -> SkillsetMeta {
+    receipt_meta(receipt)
+}
+
+pub(crate) fn locked_digest_at_checkout(
+    checkout: &Path,
+    meta: &SkillsetMeta,
+    name: &str,
+) -> Result<String, Error> {
+    let staging = tempfile::Builder::new()
+        .prefix(".tink-skillset-digest-")
+        .tempdir()
+        .map_err(|e| Error::msg(format!("skillset digest staging: {e}")))?;
+    let (_guard, staged) = stage_from_checkout(checkout, meta, staging.path(), name)?;
+    skills::tree_digest(&staged, DIGEST_ROOT_IGNORE)
+}
+
+pub(crate) fn list_lockable_skillsets(
+    project_root: &Path,
+) -> Result<Vec<(String, SkillsetMeta, String)>, Error> {
+    let skills_root = home::project_skills_path(project_root);
+    if !skills_root.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut entries: Vec<_> = fs::read_dir(&skills_root)
+        .map_err(|e| map_io(&skills_root, e))?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .collect();
+    entries.sort();
+    let mut out = Vec::new();
+    for path in entries {
+        if classify_entry(&path) != EntryClass::Skillset {
+            continue;
+        }
+        let installed = read_installed(&path)?;
+        let digest = skills::tree_digest(&path, DIGEST_ROOT_IGNORE)?;
+        out.push((
+            installed.name,
+            meta_from_receipt(&installed.receipt),
+            digest,
+        ));
+    }
+    Ok(out)
+}
+
+pub(crate) fn sync_locked_skillset_at(
+    home: Option<&Path>,
+    project_root: &Path,
+    name: &str,
+    meta: &SkillsetMeta,
+) -> Result<bool, Error> {
+    validate_meta(meta)?;
+    preflight_library_target(home, name)?;
+    let remote = parse_source(&meta.source)?;
+    let (_clone, repository, tip) = git::checkout(&remote)?;
+    let (_old_checkout, checkout) = if tip == meta.revision {
+        (None, repository)
+    } else {
+        let (temp, checkout) = git::checkout_revision(&repository, &meta.revision)?;
+        (Some(temp), checkout)
+    };
+    preflight_active_members(project_root, &checkout, meta, name, Some(name))?;
+    init::ensure_project_layout_at(home, project_root)?;
+    let skills_root = home::project_skills_path(project_root);
+    let target = skills_root.join(name);
+    let created = if target.exists() || target.is_symlink() {
+        refuse_symlink(&target)?;
+        if !target.is_dir() {
+            return Err(Error::msg(format!(
+                "Refusing to overwrite non-directory skillset: {}",
+                output::display_path(&target)
+            )));
+        }
+        let receipt = read_owned_receipt(&target, "installed skillset receipt")?;
+        if receipt.digest_version != DIGEST_VERSION {
+            return Err(Error::msg(format!(
+                "Skillset receipt uses a legacy digest; run `tink skillset refresh {name}` to migrate it"
+            )));
+        }
+        if validate_installed_tree(&target, &receipt).is_err() {
+            return Err(Error::msg(format!(
+                "Refusing to sync {name}: local modifications are present"
+            )));
+        }
+        if receipt_meta(&receipt) == *meta {
+            ensure_project_router(home, &target, name, &meta.members)?;
+            sync_library_from_project(home, &target)?;
+            return Ok(false);
+        }
+        replace_from_checkout(&checkout, meta, &skills_root, name)?;
+        false
+    } else {
+        let (_installed, created) = install_from_checkout(&checkout, meta, &skills_root, name)?;
+        created
+    };
+    sync_library_from_project(home, &skills_root.join(name))?;
+    Ok(created)
 }
 
 fn sync_library_from_project(home: Option<&Path>, project: &Path) -> Result<LibraryWrite, Error> {
