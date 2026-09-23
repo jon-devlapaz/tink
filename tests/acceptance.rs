@@ -401,9 +401,9 @@ fn i10_init_bundle_failure_is_resumable() {
     first
         .assert()
         .failure()
-        .stderr(predicate::str::contains("grill-me-with-jev"));
-    assert!(!Workspace::skill_path(&project, "grill-me-with-jev").exists());
-    assert!(!ws.library_skill("grill-me-with-jev").exists());
+        .stderr(predicate::str::contains("interrogate"));
+    assert!(!Workspace::skill_path(&project, "interrogate").exists());
+    assert!(!ws.library_skill("interrogate").exists());
     ws.cmd(&project).args(["skill", "check"]).assert().success();
     let manage_before =
         fs::read(Workspace::skill_path(&project, "manage-tink").join("SKILL.md")).unwrap();
@@ -411,11 +411,11 @@ fn i10_init_bundle_failure_is_resumable() {
         fs::read(Workspace::skill_path(&project, "skill-scout").join("SKILL.md")).unwrap();
 
     write_skill(
-        &remote.join("skills").join("grill-me-with-jev"),
-        "grill-me-with-jev",
-        "Grill a claim.",
+        &remote.join("skills").join("interrogate"),
+        "interrogate",
+        "Settle pre-intent.",
     );
-    commit_all(&remote, "add grill-me-with-jev");
+    commit_all(&remote, "add interrogate");
 
     let mut second = ws.cmd(&project);
     second.args(args);
@@ -425,7 +425,7 @@ fn i10_init_bundle_failure_is_resumable() {
     second
         .assert()
         .success()
-        .stdout(predicate::str::contains("Added grill-me-with-jev"));
+        .stdout(predicate::str::contains("Added interrogate"));
     assert_eq!(
         fs::read(Workspace::skill_path(&project, "manage-tink").join("SKILL.md")).unwrap(),
         manage_before,
