@@ -134,8 +134,8 @@ pub(crate) fn init_project_at(
         &format!(
             "{}{} and {}{}{}?",
             style.warn("Add "),
-            style.skill("skill-scout"),
-            style.skill("interrogate"),
+            style.skill(TINK_SKILLS[0]),
+            style.skill(TINK_SKILLS[1]),
             style.warn(" from "),
             style.link(
                 &format!("https://github.com/{TINK_SKILLS_SOURCE}"),
