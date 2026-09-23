@@ -12,7 +12,7 @@ use crate::paths::{map_io, mkdir_p, require_directory, require_file};
 use crate::style::CliStyle;
 
 const TINK_SKILLS_SOURCE: &str = "jon-devlapaz/tink-skills";
-const TINK_SKILLS: &[&str] = &["skill-scout", "grill-me-with-jev"];
+const TINK_SKILLS: &[&str] = &["skill-scout", "interrogate"];
 
 const AGENTS_FILENAME: &str = "AGENTS.md";
 const AGENTS_MD: &str = "\
@@ -134,8 +134,8 @@ pub(crate) fn init_project_at(
         &format!(
             "{}{} and {}{}{}?",
             style.warn("Add "),
-            style.skill("skill-scout"),
-            style.skill("grill-me-with-jev"),
+            style.skill(TINK_SKILLS[0]),
+            style.skill(TINK_SKILLS[1]),
             style.warn(" from "),
             style.link(
                 &format!("https://github.com/{TINK_SKILLS_SOURCE}"),
