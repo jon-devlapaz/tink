@@ -69,6 +69,9 @@ pub struct RemoteSource {
 
 /// Classify ambiguous command-line input once, using the documented add precedence.
 pub fn classify_add_input(value: &str) -> Result<AddSource, Error> {
+    if value.contains("://") {
+        return Ok(AddSource::Github(parse_github_add_source(value)?));
+    }
     let path = Path::new(value);
     if path.exists() {
         return Ok(AddSource::LocalPath(path.to_path_buf()));
@@ -77,9 +80,6 @@ pub fn classify_add_input(value: &str) -> Result<AddSource, Error> {
         return Err(Error::msg(format!("Path does not exist: {value}")));
     }
     if looks_like_remote_source(value) {
-        if value.contains("://") {
-            return Ok(AddSource::Github(parse_github_add_source(value)?));
-        }
         return Ok(AddSource::Github(GithubAddSource {
             remote: parse_remote(value)?,
             tree_ref: None,
@@ -186,7 +186,15 @@ pub fn validate_manifest_source(
 }
 
 fn validate_remote_path(path: &str, name: &str, kind: &str) -> Result<(), Error> {
-    if path.starts_with('/') || path.contains("..") || path.contains('\\') {
+    if path.is_empty()
+        || path == "."
+        || path == ".."
+        || path.starts_with('/')
+        || path.contains("..")
+        || path.contains('\\')
+        || path.ends_with('/')
+        || path.contains("//")
+    {
         return Err(Error::msg(format!(
             "Invalid source path for project {kind} skill: {name}"
         )));
@@ -221,7 +229,23 @@ pub fn normalize_project_path(path: &Path, name: &str) -> Result<String, Error> 
 }
 
 fn looks_like_remote_source(value: &str) -> bool {
-    value.contains('/') || value.contains("://")
+    if value.is_empty()
+        || value.starts_with('.')
+        || value.starts_with('/')
+        || value.starts_with('~')
+        || value.ends_with('/')
+        || value.contains("//")
+    {
+        return false;
+    }
+    if value.contains("://") {
+        return true;
+    }
+    if value.contains('\\') {
+        return false;
+    }
+    let slash_count = value.matches('/').count();
+    slash_count >= 1 && !value.starts_with("./") && !value.starts_with("../")
 }
 
 fn looks_like_filesystem_path(value: &str) -> bool {
@@ -230,7 +254,12 @@ fn looks_like_filesystem_path(value: &str) -> bool {
         || value.starts_with("./")
         || value.starts_with("../")
         || value.starts_with("~/")
+        || value.ends_with('/')
+        || value.contains("//")
         || value.contains('\\')
+        || value == "."
+        || value == ".."
+        || value.is_empty()
 }
 
 /// Shared gate: only public GitHub HTTPS URLs enter tree-URL parsing.
@@ -431,6 +460,17 @@ mod tests {
     fn rejects_dot_owner_shorthand() {
         assert!(parse_remote("./relative-missing").is_err());
         assert!(parse_remote("../up").is_err());
+        assert!(classify_add_input("./relative-missing").is_err());
+        assert!(classify_add_input("../up").is_err());
+        assert!(matches!(
+            classify_add_input("."),
+            Ok(AddSource::LocalPath(_))
+        ));
+        assert!(matches!(
+            classify_add_input(".."),
+            Ok(AddSource::LocalPath(_))
+        ));
+        assert!(classify_add_input("foo/").is_err());
     }
 
     #[test]
