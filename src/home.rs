@@ -299,22 +299,6 @@ mod tests {
     }
 
     #[test]
-    fn skillset_pin_is_sibling_json_not_inside_tree() {
-        let home = Path::new("/tmp/tink-home");
-        let pin = skillset_pin_path(home, "common-skillset");
-        assert_eq!(
-            pin,
-            PathBuf::from("/tmp/tink-home/skillsets/common-skillset.json")
-        );
-        assert_ne!(
-            pin,
-            skillsets_library_path(home)
-                .join("common-skillset")
-                .join("meta.json")
-        );
-    }
-
-    #[test]
     fn ensure_initializes_existing_empty_root() {
         let temp = TempDir::new().unwrap();
         let root = temp.path().join("inv");

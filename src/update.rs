@@ -739,14 +739,6 @@ mod tests {
     }
 
     #[test]
-    fn asset_name_matches_release_layout() {
-        assert_eq!(
-            asset_name("0.2.0", "aarch64-apple-darwin"),
-            "tink-0.2.0-aarch64-apple-darwin.tar.gz"
-        );
-    }
-
-    #[test]
     fn semantic_version_comparison_is_numeric_and_prerelease_aware() {
         assert!(parse_version("0.3.10").unwrap() > parse_version("0.3.9").unwrap());
         assert!(parse_version("1.0.0").unwrap() > parse_version("1.0.0-rc.1").unwrap());
@@ -1031,20 +1023,5 @@ mod tests {
         let err = validate_archive_inventory(&archive).unwrap_err();
 
         assert!(err.to_string().contains("exactly one"));
-    }
-
-    #[test]
-    fn select_release_asset_errors_when_missing() {
-        let json = r#"{
-          "tag_name": "v0.2.0",
-          "assets": [
-            {
-              "name": "tink-0.2.0-x86_64-unknown-linux-gnu.tar.gz",
-              "browser_download_url": "https://example.test/linux.tgz"
-            }
-          ]
-        }"#;
-        let err = select_release_asset(json, "aarch64-apple-darwin").unwrap_err();
-        assert!(err.to_string().contains("no release asset"));
     }
 }

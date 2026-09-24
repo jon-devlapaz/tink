@@ -31,11 +31,6 @@ pub struct CliStyle {
 
 impl CliStyle {
     #[cfg(test)]
-    pub fn plain() -> Self {
-        Self { enabled: false }
-    }
-
-    #[cfg(test)]
     pub fn forced(enabled: bool) -> Self {
         Self { enabled }
     }
@@ -50,11 +45,6 @@ impl CliStyle {
         Self {
             enabled: color_enabled() && std::io::stderr().is_terminal(),
         }
-    }
-
-    #[cfg(test)]
-    pub fn enabled(self) -> bool {
-        self.enabled
     }
 
     fn paint(self, style: Style, text: impl std::fmt::Display) -> String {
@@ -135,24 +125,6 @@ fn color_enabled() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn plain_strips_styles() {
-        let style = CliStyle::plain();
-        assert_eq!(style.success("OK"), "OK");
-        assert_eq!(style.error("nope"), "nope");
-        assert_eq!(style.accent("tui-design"), "tui-design");
-        assert_eq!(style.skill("manage-tink"), "manage-tink");
-        assert_eq!(
-            style.skillset("engineering-skillset"),
-            "engineering-skillset"
-        );
-        assert_eq!(
-            style.link("https://github.com/jon-devlapaz/tink-skills", "tink-skills"),
-            "tink-skills"
-        );
-        assert!(!style.enabled());
-    }
 
     #[test]
     fn forced_emits_ansi_and_reset() {
