@@ -75,24 +75,3 @@ pub(crate) fn flush_stdout() -> Result<(), Error> {
         .flush()
         .map_err(|error| Error::output("stdout", error))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn untrusted_terminal_text_uses_visible_reversible_escapes() {
-        assert_eq!(
-            escape_untrusted("a\\b\nrow\r\t\0\u{1b}[31m"),
-            "a\\\\b\\nrow\\r\\t\\0\\x1b[31m"
-        );
-    }
-
-    #[test]
-    fn displayed_paths_escape_terminal_controls() {
-        assert_eq!(
-            display_path(Path::new("directory\u{1b}[31m/file\nname")),
-            "directory\\x1b[31m/file\\nname"
-        );
-    }
-}

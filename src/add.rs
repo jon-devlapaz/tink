@@ -674,30 +674,4 @@ mod tests {
 
         assert!(error.to_string().contains("symlink"), "{error}");
     }
-
-    #[test]
-    fn add_skill_at_installs_from_isolated_library() {
-        let temp = tempfile::tempdir().unwrap();
-        let home = temp.path().join("tink-home");
-        let project = temp.path().join("project");
-        fs::create_dir_all(&project).unwrap();
-
-        let src = temp.path().join("src").join("demo-skill");
-        fs::create_dir_all(&src).unwrap();
-        fs::write(
-            src.join("SKILL.md"),
-            "---\nname: demo-skill\ndescription: Isolation fixture.\n---\n\n# demo-skill\n\nbody\n",
-        )
-        .unwrap();
-        let skill = skills::read_skill(&src, true).unwrap();
-        library::deposit_at(Some(&home), &skill, None).unwrap();
-
-        let outcome = add_skill_quiet_at(Some(&home), &project, "demo-skill", None).unwrap();
-        assert_eq!(outcome.name, "demo-skill");
-        assert!(
-            crate::home::project_skills_path(&project)
-                .join("demo-skill/SKILL.md")
-                .is_file()
-        );
-    }
 }

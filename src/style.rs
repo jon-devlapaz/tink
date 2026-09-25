@@ -30,11 +30,6 @@ pub struct CliStyle {
 }
 
 impl CliStyle {
-    #[cfg(test)]
-    pub fn forced(enabled: bool) -> Self {
-        Self { enabled }
-    }
-
     pub fn auto_stdout() -> Self {
         Self {
             enabled: color_enabled() && std::io::stdout().is_terminal(),
@@ -120,32 +115,4 @@ impl CliStyle {
 
 fn color_enabled() -> bool {
     std::env::var_os("NO_COLOR").is_none()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn forced_emits_ansi_and_reset() {
-        let style = CliStyle::forced(true);
-        let painted = style.success("OK");
-        assert!(painted.contains("OK"), "{painted}");
-        assert!(painted.contains('\u{1b}'), "{painted}");
-        assert_ne!(painted, "OK");
-        let skill = style.skill("manage-tink");
-        assert!(skill.contains("manage-tink"), "{skill}");
-        assert!(skill.contains('\u{1b}'), "{skill}");
-        let skillset = style.skillset("engineering-skillset");
-        assert!(skillset.contains("engineering-skillset"), "{skillset}");
-        assert!(skillset.contains('\u{1b}'), "{skillset}");
-        assert!(skill.contains("\u{1b}[35m"), "{skill}");
-        assert!(skillset.contains("\u{1b}[34m"), "{skillset}");
-        let link = style.link("https://github.com/jon-devlapaz/tink-skills", "tink-skills");
-        assert!(link.contains("tink-skills"), "{link}");
-        assert!(
-            link.contains("\u{1b}]8;;https://github.com/jon-devlapaz/tink-skills\u{1b}\\"),
-            "{link}"
-        );
-    }
 }

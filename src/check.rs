@@ -168,19 +168,6 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn load_project_skills_refuses_nested_symlink() {
-        let temp = TempDir::new().unwrap();
-        let skill = temp.path().join(".agents/skills/demo-skill");
-        write_skill(&skill);
-        std::os::unix::fs::symlink("/tmp", skill.join("nested-link")).unwrap();
-
-        let err = load_project_skills(temp.path()).unwrap_err();
-
-        assert!(err.to_string().contains("symlink"), "{err}");
-    }
-
-    #[cfg(unix)]
-    #[test]
     fn load_project_skills_refuses_nested_special_file() {
         let temp = TempDir::new().unwrap();
         let skill = temp.path().join(".agents/skills/demo-skill");

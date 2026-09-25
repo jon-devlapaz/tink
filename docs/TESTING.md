@@ -108,20 +108,19 @@ concurrent writers, and larger shapes are outside this measurement.
 
 | Boundary | Primary executable sensors |
 |---|---|
-| Bootstrap and layout | `I*` acceptance tests; `home.rs` unit tests |
-| Local and remote standalone add | `A*`, `R*`; `sources.rs` and `skills.rs` unit tests, including Unix path-byte/mode preservation |
-| Skillsets | `K*`; `skillsets.rs` validation and receipt-classification unit tests |
+| Bootstrap and layout | `I*` acceptance tests; remaining `home.rs` refusal unit tests |
+| Local and remote standalone add | `A*`, `R*`; `skills.rs` mode, digest, and rollback unit tests |
+| Skillsets | `K*`; `skillsets.rs` validation unit tests acceptance does not assert |
 | GitHub inspection | `G*` |
 | Project validation and listing | `C*`, `L*` |
-| Library, promotion, cache, and harvest | `H*`; `library.rs` unit tests |
+| Library, promotion, cache, and harvest | `H*` |
 | Standalone refresh and removal | `P*`, `X*` |
-| Manifest lock/sync/verify | `M*`; `manifest.rs` framing, mode, legacy-lock, exact-source, and preflight unit tests |
-| CLI surface and lifecycle safety | `V*`, `D*`, `U*`, `S*`; `output.rs`, `update.rs`, `destroy.rs`, `catalog.rs`, `style.rs`, and `git.rs` unit tests |
+| Manifest lock/sync/verify | `M*`; `manifest.rs` framing, mode, project preflight, and lock-publication rollback unit tests |
+| CLI surface and lifecycle safety | `V*`, `D*`, `U*`, `S*`; `update.rs` and `git.rs` unit tests acceptance does not assert |
 
 The most important ownership sensors are:
 
-- `skillsets::tests::receipt_entry_presence_includes_dangling_symlinks` pins
-  classification before validation.
+- A16 and H14 pin receipt classification, including dangling symlinks, before validation.
 - H11 excludes a receipt-classified library root from standalone listing and directs a
   bare-name add to `skillset add`.
 - H12 refuses a divergent standalone collision before mutation or project publication
@@ -136,15 +135,15 @@ The most important ownership sensors are:
   offline re-add, staged refresh, version-2 receipts, and member-name validation.
 - P1-P7 cover clean-project proof and project/library refresh direction.
 - M7-M9 cover all-entry hash validation before mutation, later library refusal before
-  publication, and the explicit version-1-to-version-2 relock path. Manifest unit tests
-  also preflight project and catalog owners and prove prepared local snapshots retain
-  exact bytes.
-- A14 plus `skills.rs` unit tests cover portable executable-mode propagation, umask
-  normalization, and distinct non-UTF-8 Unix names. Digest tests pin unambiguous
-  framing and executable-mode sensitivity.
+  publication, and the explicit version-1-to-version-2 relock path. Remaining manifest
+  unit tests preflight every project destination before sync publishes, and restore
+  `skills.toml` when lock publication fails.
+- A14 and A15 cover portable executable-mode propagation and distinct non-UTF-8 Unix
+  names. `skills.rs` unit tests cover umask canonicalization, special-bit stripping,
+  and digest framing that those rows do not assert.
 - V4-V6 pin closed stdout/stderr exit semantics for the CLI and installer. V7
-  and the updater unit tests pin terminal-safe rendering for representative
-  catalog and updater failure paths. U4-U20 cover invalid payloads, downgrade
+  pins terminal-safe rendering for representative catalog and updater failure paths.
+  U4-U20 cover invalid payloads, downgrade
   refusal, strict semantic versions,
   case-insensitive SHA-256 metadata, URL
   redaction/policy, bounded candidate probes and output capture, exact published
@@ -157,7 +156,7 @@ The most important ownership sensors are:
   pair rollback when lock publication fails.
 - G9-G10 pin Git process-group cleanup on parent-only termination and visible escaping
   of terminal controls in untrusted repository paths.
-- L10-L13 and `catalog.rs` unit tests cover hashed catalog identity, bounded
+- L10-L13 cover hashed catalog identity, bounded
   components, raw Unix paths, legacy migration ownership, same-basename projects,
   and stable three-column catalog output for hidden, delimiter-bearing, and empty
   project sets.
