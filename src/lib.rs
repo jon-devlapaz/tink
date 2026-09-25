@@ -142,6 +142,8 @@ pub enum Command {
     Update,
     /// Run read-only environment and consistency diagnostics
     Doctor,
+    /// Print version information
+    Version,
 }
 
 #[derive(Debug, Subcommand)]
@@ -386,6 +388,10 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
             Ok(())
         }
         Command::Doctor => dispatch_doctor(&cwd),
+        Command::Version => {
+            println!("tink {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
     }
 }
 

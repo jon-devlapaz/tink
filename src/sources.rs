@@ -69,6 +69,9 @@ pub struct RemoteSource {
 
 /// Classify ambiguous command-line input once, using the documented add precedence.
 pub fn classify_add_input(value: &str) -> Result<AddSource, Error> {
+    if value.trim().is_empty() {
+        return Err(Error::msg("Skill target cannot be empty"));
+    }
     if value.contains("://") {
         return Ok(AddSource::Github(parse_github_add_source(value)?));
     }

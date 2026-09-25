@@ -8108,3 +8108,28 @@ fn zero_footprint_conflicts_with_bundled_flags() {
         .failure()
         .stderr(predicate::str::contains("cannot be used with"));
 }
+
+#[test]
+fn version_subcommand_prints_version() {
+    let ws = Workspace::new();
+    let project = ws.project("ver-test");
+
+    ws.cmd(&project)
+        .args(["version"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
+}
+
+#[test]
+fn empty_skill_add_fails_with_clear_error() {
+    let ws = Workspace::new();
+    ws.initialize_inventory();
+    let project = ws.project("empty-add");
+
+    ws.cmd(&project)
+        .args(["skill", "add", ""])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Skill target cannot be empty"));
+}
