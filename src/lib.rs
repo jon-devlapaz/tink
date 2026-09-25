@@ -767,10 +767,7 @@ fn dispatch_unmount(cwd: &Path, skill: &str) -> Result<(), Error> {
             output::stdout_line(format_args!("Unmounted {}", style.skill(skill)))?;
         }
         mount::UnmountOutcome::NotMounted => {
-            output::stdout_line(format_args!(
-                "Skill {} is not mounted",
-                style.skill(skill)
-            ))?;
+            output::stdout_line(format_args!("Skill {} is not mounted", style.skill(skill)))?;
         }
     }
     Ok(())

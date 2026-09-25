@@ -129,60 +129,61 @@ pub(crate) fn init_project_at(
     let (inventory_home, home_created) = home::ensure_inventory_root(home)?;
     let style = CliStyle::auto_stdout();
 
-    let (skills_path, skills_created, manage_tink_added, tink_skills_added) =
-        if options.zero_footprint {
-            let tink_dir = project_root.join(home::PROJECT_TINK_DIR);
-            let created = !tink_dir.is_dir();
-            mkdir_p(&tink_dir)?;
-            let gitignore = tink_dir.join(".gitignore");
-            if !gitignore.exists() {
-                std::fs::write(&gitignore, ".active/\ncache/\nephemeral.*\n")
-                    .map_err(|e| map_io(&gitignore, e))?;
-            }
-            (tink_dir, created, None, Vec::new())
-        } else {
-            let (agents, skills, readme) = layout_paths(project_root);
-            preflight_layout_dirs(&agents, &skills, &readme)?;
-            let with_tink_skills = opt_in(
-                options.with_tink_skills,
-                &format!(
-                    "{}{} and {}{}{}?",
-                    style.warn("Add "),
-                    style.skill(TINK_SKILLS[0]),
-                    style.skill(TINK_SKILLS[1]),
-                    style.warn(" from "),
-                    style.link(
-                        &format!("https://github.com/{TINK_SKILLS_SOURCE}"),
-                        "tink-skills",
-                    ),
+    let (skills_path, skills_created, manage_tink_added, tink_skills_added) = if options
+        .zero_footprint
+    {
+        let tink_dir = project_root.join(home::PROJECT_TINK_DIR);
+        let created = !tink_dir.is_dir();
+        mkdir_p(&tink_dir)?;
+        let gitignore = tink_dir.join(".gitignore");
+        if !gitignore.exists() {
+            std::fs::write(&gitignore, ".active/\ncache/\nephemeral.*\n")
+                .map_err(|e| map_io(&gitignore, e))?;
+        }
+        (tink_dir, created, None, Vec::new())
+    } else {
+        let (agents, skills, readme) = layout_paths(project_root);
+        preflight_layout_dirs(&agents, &skills, &readme)?;
+        let with_tink_skills = opt_in(
+            options.with_tink_skills,
+            &format!(
+                "{}{} and {}{}{}?",
+                style.warn("Add "),
+                style.skill(TINK_SKILLS[0]),
+                style.skill(TINK_SKILLS[1]),
+                style.warn(" from "),
+                style.link(
+                    &format!("https://github.com/{TINK_SKILLS_SOURCE}"),
+                    "tink-skills",
                 ),
-                Some("Optional GitHub bundle — click tink-skills to open the repo"),
-            )?;
-            let with_manage_tink = options.with_manage_tink.unwrap_or(true);
-            let created = !skills.is_dir();
-            create_layout_dirs(&agents, &skills, &readme)?;
-            let manage = if with_manage_tink {
-                let outcome = manage_tink::install_manage_tink_at(home, project_root)?;
-                Some(InstalledSkill {
+            ),
+            Some("Optional GitHub bundle — click tink-skills to open the repo"),
+        )?;
+        let with_manage_tink = options.with_manage_tink.unwrap_or(true);
+        let created = !skills.is_dir();
+        create_layout_dirs(&agents, &skills, &readme)?;
+        let manage = if with_manage_tink {
+            let outcome = manage_tink::install_manage_tink_at(home, project_root)?;
+            Some(InstalledSkill {
+                name: outcome.name,
+                created: outcome.created,
+            })
+        } else {
+            None
+        };
+        let mut added = Vec::new();
+        if with_tink_skills {
+            for name in TINK_SKILLS {
+                let outcome =
+                    add::add_skill_quiet_at(home, project_root, TINK_SKILLS_SOURCE, Some(name))?;
+                added.push(InstalledSkill {
                     name: outcome.name,
                     created: outcome.created,
-                })
-            } else {
-                None
-            };
-            let mut added = Vec::new();
-            if with_tink_skills {
-                for name in TINK_SKILLS {
-                    let outcome =
-                        add::add_skill_quiet_at(home, project_root, TINK_SKILLS_SOURCE, Some(name))?;
-                    added.push(InstalledSkill {
-                        name: outcome.name,
-                        created: outcome.created,
-                    });
-                }
+                });
             }
-            (skills, created, manage, added)
-        };
+        }
+        (skills, created, manage, added)
+    };
 
     let agents_written = write_agents_md(project_root)?;
 

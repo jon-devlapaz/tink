@@ -8072,7 +8072,9 @@ fn mount_refuses_to_overwrite_real_directory() {
         .args(["mount", "demo-skill"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Refusing to overwrite non-symlink directory"));
+        .stderr(predicate::str::contains(
+            "Refusing to overwrite non-symlink directory",
+        ));
 
     assert!(real_dir.join("valuable-user-data.txt").is_file());
 }
