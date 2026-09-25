@@ -2,7 +2,7 @@
 
 Tink is a local CLI that installs Agent Skills into a project's
 `.agents/skills/`. That project directory is the only live agent-discovery root.
-`$TINK_HOME` (default `~/.tink`) is offline inventory: it stores reusable skill
+`$TINK_HOME` (default `~/.tink-library`) is offline inventory: it stores reusable skill
 trees and pinned skillset definitions.
 
 This document is the current navigation map. [`ACCEPTANCE.md`](../ACCEPTANCE.md)

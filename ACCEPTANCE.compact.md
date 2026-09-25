@@ -6,7 +6,7 @@
 
 ## Core model
 
-- Rust CLI manages standalone skills + pinned skillsets under `<project>/.agents/skills/`; validates offline; manifest + lockfile record and restore standalone intent; reusable home inventory at `~/.tink` (`TINK_HOME` override); read-only GitHub inspection; scoped removal; verified binary updates from GitHub Releases.
+- Rust CLI manages standalone skills + pinned skillsets under `<project>/.agents/skills/`; validates offline; manifest + lockfile record and restore standalone intent; reusable home inventory at `~/.tink-library` (`TINK_HOME` override); read-only GitHub inspection; scoped removal; verified binary updates from GitHub Releases.
 - Gate: PRs/`main` run pinned Rust 1.95 fmt, check, Clippy `-D warnings`, docs, audit, test, release build. Native macOS + Linux, x86_64 + arm64. Tag releases repeat the gate before building all four artifacts.
 - Out of v1: weekly update workflows, private GitHub auth, Windows, library pruning, concurrent mutations in one project/home, cross-filesystem rollback after unexpected I/O failure. Recovery model: rerun the idempotent command.
 - Process: stdout = data/summaries; stderr = warnings/errors. Exits: 1 = failure, 2 = Clap usage. Closed stdout = normal exit 0, no panic.
@@ -14,7 +14,7 @@
 
 ## Commands (condensed)
 
-- `init`: create `.agents/skills/`, write `AGENTS.md` if missing, install `manage-tink` by default, ensure `~/.tink`.
+- `init`: create `.agents/skills/`, write `AGENTS.md` if missing, install `manage-tink` by default, ensure `~/.tink-library`.
 - `skill add <source> [--skill <name-or-path>]`: one local path, public GitHub skill, GitHub tree URL, or library name. Remote selectors may be unique names or repo-relative paths.
 - `skill list` / `--library`: project skills (read-only); library names (`tink library list` / compatibility alias).
 - `skill read <name> [--library] [--raw]`: description + lifecycle metadata.
@@ -35,7 +35,7 @@
 - Live skills: `<project>/.agents/skills/<name>/` with `SKILL.md`.
 - Live skillsets: `<project>/.agents/skills/<name>-skillset/<member>/`, one `SKILL.md` per explicit member.
 - Receipt `.tink-source.json`: exactly `source`, `revision`, `path` (non-empty strings).
-- Home: `$TINK_HOME` or `~/.tink` (relative absolutized vs cwd) with `layout.json` (`kind: tink-skill-inventory`).
+- Home: `$TINK_HOME` or `~/.tink-library` (relative absolutized vs cwd) with `layout.json` (`kind: tink-skill-inventory`).
 - Library `skills/<name>/`: rebuildable standalone copies on successful add; identical tip may seed project; divergence repairs + warns; project overwrite still refused; never a discovery root.
 - Skillsets library `skillsets/<name>-skillset/`: derived copies of validated project skillsets; project is primary; never a discovery root.
 - Skillset pin `$TINK_HOME/skillsets/<name>-skillset.json`: create-only, `source`, immutable `revision`, repo-relative `sourceRoot`, explicit `members`.

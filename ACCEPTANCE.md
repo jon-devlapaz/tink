@@ -3,7 +3,7 @@
 **Outcome:** A Rust CLI that manages complete standalone Agent Skills and pinned
 skillsets under a project's `.agents/skills/`; validates them offline; records and
 restores standalone intent through a project manifest and lockfile; maintains a
-reusable home inventory at `~/.tink` (override: `TINK_HOME`); inspects public GitHub
+reusable home inventory at `~/.tink-library` (override: `TINK_HOME`); inspects public GitHub
 skill structures without persistent writes; removes only explicitly managed project
 state; and updates the CLI binary from verified GitHub Releases.
 
@@ -39,7 +39,7 @@ top-level `add` / `check` / `refresh` aliases. CLI binary updates use top-level
 
 | Command | Meaning |
 |---|---|
-| `tink init` | Create `.agents/skills/`; write `AGENTS.md` if missing; install `manage-tink` by default; optional tink-skills; ensure `~/.tink` |
+| `tink init` | Create `.agents/skills/`; write `AGENTS.md` if missing; install `manage-tink` by default; optional tink-skills; ensure `~/.tink-library` |
 | `tink skill add <source> [--skill <name-or-path>]` | Install one local path, public GitHub skill, GitHub skill tree URL, or library skill by name; remote selectors may be unique names or repository-relative paths |
 | `tink skill list` | List project skills under `.agents/skills/` (read-only) |
 | `tink skill read <name> [--library] [--raw]` | Print one standalone skill's description and lifecycle metadata (read-only) |
@@ -70,7 +70,7 @@ top-level `add` / `check` / `refresh` aliases. CLI binary updates use top-level
 | Live skills | `<project>/.agents/skills/<name>/` with `SKILL.md` |
 | Live skillsets | `<project>/.agents/skills/<name>-skillset/<member>/` with one `SKILL.md` per explicitly named member |
 | Receipt | `.tink-source.json` with exactly `source`, `revision`, `path` (non-empty strings) |
-| Home root | `$TINK_HOME` or `~/.tink` (relative `$TINK_HOME` absolutized against cwd), with `layout.json` (`kind`: `tink-skill-inventory`) |
+| Home root | `$TINK_HOME` or `~/.tink-library` (relative `$TINK_HOME` absolutized against cwd), with `layout.json` (`kind`: `tink-skill-inventory`) |
 | Library | `skills/<name>/` standalone skill trees copied on successful add (rebuildable collection; identical tip may install project from library; divergent → repair + warn; project overwrite still refused; not an agent discovery root) |
 | Skillsets library | `skillsets/<name>-skillset/` derived copies of validated project skillsets (project is primary; not an agent discovery root) |
 | Skillset pin | `$TINK_HOME/skillsets/<name>-skillset.json` is create-only authored by `tink skillset add <url>` or externally authored desired state with `source`, immutable `revision`, repository-relative `sourceRoot`, and explicit `members` |

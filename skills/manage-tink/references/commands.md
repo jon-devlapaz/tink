@@ -41,7 +41,7 @@ list, read, check, refresh, and remove.
 
 - Live skills: `<project>/.agents/skills/<name>/` with `SKILL.md`. Live
   skillsets: `<project>/.agents/skills/<name>-skillset/<member>/SKILL.md`.
-- Home (`$TINK_HOME` or `~/.tink`) is not an agent discovery root. Standalone
+- Home (`$TINK_HOME` or `~/.tink-library`) is not an agent discovery root. Standalone
   library trees live at `skills/<name>/`, skillset trees at
   `skillsets/<name>-skillset/`. Promote with `tink skill add NAME`.
   Receipt-backed roots are excluded from standalone operations.

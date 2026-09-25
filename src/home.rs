@@ -1,4 +1,4 @@
-//! Offline home root (`~/.tink` or `TINK_HOME`): layout, migration, paths.
+//! Offline home root (`~/.tink-library` or `TINK_HOME`): layout, migration, paths.
 //!
 //! Not an agent discovery root. Live skills stay under the project's
 //! `.agents/skills/`.
@@ -12,7 +12,7 @@ use crate::output;
 use crate::paths::{map_io, mkdir_p, refuse_symlink, require_file};
 
 pub const TINK_HOME_ENV: &str = "TINK_HOME";
-pub const TINK_HOME_NAME: &str = ".tink";
+pub const TINK_HOME_NAME: &str = ".tink-library";
 pub const LAYOUT_FILENAME: &str = "layout.json";
 pub const LAYOUT_KIND: &str = "tink-skill-inventory";
 
@@ -34,7 +34,7 @@ pub fn project_skills_path(project_root: &Path) -> PathBuf {
 }
 
 const HOME_README: &str = "\
-# Tink home (`~/.tink`)
+# Tink home (`~/.tink-library`)
 
 Tink home directory. This is **not** an agent skill discovery root. Agents load
 skills only from a project's `.agents/skills/`.
@@ -49,7 +49,7 @@ Successful installs:
 `skill remove` and `destroy` delete project trees only; they do not prune
 library trees.
 
-Default location: `~/.tink` (override with `TINK_HOME`; relative values
+Default location: `~/.tink-library` (override with `TINK_HOME`; relative values
 resolve against the process working directory to an absolute path).
 ";
 
@@ -449,6 +449,11 @@ mod tests {
             assert!(fs::read_dir(&target).unwrap().next().is_none());
             assert_eq!(fs::read(&readme).unwrap(), before);
         }
+    }
+
+    #[test]
+    fn default_tink_home_name_is_dot_tink_library() {
+        assert_eq!(TINK_HOME_NAME, ".tink-library");
     }
 
     #[test]

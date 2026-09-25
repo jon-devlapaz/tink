@@ -95,7 +95,7 @@ Defaults after `init`:
 
 1. Creates `.agents/skills/`.
 2. Writes `AGENTS.md` if it is missing, so agents know Tink manages skills here.
-3. Ensures `~/.tink` exists.
+3. Ensures `~/.tink-library` exists.
 4. Installs the embedded `manage-tink` skill.
 
 **Agents:** follow [`skills/manage-tink/SKILL.md`](skills/manage-tink/SKILL.md).
@@ -113,7 +113,7 @@ flowchart LR
   agent["Agent harness"]
   tink["tink CLI"]
   live[".agents/skills/"]
-  library["~/.tink/skills/"]
+  library["~/.tink-library/skills/"]
 
   agent -->|"discovers"| live
   tink -->|"add / remove"| live
@@ -291,7 +291,7 @@ cargo test
 
 `./tink-test` builds this checkout and runs `target/debug/tink` (not
 `~/.local/bin/tink`). It forces `TINK_HOME` to `~/.tink-test` (override with
-`TINK_TEST_HOME`) so dogfood does not touch `~/.tink`.
+`TINK_TEST_HOME`) so dogfood does not touch `~/.tink-library`.
 
 Flag-level detail lives in `tink --help` and
 `ACCEPTANCE.md`.

@@ -50,7 +50,7 @@ Otherwise run only the read command that matches the request:
 `tink skill check` remains the integrity gate: non-zero means stop.
 
 **On failure:** Report the exact refusal or error and stop. Prefer the CLI over hand-parsing
-`~/.tink` or skillset pin files.
+`~/.tink-library` or skillset pin files.
 
 ### Step 2: Execute the one authorized mutation
 
@@ -192,7 +192,7 @@ refresh, and destroy each need their own ask.
   - `tink destroy` → `.agents/skills/`, then `.agents/` only if empty;
     preserves files outside `.agents/` (including `AGENTS.md`)
 - Local skills stay non-refreshable unless they carry a valid receipt.
-- Library (`~/.tink/skills/`) is not an agent discovery root; promote with
+- Library (`~/.tink-library/skills/`) is not an agent discovery root; promote with
   `tink skill add NAME`.
 - Skillsets nest at `.agents/skills/NAME-skillset/<member>/SKILL.md`.
 - Run one Tink mutation at a time; Tink has no inter-process lock.

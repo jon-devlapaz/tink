@@ -225,7 +225,7 @@ fn repair_divergent_deposit(
     skills::publish_staged_tree(staging, staged, target)
 }
 
-/// Copy skill tree into `~/.tink/skills/<name>/`.
+/// Copy skill tree into `~/.tink-library/skills/<name>/`.
 ///
 /// Identical → noop; missing → create; divergent → replace (caller should warn).
 /// Project installs still refuse overwrites separately.
