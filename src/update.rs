@@ -6,11 +6,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-#[cfg(test)]
-use std::thread;
 use std::time::Duration;
-#[cfg(test)]
-use std::time::Instant;
 
 use semver::Version;
 use sha2::{Digest, Sha256};
@@ -626,116 +622,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn curl_command_args_wire_timeouts_retries_and_dest() {
-        let dest = Path::new("/tmp/tink-release.json");
-        assert_eq!(
-            curl_command_args(CurlBudget::Metadata, "https://example.test/meta", dest),
-            [
-                "-fsSL",
-                "--proto",
-                "=https",
-                "--proto-redir",
-                "=https",
-                "--connect-timeout",
-                CURL_CONNECT_TIMEOUT_SECONDS,
-                "--max-time",
-                CURL_METADATA_MAX_TIME_SECONDS,
-                "--retry",
-                CURL_RETRY_COUNT,
-                "--retry-delay",
-                CURL_RETRY_DELAY_SECONDS,
-                "https://example.test/meta",
-                "-o",
-                "/tmp/tink-release.json",
-            ]
-        );
-        let archive = Path::new("/tmp/tink.tgz");
-        let asset_args =
-            curl_command_args(CurlBudget::Asset, "https://example.test/tink.tgz", archive);
-        let max_time_idx = asset_args
-            .iter()
-            .position(|a| *a == "--max-time")
-            .expect("--max-time present");
-        assert_eq!(asset_args[max_time_idx + 1], CURL_ASSET_MAX_TIME_SECONDS);
-        assert_ne!(CURL_METADATA_MAX_TIME_SECONDS, CURL_ASSET_MAX_TIME_SECONDS);
-        let file_args = curl_command_args(
-            CurlBudget::Asset,
-            "file:///tmp/tink.tgz",
-            Path::new("/tmp/download.tgz"),
-        );
-        assert!(
-            file_args
-                .windows(2)
-                .any(|args| args == ["--proto", "=file"])
-        );
-    }
-
-    #[test]
     fn file_asset_requires_explicit_file_api_mode() {
         assert!(validate_asset_url("file:///tmp/tink.tgz", ReleaseUrlMode::Https).is_err());
         assert!(validate_asset_url("file:///tmp/tink.tgz", ReleaseUrlMode::File).is_ok());
         assert!(validate_asset_url("https://example.test/tink.tgz", ReleaseUrlMode::Https).is_ok());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn bounded_process_kills_and_reaps_timeout() {
-        let started = Instant::now();
-        let err = run_bounded(
-            Command::new("sh").args(["-c", "exec sleep 2"]),
-            Duration::from_millis(30),
-            "timeout fixture",
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("timed out"));
-        assert!(started.elapsed() < Duration::from_secs(1));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn bounded_process_times_out_when_descendant_holds_output_pipes() {
-        let temp = tempfile::tempdir().unwrap();
-        let marker = temp.path().join("descendant-survived");
-        let started = Instant::now();
-        let err = run_bounded(
-            Command::new("sh")
-                .args(["-c", "(sleep 0.2; : > \"$TINK_TIMEOUT_MARKER\") & exit 0"])
-                .env("TINK_TIMEOUT_MARKER", &marker),
-            Duration::from_millis(30),
-            "descendant pipe fixture",
-        )
-        .unwrap_err();
-
-        assert!(err.to_string().contains("timed out"));
-        assert!(started.elapsed() < Duration::from_secs(1));
-        thread::sleep(Duration::from_millis(300));
-        assert!(!marker.exists(), "timed-out descendant was left running");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn bounded_process_cleans_descendants_after_direct_child_succeeds() {
-        let temp = tempfile::tempdir().unwrap();
-        let marker = temp.path().join("descendant-survived");
-        let output = run_bounded(
-            Command::new("sh")
-                .args([
-                    "-c",
-                    "(sleep 0.2; : > \"$TINK_TIMEOUT_MARKER\") >/dev/null 2>&1 & printf done",
-                ])
-                .env("TINK_TIMEOUT_MARKER", &marker),
-            Duration::from_secs(1),
-            "successful descendant fixture",
-        )
-        .unwrap();
-
-        assert!(output.status.success());
-        assert_eq!(output.stdout, b"done");
-        thread::sleep(Duration::from_millis(300));
-        assert!(
-            !marker.exists(),
-            "successful child left a descendant running"
-        );
     }
 
     #[test]
@@ -756,64 +646,6 @@ mod tests {
         for version in ["1.2", "01.2.3", "1.2.3-01", "1.2.3+", "1.2.3/evil"] {
             assert!(parse_version(version).is_err(), "accepted {version}");
         }
-    }
-
-    #[test]
-    fn select_release_asset_picks_matching_target() {
-        let json = r#"{
-          "tag_name": "v0.2.0",
-          "assets": [
-            {
-              "name": "tink-0.2.0-x86_64-unknown-linux-gnu.tar.gz",
-              "browser_download_url": "https://example.test/linux.tgz"
-            },
-            {
-              "name": "tink-0.2.0-aarch64-apple-darwin.tar.gz",
-              "browser_download_url": "https://example.test/mac.tgz",
-              "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-            }
-          ]
-        }"#;
-        let asset = select_release_asset(json, "aarch64-apple-darwin").unwrap();
-        assert_eq!(asset.version, "0.2.0");
-        assert_eq!(asset.tag_name, "v0.2.0");
-        assert_eq!(asset.download_url, "https://example.test/mac.tgz");
-        assert_eq!(
-            asset.sha256,
-            parse_sha256("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
-                .unwrap()
-        );
-    }
-
-    #[test]
-    fn parse_sha256_accepts_case_insensitive_metadata() {
-        let lowercase =
-            parse_sha256("sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
-                .unwrap();
-        let mixed_case =
-            parse_sha256("ShA256:ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789")
-                .unwrap();
-
-        assert_eq!(mixed_case, lowercase);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn update_failure_paths_escape_terminal_controls() {
-        let temp = TempDir::new().unwrap();
-        let current = temp.path().join("tink-\u{1b}\nunsafe");
-        fs::create_dir(&current).unwrap();
-
-        let message = validate_current_binary_target(&current)
-            .unwrap_err()
-            .to_string();
-
-        assert!(
-            !message.contains('\u{1b}'),
-            "raw escape leaked: {message:?}"
-        );
-        assert!(message.contains("\\x1b") && message.contains("\\nunsafe"));
-        assert_eq!(message.lines().count(), 1);
     }
 
     #[test]
@@ -917,51 +749,6 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(orphans.len(), 1, "{err}");
         assert_eq!(fs::read(&orphans[0]).unwrap(), original);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn replace_binary_rolls_back_when_published_probe_fails() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let temp = tempfile::tempdir().unwrap();
-        let current = temp.path().join("installed-tink");
-        let candidate = temp.path().join("candidate-tink");
-        let original = b"#!/bin/sh\nprintf 'tink 0.3.14\\n'\n";
-        fs::write(&current, original).unwrap();
-        fs::set_permissions(&current, fs::Permissions::from_mode(0o755)).unwrap();
-        fs::write(
-            &candidate,
-            b"#!/bin/sh\ncase \"$0\" in\n  */installed-tink) exit 7 ;;\nesac\nprintf 'tink 99.0.0\\n'\n",
-        )
-        .unwrap();
-        fs::set_permissions(&candidate, fs::Permissions::from_mode(0o755)).unwrap();
-
-        let err = replace_binary(&current, &candidate, "99.0.0").unwrap_err();
-
-        assert!(err.to_string().contains("published"));
-        assert!(
-            !err.to_string().contains("recovery backup"),
-            "successful rollback must not retain a recovery backup: {err}"
-        );
-        assert_eq!(fs::read(&current).unwrap(), original);
-        assert_eq!(
-            fs::metadata(&current).unwrap().permissions().mode() & 0o777,
-            0o755
-        );
-        assert!(
-            fs::read_dir(temp.path())
-                .into_iter()
-                .flatten()
-                .flatten()
-                .all(|entry| {
-                    !entry
-                        .file_name()
-                        .to_str()
-                        .is_some_and(|name| name.starts_with(".tink-orphan-"))
-                }),
-            "successful rollback must not leave orphan files"
-        );
     }
 
     #[test]

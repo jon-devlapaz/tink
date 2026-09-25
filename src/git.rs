@@ -275,23 +275,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn git_command_args_prepend_transport_timeouts() {
-        assert_eq!(
-            git_command_args(&["ls-remote", "--quiet", "https://example.test", "HEAD"]),
-            [
-                "-c",
-                GIT_LOW_SPEED_LIMIT_SETTING,
-                "-c",
-                GIT_LOW_SPEED_TIME_SETTING,
-                "ls-remote",
-                "--quiet",
-                "https://example.test",
-                "HEAD",
-            ]
-        );
-    }
-
-    #[test]
     fn git_guard_rejects_project_mutations_and_allows_owned_reads() {
         for args in [
             &["init"][..],

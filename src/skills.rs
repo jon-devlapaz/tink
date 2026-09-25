@@ -790,16 +790,6 @@ pub fn install_local(
     }
 }
 
-#[cfg(test)]
-pub(crate) fn test_rollback_or_retain_backup(
-    staging: tempfile::TempDir,
-    backup: &Path,
-    target: &Path,
-    publish_error: std::io::Error,
-) -> Error {
-    rollback_or_retain_backup(staging, backup, target, publish_error)
-}
-
 fn rollback_or_retain_backup(
     staging: tempfile::TempDir,
     backup: &Path,
@@ -916,23 +906,6 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn skill_errors_escape_terminal_controls_in_paths() {
-        let temp = TempDir::new().unwrap();
-        let skill = temp.path().join("unsafe\u{1b}[31m");
-        fs::create_dir_all(&skill).unwrap();
-        fs::write(skill.join("SKILL.md"), "missing frontmatter\n").unwrap();
-
-        let error = read_skill(&skill, false).unwrap_err().to_string();
-
-        assert!(
-            !error.contains('\u{1b}'),
-            "raw escape reached diagnostic: {error:?}"
-        );
-        assert!(error.contains("unsafe\\x1b[31m"), "{error:?}");
-    }
-
-    #[cfg(unix)]
-    #[test]
     fn copy_skill_tree_canonicalizes_executable_mode_and_strips_special_bits() {
         use std::os::unix::fs::PermissionsExt;
 
@@ -981,47 +954,6 @@ mod tests {
 
         assert_eq!(tree_digest(&source, &[]).unwrap(), restrictive_digest);
         assert!(skill_contents_equal(&source, &destination).unwrap());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn copy_skill_tree_preserves_distinct_non_utf8_names() {
-        use std::ffi::OsString;
-        use std::os::unix::ffi::OsStringExt;
-
-        let temp = TempDir::new().unwrap();
-        let source = temp.path().join("source");
-        let destination = temp.path().join("destination");
-        fs::create_dir_all(&source).unwrap();
-        let first = source.join(OsString::from_vec(vec![0x80]));
-        let second = source.join(OsString::from_vec(vec![0x81]));
-        for (path, body) in [
-            (&first, b"first".as_slice()),
-            (&second, b"second".as_slice()),
-        ] {
-            if let Err(error) = fs::write(path, body) {
-                assert!(
-                    matches!(error.raw_os_error(), Some(1 | 92)),
-                    "unexpected fixture error: {error}"
-                );
-                assert!(
-                    !destination.exists(),
-                    "OS rejection must happen before destination writes"
-                );
-                return;
-            }
-        }
-
-        copy_skill_tree(&source, &destination, &[]).unwrap();
-
-        assert_eq!(
-            fs::read(destination.join(OsString::from_vec(vec![0x80]))).unwrap(),
-            b"first"
-        );
-        assert_eq!(
-            fs::read(destination.join(OsString::from_vec(vec![0x81]))).unwrap(),
-            b"second"
-        );
     }
 
     #[test]

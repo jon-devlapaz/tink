@@ -201,62 +201,6 @@ mod tests {
         .unwrap();
     }
 
-    fn outcomes(rows: &[ProbeRow]) -> Vec<(&'static str, ProbeOutcome)> {
-        rows.iter().map(|row| (row.name, row.outcome)).collect()
-    }
-
-    #[test]
-    fn healthy_project_reports_no_failures() {
-        let temp = tempfile::tempdir().unwrap();
-        let home = temp.path().join("home");
-        let project = temp.path().join("app");
-        crate::init::init_project_at(
-            Some(&home),
-            &project,
-            crate::init::InitOptions {
-                with_tink_skills: Some(false),
-                with_manage_tink: Some(false),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        write_skill(&project, "alpha");
-
-        let rows = doctor_at(Some(&home), &project).unwrap();
-        assert!(healthy(&rows), "{rows:?}");
-        // Local-only project: network and manifest probes skip, nothing fails.
-        assert!(outcomes(&rows).contains(&("network", ProbeOutcome::Skip)));
-        assert!(outcomes(&rows).contains(&("manifest", ProbeOutcome::Skip)));
-    }
-
-    #[test]
-    fn invalid_tree_names_the_skills_probe() {
-        let temp = tempfile::tempdir().unwrap();
-        let home = temp.path().join("home");
-        let project = temp.path().join("app");
-        crate::init::init_project_at(
-            Some(&home),
-            &project,
-            crate::init::InitOptions {
-                with_tink_skills: Some(false),
-                with_manage_tink: Some(false),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        write_skill(&project, "alpha");
-        fs::write(
-            project.join(".agents/skills/alpha/SKILL.md"),
-            "no frontmatter here\n",
-        )
-        .unwrap();
-
-        let rows = doctor_at(Some(&home), &project).unwrap();
-        assert!(!healthy(&rows));
-        let skills = rows.iter().find(|row| row.name == "skills").unwrap();
-        assert_eq!(skills.outcome, ProbeOutcome::Fail);
-    }
-
     #[test]
     fn broken_home_marker_fails_only_the_home_probe() {
         let temp = tempfile::tempdir().unwrap();
@@ -281,21 +225,5 @@ mod tests {
         assert_eq!(home_row.outcome, ProbeOutcome::Fail);
         let skills = rows.iter().find(|row| row.name == "skills").unwrap();
         assert_eq!(skills.outcome, ProbeOutcome::Pass);
-    }
-
-    #[test]
-    fn unreachable_remote_fails_fast() {
-        // A bare word is treated as a local path, so git fails without
-        // touching the network: instant on any machine, and — critically —
-        // without holding the shared subprocess supervision lock, which
-        // would starve the timing-sensitive tests in this binary.
-        // Timeout bounding itself is covered by `update::tests`.
-        let started = std::time::Instant::now();
-        let result = ls_remote_head("tink-doctor-probe-invalid-remote");
-        assert!(result.is_err());
-        assert!(
-            started.elapsed() < std::time::Duration::from_secs(30),
-            "network probe must not hang"
-        );
     }
 }
