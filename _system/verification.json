@@ -1,0 +1,17 @@
+{
+  "require_tink": false,
+  "checks": [
+    {
+      "argv": ["cargo", "check"],
+      "timeout_seconds": 120
+    },
+    {
+      "argv": ["cargo", "test", "--test", "acceptance", "zero_footprint"],
+      "timeout_seconds": 120
+    },
+    {
+      "argv": ["cargo", "test", "--test", "acceptance", "mount"],
+      "timeout_seconds": 120
+    }
+  ]
+}

@@ -216,6 +216,7 @@ mod tests {
             crate::init::InitOptions {
                 with_tink_skills: Some(false),
                 with_manage_tink: Some(false),
+                ..Default::default()
             },
         )
         .unwrap();
@@ -239,6 +240,7 @@ mod tests {
             crate::init::InitOptions {
                 with_tink_skills: Some(false),
                 with_manage_tink: Some(false),
+                ..Default::default()
             },
         )
         .unwrap();
@@ -266,6 +268,7 @@ mod tests {
             crate::init::InitOptions {
                 with_tink_skills: Some(false),
                 with_manage_tink: Some(false),
+                ..Default::default()
             },
         )
         .unwrap();

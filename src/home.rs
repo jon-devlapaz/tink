@@ -20,6 +20,10 @@ pub const LAYOUT_KIND: &str = "tink-skill-inventory";
 pub const PROJECT_AGENTS_DIR: &str = ".agents";
 /// Project installed-skill root (`.agents/skills`).
 pub const PROJECT_SKILLS_DIR: &str = "skills";
+/// Project metadata directory (`.tink`).
+pub const PROJECT_TINK_DIR: &str = ".tink";
+/// Project ephemeral active skills directory (`.tink/.active`).
+pub const PROJECT_ACTIVE_DIR: &str = ".active";
 
 /// Path to a project's agent directory (`.agents`).
 pub fn project_agents_path(project_root: &Path) -> PathBuf {
@@ -31,6 +35,11 @@ pub fn project_skills_path(project_root: &Path) -> PathBuf {
     project_root
         .join(PROJECT_AGENTS_DIR)
         .join(PROJECT_SKILLS_DIR)
+}
+
+/// Path to a project's ephemeral active skills directory (`.tink/.active`).
+pub fn project_active_skills_path(project_root: &Path) -> PathBuf {
+    project_root.join(PROJECT_TINK_DIR).join(PROJECT_ACTIVE_DIR)
 }
 
 const HOME_README: &str = "\

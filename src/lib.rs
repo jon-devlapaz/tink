@@ -17,6 +17,7 @@ mod inventory;
 mod library;
 mod manage_tink;
 mod manifest;
+mod mount;
 mod outdated;
 mod output;
 mod paths;
@@ -92,6 +93,12 @@ pub enum Command {
         /// Skip the embedded manage-tink skill
         #[arg(long, group = "manage_tink")]
         no_manage_tink: bool,
+        /// Zero-footprint mode: scaffolds .tink/ and AGENTS.md without .agents/skills/
+        #[arg(
+            long = "zero-footprint",
+            conflicts_with_all = ["tink_skills", "manage_tink"]
+        )]
+        zero_footprint: bool,
     },
     /// Manage project Agent Skills
     Skill {
@@ -120,6 +127,16 @@ pub enum Command {
         /// Skip the confirmation prompt
         #[arg(long)]
         yes: bool,
+    },
+    /// Ephemerally mount a library skill into `.tink/.active/`
+    Mount {
+        /// Skill name to mount
+        skill: String,
+    },
+    /// Unmount an ephemeral skill from `.tink/.active/`
+    Unmount {
+        /// Skill name to unmount
+        skill: String,
     },
     /// Replace this binary with a newer verified GitHub Release
     Update,
@@ -332,10 +349,12 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
             no_tink_skills,
             with_manage_tink,
             no_manage_tink,
+            zero_footprint,
         } => dispatch_init(
             &cwd,
             flag_tri(with_tink_skills, no_tink_skills),
             flag_tri(with_manage_tink, no_manage_tink),
+            zero_footprint,
         ),
         Command::Skill { command } => dispatch_skill(&cwd, command),
         Command::Library { command } => match command {
@@ -359,6 +378,8 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
             }
             Ok(())
         }
+        Command::Mount { skill } => dispatch_mount(&cwd, &skill),
+        Command::Unmount { skill } => dispatch_unmount(&cwd, &skill),
         Command::Update => {
             let report = update::update_binary()?;
             update::print_report(&report)?;
@@ -723,10 +744,40 @@ fn print_skillset_row(
     Ok(())
 }
 
+fn dispatch_mount(cwd: &Path, skill: &str) -> Result<(), Error> {
+    let outcome = mount::mount_skill(cwd, skill, None)?;
+    let style = CliStyle::auto_stdout();
+    match outcome {
+        mount::MountOutcome::Mounted(target) => {
+            output::stdout_line(format_args!(
+                "Mounted {} → {}",
+                style.skill(skill),
+                style.accent(output::display_path(&target))
+            ))?;
+        }
+    }
+    Ok(())
+}
+
+fn dispatch_unmount(cwd: &Path, skill: &str) -> Result<(), Error> {
+    let outcome = mount::unmount_skill(cwd, skill)?;
+    let style = CliStyle::auto_stdout();
+    match outcome {
+        mount::UnmountOutcome::Unmounted => {
+            output::stdout_line(format_args!("Unmounted {}", style.skill(skill)))?;
+        }
+        mount::UnmountOutcome::NotMounted => {
+            output::stdout_line(format_args!("Skill {} is not mounted", style.skill(skill)))?;
+        }
+    }
+    Ok(())
+}
+
 fn dispatch_init(
     cwd: &Path,
     with_tink_skills: Option<bool>,
     with_manage_tink: Option<bool>,
+    zero_footprint: bool,
 ) -> Result<(), Error> {
     let style = CliStyle::auto_stdout();
     let report = init::init_project(
@@ -734,6 +785,7 @@ fn dispatch_init(
         InitOptions {
             with_tink_skills,
             with_manage_tink,
+            zero_footprint,
         },
     )?;
     if report.skills_created {

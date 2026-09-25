@@ -1,0 +1,22 @@
+{
+  "version": "1.0.1",
+  "files": {
+    "_shared/REVIEW.md": "39a6aedd2372b9ce5a9179882758680a47f8a6d28bcf9ee5137eef34da14ea2c",
+    "_shared/brief-template.md": "7643f25d62767b74919c7769554364d3058b8627504cd399b28530b3da635b63",
+    "_shared/intent-template.md": "79782c06172e94de361195c263bb38f57660566689ae45e560baa143406df2a1",
+    "_shared/plan-template.md": "4d127148f2daa84ce65e840cbcbfe1265b632496b80bced541a43f80437e9bac",
+    "_shared/spec-template.md": "d1f8f2bbd9f39f8e1a6ba114eb763cbffde69b7564b701c7a3677ae7abbaa4d3",
+    "_system/SDLC.md": "8db913779a47307dc0f559957ca0cdd924f0e0d5573fa1fce8ccd2915628362f",
+    "_system/scripts/new-run.sh": "5cefd13d71d3ad1f4dfdceb8ed85c2ac6f07ff4798f722df91c4d705305a260b",
+    "_system/scripts/sdlc.py": "fd5e0f11ec8ccee1c82b28d9775228da6371346622227c4085790c08ce4b0dde",
+    "_system/scripts/status.sh": "220b50bfca4d1dd6fcf786a9c834b295a3a8740efa8074a0846c8ad12a1a3c31",
+    "_system/scripts/verify.sh": "ef2e22f7fd5a30ee4cbe54cc9eb4b08a093e5603a02f9bbf2b35d7784c10cc02",
+    "_system/verification.json": "1308d67c7c43c1a8f5c90cde99a69e217a7fa7c553cece572ecf3228b50fa937",
+    "stages/01-plan/CONTEXT.md": "b34b9a14c0e4a2118f9f965b47108c78e16b94fded675af471e4bd90f02bc174",
+    "stages/02-design/CONTEXT.md": "ba0d09bdd9eb1b60bbfb271cf9be3da1449d558139c5709b0b0009c24c20de7b",
+    "stages/03-build/CONTEXT.md": "ebd3668b090baa91c72eea12ddd23d6555eab858b938b1382ac41c4cd3a13022",
+    "stages/04-test/CONTEXT.md": "98997589d65c4a73c06168c67a650ded5bfebb1a0971bf88124a053568380ca2",
+    "stages/05-deploy/CONTEXT.md": "685e94db7fd3eae9d23da03a98f6bb972db24782357bb53bf347fd6bd057866a",
+    "stages/06-maintain/CONTEXT.md": "fbc4f9cb881868ec3890e0af7185b997e1b4c1ec38a9a7728cc006f67c773f22"
+  }
+}

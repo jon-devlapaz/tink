@@ -7959,3 +7959,152 @@ fn inspect_emits_installable_plugin_skillset_json() {
         serde_json::json!(["alpha", "beta"])
     );
 }
+
+#[test]
+fn zero_footprint_init_leaves_git_clean() {
+    let ws = Workspace::new();
+    let project = ws.project("zero-git");
+
+    ws.cmd(&project)
+        .args(["init", "--zero-footprint"])
+        .assert()
+        .success();
+
+    assert!(project.join(".tink").is_dir());
+    assert!(project.join(".tink/.gitignore").is_file());
+    let gitignore = fs::read_to_string(project.join(".tink/.gitignore")).unwrap();
+    assert!(gitignore.contains(".active/"));
+    assert!(project.join("AGENTS.md").is_file());
+    assert!(!project.join(".agents").exists());
+}
+
+#[test]
+fn atomic_mount_and_unmount_creates_and_removes_ephemeral_link() {
+    let ws = Workspace::new();
+    ws.initialize_inventory();
+    let project = ws.project("zero-mount");
+
+    ws.cmd(&project)
+        .args(["init", "--zero-footprint"])
+        .assert()
+        .success();
+
+    let lib_skill = ws.library_skill("demo-skill");
+    fs::create_dir_all(&lib_skill).unwrap();
+    fs::write(
+        lib_skill.join("SKILL.md"),
+        "---\nname: demo-skill\ndescription: Demo skill.\n---\n# Demo\n",
+    )
+    .unwrap();
+
+    ws.cmd(&project)
+        .args(["mount", "demo-skill"])
+        .assert()
+        .success();
+
+    let active_skill = project.join(".tink/.active/demo-skill");
+    assert!(active_skill.exists());
+    assert!(active_skill.join("SKILL.md").is_file());
+
+    ws.cmd(&project)
+        .args(["unmount", "demo-skill"])
+        .assert()
+        .success();
+
+    assert!(!active_skill.exists());
+}
+
+#[test]
+fn mount_missing_skill_fails_cleanly() {
+    let ws = Workspace::new();
+    ws.initialize_inventory();
+    let project = ws.project("missing-mount");
+
+    ws.cmd(&project)
+        .args(["init", "--zero-footprint"])
+        .assert()
+        .success();
+
+    ws.cmd(&project)
+        .args(["mount", "ghost-skill"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found in library"));
+}
+
+#[test]
+fn mount_path_traversal_aborts() {
+    let ws = Workspace::new();
+    ws.initialize_inventory();
+    let project = ws.project("traversal-mount");
+
+    ws.cmd(&project)
+        .args(["init", "--zero-footprint"])
+        .assert()
+        .success();
+
+    ws.cmd(&project)
+        .args(["mount", "../escaped"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn mount_refuses_to_overwrite_real_directory() {
+    let ws = Workspace::new();
+    ws.initialize_inventory();
+    let project = ws.project("real-dir-mount");
+
+    ws.cmd(&project)
+        .args(["init", "--zero-footprint"])
+        .assert()
+        .success();
+
+    let lib_skill = ws.library_skill("demo-skill");
+    fs::create_dir_all(&lib_skill).unwrap();
+    fs::write(lib_skill.join("SKILL.md"), "# Demo").unwrap();
+
+    let real_dir = project.join(".tink/.active/demo-skill");
+    fs::create_dir_all(&real_dir).unwrap();
+    fs::write(real_dir.join("valuable-user-data.txt"), "do not delete").unwrap();
+
+    ws.cmd(&project)
+        .args(["mount", "demo-skill"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Refusing to overwrite non-symlink directory",
+        ));
+
+    assert!(real_dir.join("valuable-user-data.txt").is_file());
+}
+
+#[test]
+fn zero_footprint_init_rerun_reports_ready_not_created() {
+    let ws = Workspace::new();
+    let project = ws.project("rerun-zero");
+
+    ws.cmd(&project)
+        .args(["init", "--zero-footprint"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created"));
+
+    ws.cmd(&project)
+        .args(["init", "--zero-footprint"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Ready"));
+}
+
+#[test]
+fn zero_footprint_conflicts_with_bundled_flags() {
+    let ws = Workspace::new();
+    let project = ws.project("conflict-zero");
+
+    ws.cmd(&project)
+        .args(["init", "--zero-footprint", "--with-tink-skills"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
+}
