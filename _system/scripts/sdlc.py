@@ -2,12 +2,15 @@
 """Local workflow evidence. Human identity and release authority belong to the forge."""
 import argparse
 import contextlib
+import errno
+import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -54,16 +57,39 @@ def run_path(slug):
     return path
 
 
+def tink_lock_path(root=ROOT):
+    repo_id = digest(str(root.resolve()).encode())[:12]
+    return Path(tempfile.gettempdir()) / f'sdlc-tink-{os.getuid()}-{repo_id}.lock'
+
+
 @contextlib.contextmanager
-def locked(path):
+def locked(path, timeout=5.0, poll_interval=0.05):
+    path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        path.mkdir()
-    except FileExistsError:
-        raise ValueError(f'Busy or interrupted operation: {path}. Confirm no writer remains before removing this lock.')
-    try:
+        fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    except OSError as error:
+        if error.errno == errno.ELOOP:
+            raise ValueError(f'Lock path must not be a symlink: {path}') from error
+        if error.errno == errno.EISDIR:
+            raise ValueError(f'Stale directory lock found at {path}. Remove it to allow file flock.') from error
+        raise
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode):
+        os.close(fd)
+        raise ValueError(f'Lock path must be a regular file: {path}')
+    with open(fd, 'a+b', closefd=True) as handle:
+        start = time.monotonic()
+        while True:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as error:
+                if error.errno not in (errno.EAGAIN, errno.EACCES):
+                    raise
+                if time.monotonic() - start >= timeout:
+                    raise ValueError(f'Busy or interrupted operation: {path}. Confirm no writer remains before removing this lock.')
+                time.sleep(poll_interval)
         yield
-    finally:
-        path.rmdir()
 
 
 def require_run(path):
@@ -299,7 +325,17 @@ def status(args):
     print('Deployment: not inferred from local review files; consult the deployment system.')
 
 
+# tink-route uses exit 1 to mean "no skill applies" — a successful no-op, not a failure.
+TOOL_ACCEPTABLE_CODES = {
+    'tink': (0,),
+    'tink-route': (0, 1),
+}
+
+
 def skills(args):
+    allowed = TOOL_ACCEPTABLE_CODES.get(args.tool)
+    if allowed is None:
+        raise ValueError(f'Unknown skill tool: {args.tool!r}')
     # All cooperating worktrees on this host share a mutation lock. This is not
     # a security boundary and cannot coordinate tools invoked outside this wrapper.
     for relative in ['.agents', '.agents/skills', '.tink']:
@@ -311,10 +347,10 @@ def skills(args):
         arguments.pop(0)
     if not arguments:
         raise ValueError('Supply the authorized Tink/router operation.')
-    lock = Path(tempfile.gettempdir()) / f'sdlc-tink-{os.getuid()}.lock'
+    lock = tink_lock_path(ROOT)
     with locked(lock):
         result = subprocess.run([args.tool, *arguments], cwd=ROOT)
-        if result.returncode:
+        if result.returncode not in allowed:
             raise ValueError(f'{args.tool} failed with exit code {result.returncode}; inspect partial state before retrying.')
 
 
@@ -341,7 +377,7 @@ def main():
     baseline.add_argument('--source', required=True)
     baseline.add_argument('--failure-evidence', required=True)
     skill = commands.add_parser('skills')
-    skill.add_argument('tool', choices=['tink', 'tink-route'])
+    skill.add_argument('tool', choices=list(TOOL_ACCEPTABLE_CODES))
     skill.add_argument('arguments', nargs=argparse.REMAINDER)
     args = parser.parse_args()
     try:
