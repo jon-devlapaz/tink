@@ -1395,6 +1395,7 @@ pub(crate) fn sync_locked_skillset_at(
         if receipt_meta(&receipt) == *meta {
             ensure_project_router(home, &target, name, &meta.members)?;
             sync_library_from_project(home, &target)?;
+            publish_skillset_pin(home, name, meta)?;
             return Ok(false);
         }
         replace_from_checkout(&checkout, meta, &skills_root, name)?;
@@ -1404,7 +1405,20 @@ pub(crate) fn sync_locked_skillset_at(
         created
     };
     sync_library_from_project(home, &skills_root.join(name))?;
+    publish_skillset_pin(home, name, meta)?;
     Ok(created)
+}
+
+/// Publish the lockfile skillset pin into the library.
+///
+/// `sync_locked_skillset_at` derives all state from the project lockfile, so
+/// the lockfile is authoritative and overwrites any divergent cached pin.
+/// Called after the project and library trees are materialized so a failed
+/// sync never leaves a pin claiming unmaterialized state; rerunning sync
+/// converges an interrupted run.
+fn publish_skillset_pin(home: Option<&Path>, name: &str, meta: &SkillsetMeta) -> Result<(), Error> {
+    let (resolved_home, _) = home::ensure_inventory_root(home)?;
+    write_skillset_pin(&home::skillset_pin_path(&resolved_home, name), meta)
 }
 
 fn sync_library_from_project(home: Option<&Path>, project: &Path) -> Result<LibraryWrite, Error> {

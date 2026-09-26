@@ -7824,6 +7824,64 @@ fn manifest_lock_sync_verify_includes_skillsets() {
 }
 
 #[test]
+fn manifest_cold_sync_hydrates_skillset_pin() {
+    let ws = Workspace::new();
+    let project = ws.project("app");
+    ws.cmd(&project)
+        .args(["init", "--no-tink-skills", "--no-manage-tink"])
+        .assert()
+        .success();
+
+    let repo = ws.root.join("cold-pin-repo");
+    init_repo(&repo);
+    write_skill(&repo.join("bundle/alpha"), "alpha", "Alpha");
+    write_skill(&repo.join("bundle/beta"), "beta", "Beta");
+    commit_all(&repo, "cold pin fixture");
+    let branch = current_branch(&repo);
+    let public = "https://github.com/example/cold-pin.git";
+    let redirect = github_redirect(&repo, public);
+    let tree_url = format!("https://github.com/example/cold-pin/tree/{branch}/bundle");
+
+    ws.cmd(&project)
+        .args(["skillset", "add", &tree_url])
+        .envs(redirect.clone())
+        .assert()
+        .success();
+    ws.cmd(&project).args(["skill", "lock"]).assert().success();
+
+    // Simulate a clean machine: wipe the entire library and the project install.
+    fs::remove_dir_all(&ws.inventory).unwrap();
+    fs::remove_dir_all(Workspace::skill_path(&project, "bundle-skillset")).unwrap();
+    assert!(!ws.skillset_meta("bundle-skillset").exists());
+
+    ws.cmd(&project)
+        .args(["skill", "sync"])
+        .envs(redirect.clone())
+        .assert()
+        .success();
+
+    let pin = ws.skillset_meta("bundle-skillset");
+    assert!(pin.is_file(), "cold sync must write the skillset pin");
+    let meta: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&pin).unwrap()).unwrap();
+    assert_eq!(meta["source"], public);
+    assert_eq!(meta["sourceRoot"], "bundle");
+    assert!(ws.library_skillset("bundle-skillset").join("alpha/SKILL.md").is_file());
+    assert!(
+        Workspace::skill_path(&project, "bundle-skillset").join("beta/SKILL.md").is_file()
+    );
+    ws.cmd(&project)
+        .args(["skill", "verify"])
+        .assert()
+        .success();
+    ws.cmd(&project)
+        .args(["skillset", "refresh", "bundle-skillset"])
+        .envs(redirect.clone())
+        .assert()
+        .success();
+}
+
+#[test]
 fn skillset_add_rejects_descendant_skill_md_before_publication() {
     let ws = Workspace::new();
     let project = ws.project("app");
