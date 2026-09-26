@@ -189,8 +189,10 @@ pub fn validate_manifest_source(
 }
 
 fn validate_remote_path(path: &str, name: &str, kind: &str) -> Result<(), Error> {
+    if path == "." {
+        return Ok(());
+    }
     if path.is_empty()
-        || path == "."
         || path == ".."
         || path.starts_with('/')
         || path.contains("..")
@@ -451,6 +453,45 @@ pub(crate) mod url_lite {
         type Err = ();
         fn from_str(s: &str) -> Result<Self, Self::Err> {
             parse(s)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn root_level_skill_path_dot_is_valid() {
+        validate_manifest_source(
+            "root-skill",
+            "https://github.com/example/root-skill.git",
+            Some("."),
+        )
+        .expect("path = \".\" must be accepted for a root-level skill");
+        classify_locked(
+            Path::new("/tmp/project"),
+            "root-skill",
+            "https://github.com/example/root-skill.git",
+            Some(&"a".repeat(40)),
+            Some("."),
+        )
+        .expect("lockfile path = \".\" must be accepted for a root-level skill");
+    }
+
+    #[test]
+    fn remote_path_traversal_still_rejected() {
+        for bad in ["", "..", "/abs", "a/../b", "a\\b", "foo/", "a//b"] {
+            assert!(
+                validate_manifest_source(
+                    "root-skill",
+                    "https://github.com/example/root-skill.git",
+                    Some(bad),
+                )
+                .is_err(),
+                "must reject remote path {bad:?}"
+            );
         }
     }
 }
