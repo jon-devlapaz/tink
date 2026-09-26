@@ -12,7 +12,8 @@ use crate::paths::{map_io, mkdir_p, require_directory, require_file};
 use crate::style::CliStyle;
 
 const TINK_SKILLS_SOURCE: &str = "jon-devlapaz/tink-skills";
-const TINK_SKILLS: &[&str] = &["skill-scout", "interrogate"];
+const TINK_SKILLS: &[&str] = &["skill-scout", "seed-me"];
+const SDLC_SKILL_SOURCE: &str = "jon-devlapaz/ai-native-sdlc";
 
 const AGENTS_FILENAME: &str = "AGENTS.md";
 const AGENTS_MD: &str = "\
@@ -30,8 +31,10 @@ directory containing a `SKILL.md` file and any resources it needs.
 pub struct InitOptions {
     /// `None` = ask when interactive; default no when non-interactive.
     pub with_tink_skills: Option<bool>,
-    /// `None` = install manage-tink (default on).
+    /// `None` = default no (opt-in via --with-manage-tink).
     pub with_manage_tink: Option<bool>,
+    /// `None` = default no (opt-in via --with-sdlc).
+    pub with_sdlc: Option<bool>,
     /// Zero-footprint mode: scaffolds .tink/ and AGENTS.md without .agents/skills/.
     pub zero_footprint: bool,
 }
@@ -159,7 +162,8 @@ pub(crate) fn init_project_at(
             ),
             Some("Optional GitHub bundle — click tink-skills to open the repo"),
         )?;
-        let with_manage_tink = options.with_manage_tink.unwrap_or(true);
+        let with_manage_tink = options.with_manage_tink.unwrap_or(false);
+        let with_sdlc = options.with_sdlc.unwrap_or(false);
         let created = !skills.is_dir();
         create_layout_dirs(&agents, &skills, &readme)?;
         let manage = if with_manage_tink {
@@ -181,6 +185,13 @@ pub(crate) fn init_project_at(
                     created: outcome.created,
                 });
             }
+        }
+        if with_sdlc {
+            let outcome = add::add_skill_quiet_at(home, project_root, SDLC_SKILL_SOURCE, None)?;
+            added.push(InstalledSkill {
+                name: outcome.name,
+                created: outcome.created,
+            });
         }
         (skills, created, manage, added)
     };

@@ -294,7 +294,10 @@ fn i5_init_writes_agents_md_create_only() {
 fn i6_init_installs_manage_tink_and_catalogs_name() {
     let ws = Workspace::new();
     let project = ws.project("app");
-    ws.cmd(&project).arg("init").assert().success();
+    ws.cmd(&project)
+        .args(["init", "--with-manage-tink"])
+        .assert()
+        .success();
     let skill = Workspace::skill_path(&project, "manage-tink");
     assert!(skill.join("SKILL.md").is_file());
     assert!(skill.join("references").join("commands.md").is_file());
@@ -349,7 +352,7 @@ fn i8_relative_tink_home_resolves_absolute_not_nested() {
 fn i9_init_rerun_is_idempotent() {
     let ws = Workspace::new();
     let project = ws.project("app");
-    let args = ["init", "--no-tink-skills"];
+    let args = ["init", "--no-tink-skills", "--with-manage-tink"];
 
     ws.cmd(&project).args(args).assert().success();
 
@@ -391,7 +394,7 @@ fn i10_init_bundle_failure_is_resumable() {
     commit_all(&remote, "add skill-scout");
 
     let redirect = github_redirect(&remote, "https://github.com/jon-devlapaz/tink-skills.git");
-    let args = ["init", "--with-tink-skills"];
+    let args = ["init", "--with-tink-skills", "--with-manage-tink"];
 
     let mut first = ws.cmd(&project);
     first.args(args);
@@ -401,9 +404,9 @@ fn i10_init_bundle_failure_is_resumable() {
     first
         .assert()
         .failure()
-        .stderr(predicate::str::contains("interrogate"));
-    assert!(!Workspace::skill_path(&project, "interrogate").exists());
-    assert!(!ws.library_skill("interrogate").exists());
+        .stderr(predicate::str::contains("seed-me"));
+    assert!(!Workspace::skill_path(&project, "seed-me").exists());
+    assert!(!ws.library_skill("seed-me").exists());
     ws.cmd(&project).args(["skill", "check"]).assert().success();
     let manage_before =
         fs::read(Workspace::skill_path(&project, "manage-tink").join("SKILL.md")).unwrap();
@@ -411,11 +414,11 @@ fn i10_init_bundle_failure_is_resumable() {
         fs::read(Workspace::skill_path(&project, "skill-scout").join("SKILL.md")).unwrap();
 
     write_skill(
-        &remote.join("skills").join("interrogate"),
-        "interrogate",
+        &remote.join("skills").join("seed-me"),
+        "seed-me",
         "Settle pre-intent.",
     );
-    commit_all(&remote, "add interrogate");
+    commit_all(&remote, "add seed-me");
 
     let mut second = ws.cmd(&project);
     second.args(args);
@@ -425,7 +428,7 @@ fn i10_init_bundle_failure_is_resumable() {
     second
         .assert()
         .success()
-        .stdout(predicate::str::contains("Added interrogate"));
+        .stdout(predicate::str::contains("Added seed-me"));
     assert_eq!(
         fs::read(Workspace::skill_path(&project, "manage-tink").join("SKILL.md")).unwrap(),
         manage_before,
@@ -3419,7 +3422,10 @@ fn c7_check_rejects_unclosed_skill_frontmatter() {
 fn c8_check_rejects_stale_embedded_manage_tink() {
     let ws = Workspace::new();
     let project = ws.project("app");
-    ws.cmd(&project).arg("init").assert().success();
+    ws.cmd(&project)
+        .args(["init", "--with-manage-tink"])
+        .assert()
+        .success();
 
     fs::write(
         Workspace::skill_path(&project, "manage-tink").join("references/commands.md"),
@@ -3747,7 +3753,10 @@ fn m9_legacy_lock_requires_relock_and_migrates_to_v2() {
 fn l1_skill_list_after_init_includes_manage_tink() {
     let ws = Workspace::new();
     let project = ws.project("app");
-    ws.cmd(&project).arg("init").assert().success();
+    ws.cmd(&project)
+        .args(["init", "--with-manage-tink"])
+        .assert()
+        .success();
     ws.cmd(&project)
         .args(["skill", "list"])
         .assert()
@@ -3937,7 +3946,10 @@ fn rd2_read_raw_prints_only_description() {
 fn rd3_read_manage_tink_is_embedded() {
     let ws = Workspace::new();
     let project = ws.project("app");
-    ws.cmd(&project).arg("init").assert().success();
+    ws.cmd(&project)
+        .args(["init", "--with-manage-tink"])
+        .assert()
+        .success();
     ws.cmd(&project)
         .args(["skill", "read", "manage-tink"])
         .assert()
@@ -5330,7 +5342,10 @@ fn p9_refresh_manage_tink_installs_missing_embedded_copy() {
 fn p10_refresh_manage_tink_reports_current_copy_unchanged() {
     let ws = Workspace::new();
     let project = ws.project("app");
-    ws.cmd(&project).arg("init").assert().success();
+    ws.cmd(&project)
+        .args(["init", "--with-manage-tink"])
+        .assert()
+        .success();
 
     let installed = Workspace::skill_path(&project, "manage-tink");
     let before = fs::read(installed.join("SKILL.md")).expect("installed SKILL.md");
@@ -5352,7 +5367,10 @@ fn p10_refresh_manage_tink_reports_current_copy_unchanged() {
 fn p11_refresh_manage_tink_replaces_differing_reserved_copy() {
     let ws = Workspace::new();
     let project = ws.project("app");
-    ws.cmd(&project).arg("init").assert().success();
+    ws.cmd(&project)
+        .args(["init", "--with-manage-tink"])
+        .assert()
+        .success();
 
     let installed = Workspace::skill_path(&project, "manage-tink");
     let commands = installed.join("references/commands.md");
@@ -5501,7 +5519,10 @@ fn p14_refresh_manage_tink_preserves_remote_library_collision_for_existing_proje
     let current_project = ws.project("current");
     let stale_project = ws.project("stale");
     for project in [&current_project, &stale_project] {
-        ws.cmd(project).arg("init").assert().success();
+        ws.cmd(project)
+            .args(["init", "--with-manage-tink"])
+            .assert()
+            .success();
     }
     fs::write(
         Workspace::skill_path(&stale_project, "manage-tink").join("references/commands.md"),
@@ -5561,7 +5582,7 @@ fn d1_destroy_yes_removes_agents_and_preserves_guidance() {
     let ws = Workspace::new();
     let project = ws.project("app");
     ws.cmd(&project)
-        .args(["init", "--no-tink-skills"])
+        .args(["init", "--no-tink-skills", "--with-manage-tink"])
         .assert()
         .success();
     let source = ws.root.join("extra-skill");
@@ -5678,7 +5699,10 @@ fn x1_remove_deletes_project_skill_keeps_library() {
 fn x2_remove_missing_fails() {
     let ws = Workspace::new();
     let project = ws.project("app");
-    ws.cmd(&project).arg("init").assert().success();
+    ws.cmd(&project)
+        .args(["init", "--with-manage-tink"])
+        .assert()
+        .success();
     ws.cmd(&project)
         .args(["skill", "remove", "missing-skill"])
         .assert()
@@ -5743,7 +5767,10 @@ fn x4_remove_does_not_delete_library() {
 fn x5_manage_tink_documents_remove_and_lifecycle() {
     let ws = Workspace::new();
     let project = ws.project("app");
-    ws.cmd(&project).arg("init").assert().success();
+    ws.cmd(&project)
+        .args(["init", "--with-manage-tink"])
+        .assert()
+        .success();
     let skill_md =
         fs::read_to_string(Workspace::skill_path(&project, "manage-tink").join("SKILL.md"))
             .expect("manage-tink SKILL.md");
@@ -5960,7 +5987,10 @@ fn s2_library_skill_is_not_project_live_until_explicitly_added() {
 fn s3_remove_and_destroy_complete_when_implicit_home_cannot_resolve() {
     let ws = Workspace::new();
     let remove_project = ws.project("remove-app");
-    ws.cmd(&remove_project).arg("init").assert().success();
+    ws.cmd(&remove_project)
+        .args(["init", "--with-manage-tink"])
+        .assert()
+        .success();
     let remove_layout_before = fs::read(ws.inventory.join("layout.json")).unwrap();
 
     Command::cargo_bin("tink")

@@ -81,22 +81,28 @@ pub struct Cli {
 pub enum Command {
     /// Create `.agents/skills/` and ensure the home inventory root exists
     Init {
-        /// Add skill-scout and interrogate from GitHub (tink-skills)
+        /// Add skill-scout and seed-me from GitHub (tink-skills)
         #[arg(long = "with-tink-skills", group = "tink_skills")]
         with_tink_skills: bool,
         /// Skip tink-skills bundle
         #[arg(long = "no-tink-skills", group = "tink_skills")]
         no_tink_skills: bool,
-        /// Install the embedded manage-tink skill (default)
+        /// Install the embedded manage-tink skill
         #[arg(long, group = "manage_tink")]
         with_manage_tink: bool,
-        /// Skip the embedded manage-tink skill
+        /// Skip the embedded manage-tink skill (default)
         #[arg(long, group = "manage_tink")]
         no_manage_tink: bool,
+        /// Install ai-native-sdlc from GitHub (jon-devlapaz/ai-native-sdlc)
+        #[arg(long = "with-sdlc", group = "sdlc")]
+        with_sdlc: bool,
+        /// Skip ai-native-sdlc bundle (default)
+        #[arg(long = "no-sdlc", group = "sdlc")]
+        no_sdlc: bool,
         /// Zero-footprint mode: scaffolds .tink/ and AGENTS.md without .agents/skills/
         #[arg(
             long = "zero-footprint",
-            conflicts_with_all = ["tink_skills", "manage_tink"]
+            conflicts_with_all = ["tink_skills", "manage_tink", "sdlc"]
         )]
         zero_footprint: bool,
     },
@@ -351,11 +357,14 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
             no_tink_skills,
             with_manage_tink,
             no_manage_tink,
+            with_sdlc,
+            no_sdlc,
             zero_footprint,
         } => dispatch_init(
             &cwd,
             flag_tri(with_tink_skills, no_tink_skills),
             flag_tri(with_manage_tink, no_manage_tink),
+            flag_tri(with_sdlc, no_sdlc),
             zero_footprint,
         ),
         Command::Skill { command } => dispatch_skill(&cwd, command),
@@ -783,6 +792,7 @@ fn dispatch_init(
     cwd: &Path,
     with_tink_skills: Option<bool>,
     with_manage_tink: Option<bool>,
+    with_sdlc: Option<bool>,
     zero_footprint: bool,
 ) -> Result<(), Error> {
     let style = CliStyle::auto_stdout();
@@ -791,6 +801,7 @@ fn dispatch_init(
         InitOptions {
             with_tink_skills,
             with_manage_tink,
+            with_sdlc,
             zero_footprint,
         },
     )?;
