@@ -7862,15 +7862,20 @@ fn manifest_cold_sync_hydrates_skillset_pin() {
 
     let pin = ws.skillset_meta("bundle-skillset");
     assert!(pin.is_file(), "cold sync must write the skillset pin");
-    let meta: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&pin).unwrap()).unwrap();
+    let meta: serde_json::Value = serde_json::from_str(&fs::read_to_string(&pin).unwrap()).unwrap();
     assert_eq!(meta["source"], public);
     assert_eq!(meta["revision"], revision.as_str());
     assert_eq!(meta["sourceRoot"], "bundle");
     assert_eq!(meta["members"], serde_json::json!(["alpha", "beta"]));
-    assert!(ws.library_skillset("bundle-skillset").join("alpha/SKILL.md").is_file());
     assert!(
-        Workspace::skill_path(&project, "bundle-skillset").join("beta/SKILL.md").is_file()
+        ws.library_skillset("bundle-skillset")
+            .join("alpha/SKILL.md")
+            .is_file()
+    );
+    assert!(
+        Workspace::skill_path(&project, "bundle-skillset")
+            .join("beta/SKILL.md")
+            .is_file()
     );
     ws.cmd(&project)
         .args(["skill", "verify"])
@@ -7885,7 +7890,9 @@ fn manifest_cold_sync_hydrates_skillset_pin() {
     // Already-present project tree case: wipe only the library, keep the install.
     fs::remove_dir_all(&ws.inventory).unwrap();
     assert!(
-        Workspace::skill_path(&project, "bundle-skillset").join("alpha/SKILL.md").is_file()
+        Workspace::skill_path(&project, "bundle-skillset")
+            .join("alpha/SKILL.md")
+            .is_file()
     );
     ws.cmd(&project)
         .args(["skill", "sync"])
@@ -7896,8 +7903,7 @@ fn manifest_cold_sync_hydrates_skillset_pin() {
         pin.is_file(),
         "sync must rehydrate a missing pin when the project tree is present"
     );
-    let meta: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&pin).unwrap()).unwrap();
+    let meta: serde_json::Value = serde_json::from_str(&fs::read_to_string(&pin).unwrap()).unwrap();
     assert_eq!(meta["source"], public);
     assert_eq!(meta["revision"], revision.as_str());
     assert_eq!(meta["sourceRoot"], "bundle");
