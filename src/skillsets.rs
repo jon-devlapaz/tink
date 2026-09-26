@@ -1170,11 +1170,8 @@ pub(crate) fn update_single_skillset_at(
     preflight_active_members(project_root, &repository, &new_meta, name, Some(name))?;
     let installed = replace_from_checkout(&repository, &new_meta, &skills_root, name)?;
 
-    let (resolved_home, _) = home::ensure_inventory_root(home)?;
-    let pin_path = home::skillset_pin_path(&resolved_home, name);
-    write_skillset_pin(&pin_path, &new_meta)?;
-
     sync_library_from_project(home, &installed)?;
+    publish_skillset_pin(home, name, &new_meta)?;
 
     Ok(SkillsetUpdateOutcome {
         name: name.to_string(),
@@ -1394,17 +1391,15 @@ pub(crate) fn sync_locked_skillset_at(
         }
         if receipt_meta(&receipt) == *meta {
             ensure_project_router(home, &target, name, &meta.members)?;
-            sync_library_from_project(home, &target)?;
-            publish_skillset_pin(home, name, meta)?;
-            return Ok(false);
+        } else {
+            replace_from_checkout(&checkout, meta, &skills_root, name)?;
         }
-        replace_from_checkout(&checkout, meta, &skills_root, name)?;
         false
     } else {
         let (_installed, created) = install_from_checkout(&checkout, meta, &skills_root, name)?;
         created
     };
-    sync_library_from_project(home, &skills_root.join(name))?;
+    sync_library_from_project(home, &target)?;
     publish_skillset_pin(home, name, meta)?;
     Ok(created)
 }
@@ -1418,7 +1413,9 @@ pub(crate) fn sync_locked_skillset_at(
 /// converges an interrupted run.
 fn publish_skillset_pin(home: Option<&Path>, name: &str, meta: &SkillsetMeta) -> Result<(), Error> {
     let (resolved_home, _) = home::ensure_inventory_root(home)?;
-    write_skillset_pin(&home::skillset_pin_path(&resolved_home, name), meta)
+    let pin_path = home::skillset_pin_path(&resolved_home, name);
+    refuse_symlink(&pin_path)?;
+    write_skillset_pin(&pin_path, meta)
 }
 
 fn sync_library_from_project(home: Option<&Path>, project: &Path) -> Result<LibraryWrite, Error> {

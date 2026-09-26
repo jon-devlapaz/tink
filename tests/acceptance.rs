@@ -7836,7 +7836,7 @@ fn manifest_cold_sync_hydrates_skillset_pin() {
     init_repo(&repo);
     write_skill(&repo.join("bundle/alpha"), "alpha", "Alpha");
     write_skill(&repo.join("bundle/beta"), "beta", "Beta");
-    commit_all(&repo, "cold pin fixture");
+    let revision = commit_all(&repo, "cold pin fixture");
     let branch = current_branch(&repo);
     let public = "https://github.com/example/cold-pin.git";
     let redirect = github_redirect(&repo, public);
@@ -7865,7 +7865,9 @@ fn manifest_cold_sync_hydrates_skillset_pin() {
     let meta: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&pin).unwrap()).unwrap();
     assert_eq!(meta["source"], public);
+    assert_eq!(meta["revision"], revision.as_str());
     assert_eq!(meta["sourceRoot"], "bundle");
+    assert_eq!(meta["members"], serde_json::json!(["alpha", "beta"]));
     assert!(ws.library_skillset("bundle-skillset").join("alpha/SKILL.md").is_file());
     assert!(
         Workspace::skill_path(&project, "bundle-skillset").join("beta/SKILL.md").is_file()
@@ -7879,6 +7881,27 @@ fn manifest_cold_sync_hydrates_skillset_pin() {
         .envs(redirect.clone())
         .assert()
         .success();
+
+    // Already-present project tree case: wipe only the library, keep the install.
+    fs::remove_dir_all(&ws.inventory).unwrap();
+    assert!(
+        Workspace::skill_path(&project, "bundle-skillset").join("alpha/SKILL.md").is_file()
+    );
+    ws.cmd(&project)
+        .args(["skill", "sync"])
+        .envs(redirect.clone())
+        .assert()
+        .success();
+    assert!(
+        pin.is_file(),
+        "sync must rehydrate a missing pin when the project tree is present"
+    );
+    let meta: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&pin).unwrap()).unwrap();
+    assert_eq!(meta["source"], public);
+    assert_eq!(meta["revision"], revision.as_str());
+    assert_eq!(meta["sourceRoot"], "bundle");
+    assert_eq!(meta["members"], serde_json::json!(["alpha", "beta"]));
 }
 
 #[test]
