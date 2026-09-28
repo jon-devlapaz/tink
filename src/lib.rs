@@ -7,6 +7,7 @@ mod add;
 mod check;
 mod destroy;
 mod doctor;
+mod ephemeral;
 mod error;
 mod git;
 mod harvest;
@@ -857,7 +858,9 @@ fn print_init_skill(style: &CliStyle, skill: &init::InstalledSkill) -> Result<()
 }
 
 fn dispatch_skill_add(cwd: &Path, source: &str, skill: Option<&str>) -> Result<(), Error> {
-    add::add_skill(cwd, source, skill).map(|_| ())
+    let outcome = add::add_skill(cwd, source, skill)?;
+    ephemeral::promote_after_add(cwd, &outcome.name);
+    Ok(())
 }
 
 fn dispatch_skill_sync(cwd: &Path) -> Result<(), Error> {
