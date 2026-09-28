@@ -166,11 +166,55 @@ fn promote_at(
             "Published library skill failed promotion verification",
         ));
     }
+    crate::mount::record_written_library_skill(home, name)?;
     Ok(PromotionOutcome {
         destination: target,
         digest,
         write,
     })
+}
+
+/// Direct library entries by kind, read without following or opening skill trees.
+#[derive(Debug, Default)]
+pub(crate) struct LibraryEntries {
+    /// Standalone skill directories with valid names (contents not yet verified).
+    pub standalone: Vec<String>,
+    /// Entries that are symlinks; mount refuses them.
+    pub symlinked: Vec<String>,
+}
+
+/// Scan `skills/` without creating home or library state.
+pub(crate) fn scan_entries(home: Option<&Path>) -> Result<LibraryEntries, Error> {
+    let mut entries = LibraryEntries::default();
+    let Some(home) = existing_inventory_root(home)? else {
+        return Ok(entries);
+    };
+    let library = skills_library_path(&home);
+    if !library.exists() {
+        return Ok(entries);
+    }
+    refuse_symlink(&library)?;
+    for entry in fs::read_dir(&library).map_err(|e| map_io(&library, e))? {
+        let entry = entry.map_err(|e| map_io(&library, e))?;
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') || name == "README.md" {
+            continue;
+        }
+        if path.is_symlink() {
+            entries.symlinked.push(name);
+        } else if skills::valid_skill_name(&name)
+            && matches!(
+                crate::skillsets::classify_entry(&path),
+                crate::skillsets::EntryClass::Standalone
+            )
+        {
+            entries.standalone.push(name);
+        }
+    }
+    entries.standalone.sort();
+    entries.symlinked.sort();
+    Ok(entries)
 }
 
 /// Validated standalone skill trees currently in the library.
@@ -244,21 +288,24 @@ pub(crate) fn deposit_at(
             skill.name
         )));
     }
-    match skills::preflight_install(skill, &library, provenance)? {
+    let written = match skills::preflight_install(skill, &library, provenance)? {
         PreflightOutcome::Ready => {
             let (path, _) = skills::install_local(skill, &library, provenance)?;
-            Ok((path, LibraryWrite::Created))
+            (path, LibraryWrite::Created)
         }
-        PreflightOutcome::Identical => Ok((library.join(&skill.name), LibraryWrite::Unchanged)),
+        PreflightOutcome::Identical => (library.join(&skill.name), LibraryWrite::Unchanged),
         PreflightOutcome::ReceiptMismatch => {
             let (path, _) = skills::install_local(skill, &library, provenance)?;
-            Ok((path, LibraryWrite::Repaired))
+            (path, LibraryWrite::Repaired)
         }
         PreflightOutcome::Divergent => {
             let path = repair_divergent_deposit(&library, skill, provenance, &target)?;
-            Ok((path, LibraryWrite::Repaired))
+            (path, LibraryWrite::Repaired)
         }
-    }
+    };
+    // Approve-on-write: the library now holds exactly the tree the user chose.
+    crate::mount::record_written_library_skill(home, &skill.name)?;
+    Ok(written)
 }
 
 /// Validate every existing library boundary a later [`deposit_at`] will touch.
@@ -305,6 +352,7 @@ pub(crate) fn deposit_create_only_at(
         Err(err) => Ok((target, CreateOnlyWrite::Skipped(Some(err.to_string())))),
         Ok(PreflightOutcome::Ready) => {
             let (path, _) = skills::install_local(skill, &library, None)?;
+            crate::mount::record_written_library_skill(home, &skill.name)?;
             Ok((path, CreateOnlyWrite::Created))
         }
         Ok(PreflightOutcome::Identical | PreflightOutcome::ReceiptMismatch) => {

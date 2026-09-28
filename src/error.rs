@@ -7,6 +7,8 @@ use std::io;
 enum ErrorKind {
     Message,
     Conflict,
+    /// Already reported on stdout (e.g. a `--json` error document); exit with this code.
+    Reported(u8),
     StdoutBrokenPipe,
     StderrBrokenPipe,
 }
@@ -30,6 +32,21 @@ impl Error {
         Self {
             message: message.into(),
             kind: ErrorKind::Conflict,
+        }
+    }
+
+    /// A failure whose report was already written; the CLI only sets the exit code.
+    pub fn reported(message: impl Into<String>, exit_code: u8) -> Self {
+        Self {
+            message: message.into(),
+            kind: ErrorKind::Reported(exit_code),
+        }
+    }
+
+    pub(crate) fn reported_exit_code(&self) -> Option<u8> {
+        match self.kind {
+            ErrorKind::Reported(code) => Some(code),
+            _ => None,
         }
     }
 
