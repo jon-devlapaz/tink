@@ -20,6 +20,8 @@ const NETWORK_TIMEOUT: Duration = Duration::from_secs(15);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProbeOutcome {
     Pass,
+    /// Reported loudly but does not fail `doctor`.
+    Warn,
     Fail,
     Skip,
 }
@@ -41,6 +43,7 @@ pub(crate) fn doctor_at(home: Option<&Path>, root: &Path) -> Result<Vec<ProbeRow
         probe_home(home),
         probe_skills(root),
         probe_manifest(root),
+        probe_library(home),
         probe_network(root),
     ];
     Ok(rows)
@@ -124,6 +127,62 @@ fn probe_manifest(root: &Path) -> ProbeRow {
             detail: error.to_string(),
         },
     }
+}
+
+/// Library trust: symlinked entries (mount refuses them) and skills whose
+/// current tree digest is not the approved one (payload delivery refuses them).
+fn probe_library(home: Option<&Path>) -> ProbeRow {
+    let row = |outcome, detail| ProbeRow {
+        name: "library",
+        outcome,
+        detail,
+    };
+    let entries = match crate::library::scan_entries(home) {
+        Ok(entries) => entries,
+        Err(error) => return row(ProbeOutcome::Fail, error.to_string()),
+    };
+    if entries.standalone.is_empty() && entries.symlinked.is_empty() {
+        return row(ProbeOutcome::Skip, "no library skills".to_string());
+    }
+    let approved = match home::existing_inventory_root(home) {
+        Ok(Some(root)) => crate::approvals::load(&root),
+        Ok(None) => Ok(Default::default()),
+        Err(error) => Err(error),
+    };
+    let approved = match approved {
+        Ok(approved) => approved,
+        Err(error) => return row(ProbeOutcome::Fail, error.to_string()),
+    };
+    let library = match home::existing_inventory_root(home) {
+        Ok(Some(root)) => home::skills_library_path(&root),
+        _ => return row(ProbeOutcome::Skip, "no library".to_string()),
+    };
+    let mut unapproved = 0;
+    let mut refused = Vec::new();
+    for name in &entries.standalone {
+        match crate::mount::verify_library_skill(&library, name) {
+            Ok(skill) if approved.get(name) == Some(&skill.tree_digest()) => {}
+            Ok(_) => unapproved += 1,
+            Err(refusal) => refused.push(format!("{name} ({})", refusal.code)),
+        }
+    }
+    let total = entries.standalone.len() + entries.symlinked.len();
+    let mut detail = format!("{total} library skill(s); {unapproved} unapproved");
+    if !entries.symlinked.is_empty() {
+        detail.push_str(&format!("; symlinked: {}", entries.symlinked.join(", ")));
+    }
+    if !refused.is_empty() {
+        detail.push_str(&format!("; refused: {}", refused.join(", ")));
+    }
+    let clean = unapproved == 0 && entries.symlinked.is_empty() && refused.is_empty();
+    row(
+        if clean {
+            ProbeOutcome::Pass
+        } else {
+            ProbeOutcome::Warn
+        },
+        detail,
+    )
 }
 
 fn first_remote_source(root: &Path) -> Option<String> {

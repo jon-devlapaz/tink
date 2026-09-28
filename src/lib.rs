@@ -4,6 +4,7 @@
 
 mod active_skills;
 mod add;
+mod approvals;
 mod check;
 mod destroy;
 mod doctor;
@@ -137,8 +138,14 @@ pub enum Command {
     },
     /// Ephemerally mount a library skill into `.tink/.active/`
     Mount {
-        /// Skill name to mount
+        /// Skill name to mount (library directory name)
         skill: String,
+        /// Verify the skill and print one JSON object; link only skills with `scripts/`
+        #[arg(long)]
+        json: bool,
+        /// Include the whole skill (SKILL.md + inlined references); requires approval
+        #[arg(long, requires = "json")]
+        payload: bool,
     },
     /// Unmount an ephemeral skill from `.tink/.active/`
     Unmount {
@@ -235,6 +242,17 @@ pub enum SkillCommand {
 pub enum LibraryCommand {
     /// List standalone skill names in the library
     List,
+    /// Approve library skills for payload delivery by recording their tree digest
+    Approve {
+        /// Library skill directory name
+        #[arg(required_unless_present = "all", conflicts_with = "all")]
+        skill: Option<String>,
+        /// Approve every clean standalone library skill
+        #[arg(long)]
+        all: bool,
+    },
+    /// List approved library skills and their tree digests
+    Approvals,
 }
 
 #[derive(Debug, Subcommand)]
@@ -339,6 +357,9 @@ pub fn run(cli: Cli, cwd: PathBuf) -> ExitCode {
     match dispatch(cli, cwd) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) if err.is_stdout_broken_pipe() => ExitCode::SUCCESS,
+        Err(err) if err.reported_exit_code().is_some() => {
+            ExitCode::from(err.reported_exit_code().unwrap_or(1))
+        }
         Err(err) => {
             let style = CliStyle::auto_stderr();
             match output::stderr_line(format_args!("{}", style.error(&err))) {
@@ -371,6 +392,8 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
         Command::Skill { command } => dispatch_skill(&cwd, command),
         Command::Library { command } => match command {
             LibraryCommand::List => dispatch_skill_list_library(),
+            LibraryCommand::Approve { skill, all } => dispatch_library_approve(skill, all),
+            LibraryCommand::Approvals => dispatch_library_approvals(),
         },
         Command::Skillset { command } => dispatch_skillset(&cwd, command),
         Command::Inspect { url, json } => dispatch_inspect(&url, json),
@@ -390,7 +413,17 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
             }
             Ok(())
         }
-        Command::Mount { skill } => dispatch_mount(&cwd, &skill),
+        Command::Mount {
+            skill,
+            json,
+            payload,
+        } => {
+            if json {
+                dispatch_mount_json(&cwd, &skill, payload)
+            } else {
+                dispatch_mount(&cwd, &skill)
+            }
+        }
         Command::Unmount { skill } => dispatch_unmount(&cwd, &skill),
         Command::Update => {
             let report = update::update_binary()?;
@@ -413,6 +446,7 @@ fn dispatch_doctor(cwd: &Path) -> Result<(), Error> {
         let marker = match row.outcome {
             ProbeOutcome::Pass => style.success("ok"),
             ProbeOutcome::Fail => style.error("fail"),
+            ProbeOutcome::Warn => style.warn("warn"),
             ProbeOutcome::Skip => style.muted("skip"),
         };
         if row.detail.is_empty() {
@@ -771,6 +805,83 @@ fn dispatch_mount(cwd: &Path, skill: &str) -> Result<(), Error> {
                 style.accent(output::display_path(&target))
             ))?;
         }
+    }
+    Ok(())
+}
+
+fn dispatch_mount_json(cwd: &Path, skill: &str, payload: bool) -> Result<(), Error> {
+    match mount::mount_skill_report(cwd, skill, None, payload) {
+        Ok(report) => {
+            let text = serde_json::to_string(&report)
+                .map_err(|e| Error::msg(format!("mount JSON: {e}")))?;
+            output::stdout_line(format_args!("{text}"))
+        }
+        Err(refusal) => {
+            let text = serde_json::json!({
+                "contract_version": mount::CONTRACT_VERSION,
+                "error": refusal.message,
+                "code": refusal.code,
+            });
+            output::stdout_line(format_args!("{text}"))?;
+            let exit = if refusal.is_security() { 2 } else { 1 };
+            Err(Error::reported(refusal.message, exit))
+        }
+    }
+}
+
+fn dispatch_library_approve(skill: Option<String>, all: bool) -> Result<(), Error> {
+    let style = CliStyle::auto_stdout();
+    let (names, symlinked) = if all {
+        let entries = library::scan_entries(None)?;
+        (entries.standalone, entries.symlinked)
+    } else {
+        (skill.into_iter().collect(), Vec::new())
+    };
+    let mut refused = Vec::new();
+    for name in &names {
+        match mount::approve_library_skills(None, std::slice::from_ref(name)) {
+            Ok(approved) => {
+                for (name, digest) in approved {
+                    output::stdout_line(format_args!(
+                        "{} {} {}",
+                        style.success("Approved"),
+                        style.skill(&name),
+                        style.muted(digest)
+                    ))?;
+                }
+            }
+            Err(refusal) if all => refused.push(format!("{name}: {}", refusal.message)),
+            Err(refusal) => return Err(refusal.into()),
+        }
+    }
+    for name in symlinked {
+        refused.push(format!("{name}: refusing symlinked library entry"));
+    }
+    if refused.is_empty() {
+        return Ok(());
+    }
+    let err = CliStyle::auto_stderr();
+    for line in &refused {
+        output::stderr_line(format_args!("{} {line}", err.warn("Skipped")))?;
+    }
+    Err(Error::msg(format!(
+        "{} library skill(s) not approved; see above",
+        refused.len()
+    )))
+}
+
+fn dispatch_library_approvals() -> Result<(), Error> {
+    let style = CliStyle::auto_stdout();
+    let Some(home) = home::existing_inventory_root(None)? else {
+        output::stdout_line(format_args!("{}", style.muted("(no approvals)")))?;
+        return Ok(());
+    };
+    let approved = approvals::load(&home)?;
+    if approved.is_empty() {
+        output::stdout_line(format_args!("{}", style.muted("(no approvals)")))?;
+    }
+    for (name, digest) in approved {
+        output::stdout_line(format_args!("{} {digest}", style.skill(&name)))?;
     }
     Ok(())
 }

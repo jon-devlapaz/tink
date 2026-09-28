@@ -595,16 +595,19 @@ fn digest_tree(root: &Path, root_ignore: &[&str], include_mode: bool) -> Result<
         let ignored = Path::new(name);
         tree.retain(|key, _| key != ignored && !key.starts_with(ignored));
     }
+    Ok(digest_entries(&tree, include_mode))
+}
 
+fn digest_entries(tree: &BTreeMap<PathBuf, EntryKind>, include_mode: bool) -> String {
     let mut hasher = Sha256::new();
     if include_mode {
         hasher.update(b"tink-tree-digest-v2\0");
     }
     for (relative, kind) in tree {
         let path = if include_mode {
-            digest_path_bytes(&relative)
+            digest_path_bytes(relative)
         } else {
-            legacy_digest_path_bytes(&relative)
+            legacy_digest_path_bytes(relative)
         };
         hasher.update((path.len() as u64).to_be_bytes());
         hasher.update(&path);
@@ -620,7 +623,7 @@ fn digest_tree(root: &Path, root_ignore: &[&str], include_mode: bool) -> Result<
             }
         }
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    format!("{:x}", hasher.finalize())
 }
 
 /// Version-2 digest for opaque managed trees. Fields are unambiguously framed,
@@ -634,6 +637,58 @@ pub fn tree_digest(root: &Path, root_ignore: &[&str]) -> Result<String, Error> {
 /// New persisted state must use [`tree_digest`].
 pub(crate) fn tree_digest_legacy(root: &Path, root_ignore: &[&str]) -> Result<String, Error> {
     digest_tree(root, root_ignore, false)
+}
+
+/// One no-follow read of a skill tree: the regular files' exact bytes and the
+/// version-2 [`tree_digest`] computed over those same bytes (no second read).
+#[derive(Debug)]
+pub(crate) struct TreeSnapshot {
+    pub files: BTreeMap<PathBuf, Vec<u8>>,
+    pub digest: String,
+}
+
+/// Why a tree could not be snapshotted without following links.
+#[derive(Debug)]
+pub(crate) enum SnapshotRefusal {
+    Symlink(PathBuf),
+    Special(PathBuf),
+}
+
+/// Walk `root` once (skipping `.git`), refusing symlinks and special files.
+/// The root itself must not be a symlink.
+pub(crate) fn snapshot_tree(root: &Path) -> Result<Result<TreeSnapshot, SnapshotRefusal>, Error> {
+    if root.is_symlink() {
+        return Ok(Err(SnapshotRefusal::Symlink(root.to_path_buf())));
+    }
+    let tree = match collect_tree(root)? {
+        Collected::Tree(tree) => tree,
+        Collected::Unsupported {
+            path,
+            what: "symlink",
+        } => {
+            return Ok(Err(SnapshotRefusal::Symlink(path)));
+        }
+        Collected::Unsupported { path, .. } => return Ok(Err(SnapshotRefusal::Special(path))),
+    };
+    let digest = digest_entries(&tree, true);
+    let files = tree
+        .into_iter()
+        .filter_map(|(path, kind)| match kind {
+            EntryKind::File { bytes, .. } => Some((path, bytes)),
+            EntryKind::Dir => None,
+        })
+        .collect();
+    Ok(Ok(TreeSnapshot { files, digest }))
+}
+
+/// Frontmatter `name:` of SKILL.md text, if the text has closed frontmatter.
+pub(crate) fn frontmatter_name(text: &str) -> Option<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.first().copied() != Some("---") {
+        return None;
+    }
+    let closing = lines.iter().skip(1).position(|line| *line == "---")? + 1;
+    frontmatter_value(&lines[1..closing], "name")
 }
 
 /// Result of comparing a candidate skill tree to an install target.
