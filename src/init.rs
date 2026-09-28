@@ -124,6 +124,37 @@ fn create_layout_dirs(agents: &Path, skills: &Path, readme: &Path) -> Result<(),
     Ok(())
 }
 
+const TINK_GITIGNORE_RULES: &[&str] = &[".active/", "cache/", "ephemeral.*"];
+
+/// Ensure `<tink_dir>/.gitignore` holds the machine-local ignore rules.
+/// Creates the file if absent; otherwise appends only missing rule lines,
+/// preserving existing content.
+pub(crate) fn ensure_tink_gitignore(tink_dir: &Path) -> Result<(), Error> {
+    let gitignore = tink_dir.join(".gitignore");
+    let existing = match std::fs::read_to_string(&gitignore) {
+        Ok(s) => s,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(map_io(&gitignore, e)),
+    };
+    let missing: Vec<&str> = TINK_GITIGNORE_RULES
+        .iter()
+        .copied()
+        .filter(|rule| !existing.lines().any(|l| l.trim() == *rule))
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let mut out = existing;
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    for rule in missing {
+        out.push_str(rule);
+        out.push('\n');
+    }
+    std::fs::write(&gitignore, out).map_err(|e| map_io(&gitignore, e))
+}
+
 pub(crate) fn init_project_at(
     home: Option<&Path>,
     project_root: &Path,
@@ -138,11 +169,7 @@ pub(crate) fn init_project_at(
         let tink_dir = project_root.join(home::PROJECT_TINK_DIR);
         let created = !tink_dir.is_dir();
         mkdir_p(&tink_dir)?;
-        let gitignore = tink_dir.join(".gitignore");
-        if !gitignore.exists() {
-            std::fs::write(&gitignore, ".active/\ncache/\nephemeral.*\n")
-                .map_err(|e| map_io(&gitignore, e))?;
-        }
+        ensure_tink_gitignore(&tink_dir)?;
         (tink_dir, created, None, Vec::new())
     } else {
         let (agents, skills, readme) = layout_paths(project_root);

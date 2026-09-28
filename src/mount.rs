@@ -42,6 +42,9 @@ pub fn mount_skill(
     let active_dir = home::project_active_skills_path(project_root);
     mkdir_p(&active_dir)?;
     refuse_symlink(&active_dir)?;
+    if let Some(tink_dir) = active_dir.parent() {
+        crate::init::ensure_tink_gitignore(tink_dir)?;
+    }
 
     let target = active_dir.join(skill_name);
 
