@@ -500,20 +500,24 @@ pub fn run(cwd: &Path, options: &Options) -> Result<Report, Failure> {
 
     if options.check {
         let mut reasons = Vec::new();
+        let rewrite_fix = format!("run `tink use {}` to rewrite it", options.skillset);
         match &located {
             None => reasons.push(format!(
-                "missing block: no tink:rules block in {}",
+                "missing block: no tink:rules block in {}; {rewrite_fix}",
                 crate::output::display_path(&agents_path)
             )),
             Some(found) if original[found.start..found.end] != block => reasons.push(format!(
-                "block differs: {} does not match the compiled rules",
+                "block differs: {} does not match the compiled rules; {rewrite_fix}",
                 crate::output::display_path(&agents_path)
             )),
             Some(_) => {}
         }
         for skill in &compiled {
             if let Some(refusal) = &skill.unapproved {
-                reasons.push(format!("unapproved {} ({})", skill.name, refusal.code));
+                reasons.push(format!(
+                    "unapproved {} ({}); review, then run `tink library approve {}`",
+                    skill.name, refusal.code, skill.name
+                ));
             }
         }
         if let Some(dir) = &snapshot_dir {
@@ -530,7 +534,10 @@ pub fn run(cwd: &Path, options: &Options) -> Result<Report, Failure> {
                         })
                         .and_then(|entry| entry["digest"].as_str());
                     if locked.is_some_and(|digest| digest != skill.digest) {
-                        reasons.push(format!("lock digest drift for {}", skill.name));
+                        reasons.push(format!(
+                            "lock digest drift for {}; review, then run `tink library approve {}`",
+                            skill.name, skill.name
+                        ));
                     }
                 }
             }
@@ -538,11 +545,11 @@ pub fn run(cwd: &Path, options: &Options) -> Result<Report, Failure> {
                 let path = dir.join(file);
                 match fs::read(&path) {
                     Err(_) => reasons.push(format!(
-                        "snapshot missing: {}",
+                        "snapshot missing: {}; {rewrite_fix}",
                         crate::output::display_path(&path)
                     )),
                     Ok(bytes) if bytes != want.as_bytes() => reasons.push(format!(
-                        "snapshot differs: {}",
+                        "snapshot differs: {}; {rewrite_fix}",
                         crate::output::display_path(&path)
                     )),
                     Ok(_) => {}

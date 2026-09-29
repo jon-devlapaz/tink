@@ -420,6 +420,27 @@ fn validate_legacy_tree_for_refresh(path: &Path, receipt: &SkillsetReceipt) -> R
     Ok(())
 }
 
+/// Name the pin file (and the offending value, when a field is at fault) in a pin validation error.
+fn pin_error_with_context(message: &str, meta: &SkillsetMeta, path: &Path) -> Error {
+    let value = if message.starts_with("Skillset revision") {
+        Some(meta.revision.as_str())
+    } else if message.starts_with("Skillset sourceRoot") {
+        Some(meta.source_root.as_str())
+    } else if message.starts_with("Skillset source ") {
+        Some(meta.source.as_str())
+    } else {
+        None
+    };
+    let path = output::display_path(path);
+    Error::msg(match value {
+        Some(v) => format!(
+            "{message} (got {:?} in {path})",
+            output::display_path(Path::new(v))
+        ),
+        None => format!("{message} (in {path})"),
+    })
+}
+
 pub(crate) fn read_skillset_pin(home: Option<&Path>, name: &str) -> Result<SkillsetMeta, Error> {
     validate_skillset_name(name)?;
     let home = match home {
@@ -428,8 +449,18 @@ pub(crate) fn read_skillset_pin(home: Option<&Path>, name: &str) -> Result<Skill
     };
     let meta_path = home::skillset_pin_path(&home, name);
     refuse_symlink(&meta_path)?;
-    let meta: SkillsetMeta = read_json(&meta_path, "skillset pin")?;
-    validate_meta(&meta)?;
+    let meta: SkillsetMeta = read_json(&meta_path, "skillset pin").map_err(|e| {
+        let message = e.to_string();
+        if message.starts_with("Invalid skillset pin:") {
+            Error::msg(format!(
+                "{message} (in {})",
+                output::display_path(&meta_path)
+            ))
+        } else {
+            e
+        }
+    })?;
+    validate_meta(&meta).map_err(|e| pin_error_with_context(&e.to_string(), &meta, &meta_path))?;
     Ok(meta)
 }
 
@@ -694,8 +725,18 @@ fn derive_skillset_name(
     Ok(candidate)
 }
 
+/// Boundary relative to the checkout root (`.` for the root) so temp checkout paths never leak.
+fn relative_boundary(boundary_dir: &Path, repository: &Path) -> String {
+    match boundary_dir.strip_prefix(repository) {
+        Ok(rel) if rel.as_os_str().is_empty() => ".".to_string(),
+        Ok(rel) => output::display_path(rel),
+        Err(_) => ".".to_string(),
+    }
+}
+
 fn discover_skillset_members_in_boundary(
     boundary_dir: &Path,
+    repository: &Path,
 ) -> Result<Vec<(String, String)>, Error> {
     refuse_symlink(boundary_dir)?;
     if !boundary_dir.is_dir() {
@@ -731,8 +772,8 @@ fn discover_skillset_members_in_boundary(
 
     if members.is_empty() {
         return Err(Error::msg(format!(
-            "No member skills found in boundary: {}",
-            output::display_path(boundary_dir)
+            "No member skills found in boundary: {}; run `tink inspect <url>` to see installable skills and skillsets",
+            relative_boundary(boundary_dir, repository)
         )));
     }
 
@@ -889,7 +930,7 @@ fn add_skillset_url_at(
         canonicalize_beneath(&repository, Path::new(&boundary_str))?
     };
 
-    let members = discover_skillset_members_in_boundary(&boundary_dir)?;
+    let members = discover_skillset_members_in_boundary(&boundary_dir, &repository)?;
     let member_names: Vec<String> = members.iter().map(|(n, _)| n.clone()).collect();
     validate_members(&member_names)?;
 
@@ -1175,7 +1216,7 @@ pub(crate) fn update_single_skillset_at(
         canonicalize_beneath(&repository, Path::new(boundary_str))?
     };
 
-    let members = discover_skillset_members_in_boundary(&boundary_dir)?;
+    let members = discover_skillset_members_in_boundary(&boundary_dir, &repository)?;
     if members.is_empty() {
         return Err(Error::msg(format!(
             "Refusing to update {name}: no valid member skills found in boundary `{boundary_str}` at upstream revision {tip}"
