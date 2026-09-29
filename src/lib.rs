@@ -834,6 +834,7 @@ fn print_skillset_row(
 }
 
 fn dispatch_mount(cwd: &Path, skill: &str) -> Result<(), Error> {
+    let gitignore_existed = cwd.join(home::PROJECT_TINK_DIR).join(".gitignore").exists();
     let outcome = mount::mount_skill(cwd, skill, None)?;
     let style = CliStyle::auto_stdout();
     match outcome {
@@ -843,6 +844,11 @@ fn dispatch_mount(cwd: &Path, skill: &str) -> Result<(), Error> {
                 style.skill(skill),
                 style.accent(output::display_path(&target))
             ))?;
+            if !gitignore_existed {
+                output::stdout_line(format_args!(
+                    "Created .tink/.gitignore; commit it so .tink/.active stays ignored."
+                ))?;
+            }
         }
     }
     Ok(())
@@ -917,10 +923,12 @@ fn dispatch_library_approve(skill: Option<String>, all: bool) -> Result<(), Erro
         (skill.into_iter().collect(), Vec::new())
     };
     let mut refused = Vec::new();
+    let mut approved_count = 0usize;
     for name in &names {
         match mount::approve_library_skills(None, std::slice::from_ref(name)) {
             Ok(approved) => {
                 for (name, digest) in approved {
+                    approved_count += 1;
                     output::stdout_line(format_args!(
                         "{} {} {}",
                         style.success("Approved"),
@@ -930,11 +938,21 @@ fn dispatch_library_approve(skill: Option<String>, all: bool) -> Result<(), Erro
                 }
             }
             Err(refusal) if all => refused.push(format!("{name}: {}", refusal.message)),
-            Err(refusal) => return Err(refusal.into()),
+            Err(mut refusal) => {
+                if refusal.code == "not_found" {
+                    refusal.message.push_str("; see `tink library list`");
+                }
+                return Err(refusal.into());
+            }
         }
     }
     for name in symlinked {
         refused.push(format!("{name}: refusing symlinked library entry"));
+    }
+    if all && approved_count > 0 {
+        output::stdout_line(format_args!(
+            "Approved {approved_count} skill(s). Approval records a digest only; review skills you have not read."
+        ))?;
     }
     if refused.is_empty() {
         return Ok(());

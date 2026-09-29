@@ -98,7 +98,14 @@ fn probe_skills(root: &Path) -> ProbeRow {
         Err(error) => ProbeRow {
             name: "skills",
             outcome: ProbeOutcome::Fail,
-            detail: error.to_string(),
+            detail: {
+                let message = error.to_string();
+                if message == "Missing .agents/skills" {
+                    format!("{message}; run `tink init`")
+                } else {
+                    message
+                }
+            },
         },
     }
 }
@@ -173,6 +180,9 @@ fn probe_library(home: Option<&Path>) -> ProbeRow {
     }
     if !refused.is_empty() {
         detail.push_str(&format!("; refused: {}", refused.join(", ")));
+    }
+    if unapproved > 0 {
+        detail.push_str("; review, then run `tink library approve <name>` (or --all)");
     }
     let clean = unapproved == 0 && entries.symlinked.is_empty() && refused.is_empty();
     row(
