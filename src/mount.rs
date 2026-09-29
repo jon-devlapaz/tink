@@ -31,7 +31,7 @@ pub struct MountRefusal {
 }
 
 impl MountRefusal {
-    fn new(code: &'static str, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: &'static str, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),
@@ -75,6 +75,13 @@ pub struct VerifiedSkill {
 impl VerifiedSkill {
     pub fn tree_digest(&self) -> String {
         format!("sha256:{}", self.snapshot.digest)
+    }
+
+    pub(crate) fn skill_md_text(&self) -> Option<String> {
+        self.snapshot
+            .files
+            .get(Path::new("SKILL.md"))
+            .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
     }
 
     fn files_under(&self, top: &str) -> Vec<String> {
@@ -203,7 +210,10 @@ pub fn verify_library_skill(
 }
 
 /// Refuse unless the verified tree digest is the approved one.
-fn require_approved(home_root: &Path, skill: &VerifiedSkill) -> Result<(), MountRefusal> {
+pub(crate) fn require_approved(
+    home_root: &Path,
+    skill: &VerifiedSkill,
+) -> Result<(), MountRefusal> {
     let approved = approvals::load(home_root)?;
     match approved.get(&skill.name) {
         None => Err(MountRefusal::new(

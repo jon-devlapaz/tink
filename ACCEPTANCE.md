@@ -59,6 +59,7 @@ top-level `add` / `check` / `refresh` aliases. CLI binary updates use top-level
 | `tink skillset refresh <name>-skillset` | Replace one clean installed skillset from its current pinned definition; refuse local edits |
 | `tink skillset update [name]` | Advance pinned revision to upstream default branch and update project and library trees; preserves router |
 | `tink skillset remove <name>-skillset` | Delete only the installed project skillset; preserve its definition and library copy |
+| `tink use <skillset> [--agents-md PATH] [--snapshot DIR] [--max-bytes N] [--check] [--json]` | Compile the pin's optional `required` members (each passing the `mount --json --payload` trust checks) into a managed `tink:rules` block of an existing AGENTS.md, optionally with `DIR/rules.md` + `DIR/skills.lock.json`; `--check` writes nothing and exits 1 on drift. Evidence: `tests/e2e/use_skillset.py` (not a Rust sensor) |
 | `tink inspect <GITHUB_URL>` | Inspect skills and source-defined skillsets in a public GitHub URL without writing project or home state |
 | `tink update` | Replace this binary with a newer verified public GitHub Release (requires `curl` + `tar`) |
 | `tink destroy [--yes]` | Remove `.agents/skills/` and an empty `.agents/`; preserve files outside `.agents/` (including `AGENTS.md`), unrelated `.agents/` siblings, and the library |
@@ -72,6 +73,7 @@ top-level `add` / `check` / `refresh` aliases. CLI binary updates use top-level
 | Receipt | `.tink-source.json` with exactly `source`, `revision`, `path` (non-empty strings) |
 | Home root | `$TINK_HOME` or `~/.tink-library` (relative `$TINK_HOME` absolutized against cwd), with `layout.json` (`kind`: `tink-skill-inventory`) |
 | Library | `skills/<name>/` standalone skill trees copied on successful add (rebuildable collection; identical tip may install project from library; divergent → repair + warn; project overwrite still refused; not an agent discovery root) |
+| Skillset pin | `skillsets/<name>-skillset.json` with `source`, `revision`, `sourceRoot`, `members`, and optional author-owned `required` (subset of `members`); tink's own pin rewrites preserve `required` |
 | Skillsets library | `skillsets/<name>-skillset/` derived copies of validated project skillsets (project is primary; not an agent discovery root) |
 | Skillset pin | `$TINK_HOME/skillsets/<name>-skillset.json` is create-only authored by `tink skillset add <url>` or externally authored desired state with `source`, immutable `revision`, repository-relative `sourceRoot`, and explicit `members` |
 | Project manifest | `.tink/skills.toml` version 1 declares each standalone skill's `name`, typed `source`, and optional repository-relative `path` |

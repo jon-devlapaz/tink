@@ -260,6 +260,7 @@ fn resolve_lock(root: &Path, lock: Lockfile) -> Result<ResolvedLockfile, Error> 
             revision: skillset.revision.clone(),
             source_root: skillset.source_root.clone(),
             members: skillset.members.clone(),
+            required: Vec::new(),
         };
         validate_manifest_skillset(
             &ManifestSkillset {

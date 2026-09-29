@@ -111,6 +111,10 @@ pub(crate) struct SkillsetMeta {
     #[serde(rename = "sourceRoot")]
     pub(crate) source_root: String,
     pub(crate) members: Vec<String>,
+    /// Members `tink use` compiles into persistent rules. Optional and owned by
+    /// the pin's author: tink's own rewrites carry it over (see `write_skillset_pin`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) required: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -278,6 +282,7 @@ fn receipt_meta(receipt: &SkillsetReceipt) -> SkillsetMeta {
         revision: receipt.revision.clone(),
         source_root: receipt.source_root.clone(),
         members: receipt.members.clone(),
+        required: Vec::new(),
     }
 }
 
@@ -415,7 +420,7 @@ fn validate_legacy_tree_for_refresh(path: &Path, receipt: &SkillsetReceipt) -> R
     Ok(())
 }
 
-fn read_skillset_pin(home: Option<&Path>, name: &str) -> Result<SkillsetMeta, Error> {
+pub(crate) fn read_skillset_pin(home: Option<&Path>, name: &str) -> Result<SkillsetMeta, Error> {
     validate_skillset_name(name)?;
     let home = match home {
         Some(home) => home.to_path_buf(),
@@ -735,11 +740,29 @@ fn discover_skillset_members_in_boundary(
     Ok(members)
 }
 
+/// `required` of an existing readable pin at `path`, if it has a non-empty one.
+fn existing_required(path: &Path) -> Vec<String> {
+    if path.is_symlink() {
+        return Vec::new();
+    }
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<SkillsetMeta>(&text).ok())
+        .map(|meta| meta.required)
+        .unwrap_or_default()
+}
+
 fn write_skillset_pin(path: &Path, meta: &SkillsetMeta) -> Result<(), Error> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| map_io(parent, e))?;
     }
-    let text = serde_json::to_string_pretty(meta)
+    // Every tink rewrite (update, lockfile sync) builds a fresh meta; the pin's
+    // hand-authored `required` list must survive it.
+    let mut meta = meta.clone();
+    if meta.required.is_empty() {
+        meta.required = existing_required(path);
+    }
+    let text = serde_json::to_string_pretty(&meta)
         .map_err(|e| Error::msg(format!("serialize skillset pin: {e}")))?;
     fs::write(path, format!("{text}\n")).map_err(|e| map_io(path, e))?;
     Ok(())
@@ -881,6 +904,7 @@ fn add_skillset_url_at(
         revision: revision.clone(),
         source_root,
         members: member_names,
+        required: Vec::new(),
     };
 
     preflight_library_target(home, &name)?;
@@ -1165,6 +1189,7 @@ pub(crate) fn update_single_skillset_at(
         revision: tip.clone(),
         source_root: meta.source_root.clone(),
         members: member_names,
+        required: meta.required.clone(),
     };
 
     preflight_active_members(project_root, &repository, &new_meta, name, Some(name))?;
@@ -1510,6 +1535,7 @@ mod tests {
             revision: "a".repeat(40),
             source_root: "jump/skills".into(),
             members: vec!["alpha".into()],
+            required: Vec::new(),
         };
 
         let error = source_member_root(&checkout, &meta, "alpha")
