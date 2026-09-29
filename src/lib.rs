@@ -35,6 +35,7 @@ mod skillsets;
 mod sources;
 mod style;
 mod update;
+mod use_skillset;
 
 use clap::{Parser, Subcommand};
 use clap_complete::{
@@ -146,6 +147,26 @@ pub enum Command {
         /// Include the whole skill (SKILL.md + inlined references); requires approval
         #[arg(long, requires = "json")]
         payload: bool,
+    },
+    /// Compile a skillset's `required` members into a managed rules block in AGENTS.md
+    Use {
+        /// Skillset name (`planning-skillset` or bare `planning`)
+        skillset: String,
+        /// AGENTS.md to update (must exist; default ./AGENTS.md)
+        #[arg(long, value_name = "PATH")]
+        agents_md: Option<PathBuf>,
+        /// Also write DIR/rules.md and DIR/skills.lock.json
+        #[arg(long, value_name = "DIR")]
+        snapshot: Option<PathBuf>,
+        /// Refuse when the compiled rules exceed this many bytes
+        #[arg(long, value_name = "N", default_value_t = use_skillset::DEFAULT_MAX_BYTES)]
+        max_bytes: usize,
+        /// Write nothing; exit 1 unless AGENTS.md (and --snapshot) are current and trusted
+        #[arg(long)]
+        check: bool,
+        /// Print one JSON object
+        #[arg(long)]
+        json: bool,
     },
     /// Unmount an ephemeral skill from `.tink/.active/`
     Unmount {
@@ -424,6 +445,24 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
                 dispatch_mount(&cwd, &skill)
             }
         }
+        Command::Use {
+            skillset,
+            agents_md,
+            snapshot,
+            max_bytes,
+            check,
+            json,
+        } => dispatch_use(
+            &cwd,
+            &use_skillset::Options {
+                skillset,
+                agents_md,
+                snapshot,
+                max_bytes,
+                check,
+            },
+            json,
+        ),
         Command::Unmount { skill } => dispatch_unmount(&cwd, &skill),
         Command::Update => {
             let report = update::update_binary()?;
@@ -825,6 +864,46 @@ fn dispatch_mount_json(cwd: &Path, skill: &str, payload: bool) -> Result<(), Err
             output::stdout_line(format_args!("{text}"))?;
             let exit = if refusal.is_security() { 2 } else { 1 };
             Err(Error::reported(refusal.message, exit))
+        }
+    }
+}
+
+fn dispatch_use(cwd: &Path, options: &use_skillset::Options, json: bool) -> Result<(), Error> {
+    match use_skillset::run(cwd, options) {
+        Ok(report) => {
+            if json {
+                let text = serde_json::to_string(&report)
+                    .map_err(|e| Error::msg(format!("use JSON: {e}")))?;
+                return output::stdout_line(format_args!("{text}"));
+            }
+            let verb = if options.check {
+                "Verified"
+            } else {
+                "Compiled"
+            };
+            let preposition = if options.check { "in" } else { "into" };
+            output::stdout_line(format_args!(
+                "{verb} {} rule(s) from {} {preposition} {} ({} bytes)",
+                report.skills.len(),
+                report.skillset,
+                report.agents_md,
+                report.bytes
+            ))
+        }
+        Err(failure) => {
+            if json {
+                let text = serde_json::json!({
+                    "contract_version": use_skillset::CONTRACT_VERSION,
+                    "error": failure.message(),
+                    "code": failure.code(),
+                });
+                output::stdout_line(format_args!("{text}"))?;
+            } else {
+                for line in failure.lines() {
+                    output::stderr_line(format_args!("{line}"))?;
+                }
+            }
+            Err(Error::reported(failure.message(), failure.exit_code()))
         }
     }
 }

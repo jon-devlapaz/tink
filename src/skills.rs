@@ -681,6 +681,16 @@ pub(crate) fn snapshot_tree(root: &Path) -> Result<Result<TreeSnapshot, Snapshot
     Ok(Ok(TreeSnapshot { files, digest }))
 }
 
+/// Frontmatter value for `key` of SKILL.md text, if the text has closed frontmatter.
+pub(crate) fn frontmatter_field(text: &str, key: &str) -> Option<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.first().copied() != Some("---") {
+        return None;
+    }
+    let closing = lines.iter().skip(1).position(|line| *line == "---")? + 1;
+    frontmatter_value(&lines[1..closing], key)
+}
+
 /// Frontmatter `name:` of SKILL.md text, if the text has closed frontmatter.
 pub(crate) fn frontmatter_name(text: &str) -> Option<String> {
     let lines: Vec<&str> = text.lines().collect();
