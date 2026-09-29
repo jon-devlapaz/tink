@@ -124,7 +124,7 @@ fn create_layout_dirs(agents: &Path, skills: &Path, readme: &Path) -> Result<(),
     Ok(())
 }
 
-const TINK_GITIGNORE_RULES: &[&str] = &[".active/", "cache/", "ephemeral.*"];
+const TINK_GITIGNORE_RULES: &[&str] = &[".active/", "cache/"];
 
 /// Ensure `<tink_dir>/.gitignore` holds the machine-local ignore rules.
 /// Creates the file if absent; otherwise appends only missing rule lines,

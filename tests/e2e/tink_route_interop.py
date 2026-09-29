@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""E2E: tink + tink-route interop (dogfood findings D1-D6).
+"""E2E: tink + tink-route interop against the tink-route CLI contract
+(`tink-route [--skillset NAME] [--strict] [--receipt PATH] [--inline-max N] [--json] [--pick] "<task>"`).
 
 Drives this checkout's `tink` (target/debug/tink, built here) and the sibling
 tink-route checkout (../tink-route/src) together in a throwaway git project with
@@ -7,6 +8,10 @@ an isolated TINK_HOME. Neither the caller's repo nor ~/.tink-library is touched.
 
 Deterministic cases need no network. Live cases (L*) call TypeSafe Jev and are
 SKIPped without TYPESAFE_API_KEY.
+
+Cases: D1 empty task, D2 --strict needs --skillset, D3 removed flags, D4 --version,
+       D5 mount git-ignore (all deterministic); L1 delivery, L2 no-skill, L3 --pick writes
+       nothing, L4 --skillset excludes a pin's `required` (live, <=12 API calls).
 
 Run:   python3 tests/e2e/tink_route_interop.py [--only D1,D3] [--no-live]
 Env:   TINK_ROUTE_SRC   path to tink-route `src/` (default ../tink-route/src)
@@ -16,6 +21,7 @@ Exit:  0 all executed cases pass, 1 any FAIL.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -31,6 +37,7 @@ LIVE_KEY = bool(os.environ.get("TYPESAFE_API_KEY"))
 SKILLS = {
     "alpha": "Alpha skill for compiling epistemic matrix audits of what is known and unknown.",
     "beta": "Beta skill for reviewing clean code, naming, and function size in pull requests.",
+    "gamma": "Gamma skill for planning database schema migrations and rollback scripts.",
     "eli5": (
         "Explain any topic, code, concept, or error tailored to a specific audience's level. "
         "Use when the user says 'explain like I am five', 'ELI5', or 'dumb it down'."
@@ -57,7 +64,6 @@ class Env:
         )
         shim.chmod(0o755)
         self.env = dict(os.environ, TINK_HOME=str(self.home), PATH=f"{self.bin}:{os.environ['PATH']}")
-        self.env.pop("TINK_ROUTE_INSTALL", None)
         self.run("git", "init", "-q", ".")
         self.run("tink", "init")
         skills = self.home / "skills"
@@ -65,22 +71,28 @@ class Env:
             d = skills / name
             d.mkdir(parents=True, exist_ok=True)
             (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {desc}\n---\n# {name}\n", encoding="utf-8")
+        self.run("tink", "library", "approve", "--all")
+
+    def snapshot(self):
+        """Every path, file content, and symlink target under project + TINK_HOME (git internals excluded)."""
+        out = {}
+        for base in (self.proj, self.home):
+            for dp, dns, fns in os.walk(base):
+                dns[:] = sorted(d for d in dns if d != ".git")
+                for n in sorted(dns + fns):
+                    f = Path(dp) / n
+                    key = str(f)
+                    if f.is_symlink():
+                        out[key] = "L" + os.readlink(f)
+                    elif f.is_file():
+                        out[key] = "F" + f.read_bytes().hex()
+                    else:
+                        out[key] = "D"
+        return out
 
     def run(self, *cmd, cwd=None, extra_env=None):
         env = dict(self.env, **(extra_env or {}))
         return subprocess.run(list(cmd), cwd=cwd or self.proj, env=env, capture_output=True, text=True, check=False)
-
-    def installed(self):
-        d = self.proj / ".agents" / "skills"
-        return sorted(p.name for p in d.iterdir() if p.is_dir())
-
-    def ledger_path(self):
-        return self.proj / ".tink" / "ephemeral.json"
-
-    def write_ledger(self, skills):
-        p = self.ledger_path()
-        p.parent.mkdir(exist_ok=True)
-        p.write_text(json.dumps({"version": 1, "skills": skills}, indent=2))
 
 
 def _tail(p):
@@ -89,51 +101,53 @@ def _tail(p):
 
 # ---- deterministic cases: each returns (ok, detail) --------------------------------
 
-def d1_prune_keeps_explicitly_added_skill(e: Env):
-    """D1: an explicit `tink skill add` of a ledger-tracked skill must survive --prune."""
-    e.run("tink", "skill", "add", "alpha")
-    e.write_ledger(["alpha"])  # what `tink-route -i` records
-    add = e.run("tink", "skill", "add", "alpha")  # user deliberately keeps it
-    prune = e.run("tink-route", "--prune")
-    ok = "alpha" in e.installed()
-    return ok, f"after prune installed={e.installed()} add:[{_tail(add)}] prune:[{_tail(prune)}]"
-
-
-def d1b_prune_still_removes_route_installed_skill(e: Env):
-    """D1b guard: a skill only installed via tink-route's ledger path is still pruned."""
-    e.run("tink", "skill", "add", "alpha", extra_env={"TINK_ROUTE_INSTALL": "1"})
-    e.write_ledger(["alpha"])
-    prune = e.run("tink-route", "--prune")
-    ok = "alpha" not in e.installed()
-    return ok, f"after prune installed={e.installed()} prune:[{_tail(prune)}]"
-
-
-def d2_empty_task_is_a_usage_error(e: Env):
-    """D2: empty/missing task must exit 2 (not 1 = 'no skill applies'), and the wrapper must fail."""
-    results = []
-    for args in (["--json", ""], ["--json"]):
+def d1_empty_task_is_a_two_line_usage_error(e: Env):
+    """D1: empty/missing task exits 2 with a two-line usage error, never a usage dump; the sdlc wrapper fails too."""
+    rows, ok = [], True
+    for args in (["--json", ""], ["--json"], [""], []):
         p = e.run("tink-route", *args)
-        results.append((args, p.returncode))
-    shutil.copytree(REPO / "_system", e.proj / "_system")
-    w = e.run(sys.executable, "_system/scripts/sdlc.py", "skills", "tink-route", "--", "--json", "")
-    ok = all(rc == 2 for _, rc in results) and w.returncode != 0
-    return ok, f"route exits={results} wrapper exit={w.returncode}"
+        lines = [l for l in p.stderr.splitlines() if l.strip()]
+        good = p.returncode == 2 and len(lines) == 2 and "options:" not in p.stderr and not p.stdout.strip()
+        ok &= good
+        rows.append({"args": args, "exit": p.returncode, "stderr_lines": len(lines), "stdout": p.stdout[:60]})
+    w = None
+    if (REPO / "_system").is_dir():
+        shutil.copytree(REPO / "_system", e.proj / "_system")
+        w = e.run(sys.executable, "_system/scripts/sdlc.py", "skills", "tink-route", "--", "--json", "")
+    if w is not None:
+        ok &= w.returncode != 0
+    return ok, f"{rows} wrapper_exit={None if w is None else w.returncode}"
 
 
-def d3_corrupt_ledger_is_refused(e: Env):
-    """D3: a corrupt ledger must be reported (non-zero, names the file) and left in place."""
-    p = e.ledger_path()
-    p.parent.mkdir(exist_ok=True)
-    p.write_text("{bad")
-    prune = e.run("tink-route", "--prune")
-    still_there = p.exists() and p.read_text() == "{bad"
-    mentions = "ephemeral" in (prune.stdout + prune.stderr).lower() and "no ephemeral skills" not in prune.stdout.lower()
-    ok = prune.returncode != 0 and still_there and mentions
-    return ok, f"ledger_preserved={still_there} prune:[{_tail(prune)}]"
+def d2_strict_without_skillset_is_a_usage_error(e: Env):
+    """D2: `--strict` without --skillset exits 2 (strict only disables the skillset fallback)."""
+    p = e.run("tink-route", "--strict", "x")
+    return p.returncode == 2 and not p.stdout.strip(), _tail(p)
 
 
-def d6_mount_ignores_active_dir(e: Env):
-    """D6: `tink mount` must not leave .tink/.active symlinks untracked-visible to git."""
+def d3_removed_flags_are_rejected(e: Env):
+    """D3: the removed persistent-install surface (-i, --install, --prune, --stage, --multi) exits 2 and touches nothing."""
+    before = e.snapshot()
+    rows, ok = [], True
+    for args in (["-i", "x"], ["--install", "x"], ["--prune"], ["--stage", "build", "x"], ["--multi", "x"]):
+        p = e.run("tink-route", *args)
+        ok &= p.returncode == 2 and not p.stdout.strip()
+        rows.append((args, p.returncode))
+    ok &= e.snapshot() == before
+    return ok, f"{rows} unchanged={e.snapshot() == before}"
+
+
+def d4_version_matches_sibling_pyproject(e: Env):
+    """D4: `tink-route --version` reports the sibling pyproject version."""
+    pyproject = ROUTE_SRC.parent / "pyproject.toml"
+    m = re.search(r'^version\s*=\s*"([^"]+)"', pyproject.read_text(), re.M)
+    p = e.run("tink-route", "--version")
+    ok = bool(m) and p.returncode == 0 and m.group(1) in (p.stdout + p.stderr)
+    return ok, f"pyproject={m and m.group(1)} {_tail(p)}"
+
+
+def d5_mount_ignores_active_dir(e: Env):
+    """D5: `tink mount` must not leave .tink/.active symlinks untracked-visible to git."""
     m = e.run("tink", "mount", "alpha")
     status = e.run("git", "status", "--porcelain", "--untracked-files=all").stdout
     leaked = [l for l in status.splitlines() if ".tink" in l and ".gitignore" not in l]
@@ -142,64 +156,77 @@ def d6_mount_ignores_active_dir(e: Env):
     return ok, f"check-ignore={ignored} leaked={leaked} mount:[{_tail(m)}]"
 
 
-# ---- live cases (Jev) ---------------------------------------------------------------
+# ---- live cases (TypeSafe Jev; at most 12 API calls in total) -----------------------
 
-def l4_tri_gate_accepts_clear_eli5_prompts(e: Env):
-    """L4: unambiguous ELI5 prompts route to eli5; unrelated prompts still abstain."""
-    prompts = [
-        "Explain this Rust borrow checker error like I'm five",
-        "ELI5: what is a mutex?",
-        "Explain how TCP works to my mom, dumb it down",
-    ]
-    rows, ok = [], True
-    for t in prompts:
-        p = e.run("tink-route", "--json", t)
-        try:
-            j = json.loads(p.stdout)
-        except json.JSONDecodeError:
-            j = {"status": "unparseable", "raw": p.stdout[:120]}
-        hit = j.get("status") == "routed" and j.get("winner") == "eli5"
-        ok &= hit
-        rows.append({"task": t, "status": j.get("status"), "winner": j.get("winner"), "noul": j.get("specialist_noul")})
-    # Negative control: the gate must still abstain on tasks no fixture skill covers.
-    for t in ("What is the weather in Paris?", "Write a haiku about autumn"):
-        p = e.run("tink-route", "--json", t)
-        try:
-            j = json.loads(p.stdout)
-        except json.JSONDecodeError:
-            j = {"status": "unparseable"}
-        abstained = j.get("status") == "no_skill_needed"
-        ok &= abstained
-        rows.append({"negative_control": t, "status": j.get("status"), "winner": j.get("winner")})
-    return ok, json.dumps(rows)
+ELI5 = "Explain this Rust borrow checker error like I'm five"
 
 
-def l5_multi_output_is_consistent(e: Env):
-    """L5: multi_routed => confidence >= threshold, winner == candidates[0], candidates non-empty."""
-    p = e.run("tink-route", "--json", "--multi", "Compile an epistemic matrix audit and review clean code")
+def _json(p):
     try:
-        j = json.loads(p.stdout)
+        return json.loads(p.stdout)
     except json.JSONDecodeError:
-        return False, _tail(p)
-    if j.get("status") != "multi_routed":
-        return True, f"status={j.get('status')} (invariant vacuous)"
-    cands = j.get("candidates") or []
-    ok = (
-        j["confidence"] >= j["threshold"]
-        and bool(cands)
-        and cands[0].get("skill") == j.get("winner")
-    )
-    return ok, f"confidence={j['confidence']} threshold={j['threshold']} winner={j.get('winner')} candidates={cands}"
+        return {}
+
+
+def l1_default_delivers_eli5(e: Env):
+    """L1: a clear ELI5 prompt delivers eli5 on stdout (exit 0, header line, digest == `tink mount --json`, no mount link)."""
+    p = e.run("tink-route", ELI5)  # 1-3 API calls
+    header = p.stdout.splitlines()[0] if p.stdout else ""
+    m = re.match(r"# tink skill: eli5 +\(digest (\S+), \d+ chars, confidence [\d.]+\)", header)
+    # Delivery is inline: the route itself must leave no mount link.
+    linked = [k for k in e.snapshot() if "/.tink/.active/" in k]
+    mount = _json(e.run("tink", "mount", "eli5", "--json"))
+    e.run("tink", "unmount", "eli5")
+    digest = mount.get("tree_digest")
+    digest_ok = bool(m and digest and digest.startswith(m.group(1).rstrip(".…")))  # header may abbreviate
+    body_ok = "# eli5" in p.stdout
+    ok = p.returncode == 0 and bool(m) and digest_ok and body_ok and not linked
+    return ok, f"header={header!r} tree_digest={digest} linked={linked} {_tail(p)}"
+
+
+def l2_unrelated_prompt_exits_1(e: Env):
+    """L2: a prompt no fixture skill covers exits 1 with the no-skill message and delivers nothing."""
+    p = e.run("tink-route", "What is the weather in Paris?")  # 1-3 API calls
+    ok = p.returncode == 1 and "# tink skill:" not in p.stdout and bool((p.stdout + p.stderr).strip())
+    return ok, _tail(p)
+
+
+def l3_pick_json_decides_and_writes_nothing(e: Env):
+    """L3: `--pick --json` on the ELI5 prompt has winner eli5 and leaves project + TINK_HOME byte-identical."""
+    before = e.snapshot()
+    p = e.run("tink-route", "--pick", "--json", ELI5)  # 1-3 API calls
+    j = _json(p)
+    after = e.snapshot()
+    changed = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
+    ok = p.returncode == 0 and j.get("winner") == "eli5" and "contract_version" in j and j.get("status") == "routed" and not changed
+    return ok, f"winner={j.get('winner')} status={j.get('status')} changed={changed[:5]}"
+
+
+def l4_skillset_excludes_required_skills(e: Env):
+    """L4: with a project pin whose `required` names eli5, --skillset never routes to eli5 (--pick --json)."""
+    sk = e.proj / ".tink" / "skillsets"
+    sk.mkdir(parents=True, exist_ok=True)
+    (sk / "x-skillset.json").write_text(json.dumps({
+        "source": "https://github.com/e2e-org/upstream.git", "revision": "0" * 40, "sourceRoot": "skills",
+        "members": ["alpha", "beta", "eli5"], "required": ["eli5"],
+    }, indent=2))
+    p = e.run("tink-route", "--pick", "--json", "--skillset", "x", ELI5)  # 1-3 API calls
+    j = _json(p)
+    listed = json.dumps(j.get("shortlist", j.get("candidates", [])))
+    ok = p.returncode in (0, 1) and j.get("winner") != "eli5" and "eli5" not in listed
+    return ok, f"winner={j.get('winner')} status={j.get('status')} shortlist={listed[:200]} {_tail(p)}"
 
 
 CASES = [
-    ("D1", d1_prune_keeps_explicitly_added_skill, False),
-    ("D1b", d1b_prune_still_removes_route_installed_skill, False),
-    ("D2", d2_empty_task_is_a_usage_error, False),
-    ("D3", d3_corrupt_ledger_is_refused, False),
-    ("D6", d6_mount_ignores_active_dir, False),
-    ("L4", l4_tri_gate_accepts_clear_eli5_prompts, True),
-    ("L5", l5_multi_output_is_consistent, True),
+    ("D1", d1_empty_task_is_a_two_line_usage_error, False),
+    ("D2", d2_strict_without_skillset_is_a_usage_error, False),
+    ("D3", d3_removed_flags_are_rejected, False),
+    ("D4", d4_version_matches_sibling_pyproject, False),
+    ("D5", d5_mount_ignores_active_dir, False),
+    ("L1", l1_default_delivers_eli5, True),
+    ("L2", l2_unrelated_prompt_exits_1, True),
+    ("L3", l3_pick_json_decides_and_writes_nothing, True),
+    ("L4", l4_skillset_excludes_required_skills, True),
 ]
 
 
