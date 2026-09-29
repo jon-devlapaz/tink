@@ -17,6 +17,7 @@ mod init;
 mod inspect;
 mod inventory;
 mod library;
+mod library_fetch;
 mod manage_tink;
 mod manifest;
 mod mount;
@@ -274,6 +275,15 @@ pub enum LibraryCommand {
     },
     /// List approved library skills and their tree digests
     Approvals,
+    /// Deposit the members of reviewed skillset pins into the library (approves their digests)
+    Fetch {
+        /// Pin file path (.json) or skillset name (project `.tink/skillsets/` first, then home)
+        #[arg(required = true, value_name = "PIN")]
+        pins: Vec<String>,
+        /// Emit a stable JSON document
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -415,6 +425,7 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
             LibraryCommand::List => dispatch_skill_list_library(),
             LibraryCommand::Approve { skill, all } => dispatch_library_approve(skill, all),
             LibraryCommand::Approvals => dispatch_library_approvals(),
+            LibraryCommand::Fetch { pins, json } => dispatch_library_fetch(&cwd, &pins, json),
         },
         Command::Skillset { command } => dispatch_skillset(&cwd, command),
         Command::Inspect { url, json } => dispatch_inspect(&url, json),
@@ -910,6 +921,65 @@ fn dispatch_use(cwd: &Path, options: &use_skillset::Options, json: bool) -> Resu
                 }
             }
             Err(Error::reported(failure.message(), failure.exit_code()))
+        }
+    }
+}
+
+fn dispatch_library_fetch(cwd: &Path, pins: &[String], json: bool) -> Result<(), Error> {
+    match library_fetch::run(cwd, pins) {
+        Ok(report) => {
+            if json {
+                let text = serde_json::to_string(&report)
+                    .map_err(|e| Error::msg(format!("fetch JSON: {e}")))?;
+                return output::stdout_line(format_args!("{text}"));
+            }
+            for pin in &report.pins {
+                let mut fetched = 0;
+                let mut unchanged = 0;
+                for skill in &pin.skills {
+                    if skill.status == "fetched" {
+                        fetched += 1;
+                        output::stdout_line(format_args!(
+                            "  fetched {} {}",
+                            skill.name, skill.tree_digest
+                        ))?;
+                    } else {
+                        unchanged += 1;
+                        output::stdout_line(format_args!("  unchanged {}", skill.name))?;
+                    }
+                }
+                if fetched == 0 {
+                    output::stdout_line(format_args!(
+                        "Nothing new: {unchanged} skill(s) already in the library from {}@{}; digests unchanged.",
+                        pin.source,
+                        &pin.revision[..7]
+                    ))?;
+                } else {
+                    output::stdout_line(format_args!(
+                        "Fetched {fetched} new, {unchanged} unchanged skill(s) from {}@{}. Their digests were approved because you ran fetch on a reviewed pin.",
+                        pin.source,
+                        &pin.revision[..7]
+                    ))?;
+                }
+            }
+            Ok(())
+        }
+        Err(refusal) => {
+            let exit = library_fetch::exit_code(&refusal);
+            if json {
+                let text = serde_json::json!({
+                    "contract_version": library_fetch::CONTRACT_VERSION,
+                    "error": refusal.message,
+                    "code": refusal.code,
+                });
+                output::stdout_line(format_args!("{text}"))?;
+            } else {
+                output::stderr_line(format_args!(
+                    "tink library fetch: {} [{}]",
+                    refusal.message, refusal.code
+                ))?;
+            }
+            Err(Error::reported(refusal.message, exit))
         }
     }
 }

@@ -19,6 +19,7 @@ records intended CLI and on-disk behavior, the workflow files own delivery autom
 | `$TINK_HOME/skills/<name>/` | `library.rs` | Reusable standalone skill trees. Receipt-classified roots are refused at standalone boundaries. |
 | `$TINK_HOME/skillsets/<name>-skillset/` | `skillsets.rs` | Derived skillset copies mirrored from a validated project tree. |
 | `$TINK_HOME/skillsets/<name>.json` | `skillsets.rs` | Pinned skillset definition (sibling of `skillsets/<name>/`): HTTPS source, immutable revision, source root, and explicit members. Authored externally or via create-only `tink skillset add <url>`, and advanced by `tink skillset update` (K12/K13). |
+| `<project>/.tink/skillsets/<name>[-skillset].json` | `skillsets.rs`, `library_fetch.rs` | Committed project pin (same schema; author-owned, never written by tink). Wins over the home pin for `tink use`; `tink library fetch` clones its exact revision, verifies all members of all given pins, then deposits them into `$TINK_HOME/skills/` with provenance and approve-on-write digests (refuses divergent library copies; no partial deposits). |
 | `.tink-source.json` | `provenance.rs` | Optional standalone remote provenance: source, revision, and path. It does not classify a root. |
 | `.tink-skillset.json` | `skillsets.rs` | Skillset ownership and digest evidence. Presence classifies; validated contents prove the installed tree. |
 

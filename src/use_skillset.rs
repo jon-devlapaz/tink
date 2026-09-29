@@ -1,6 +1,6 @@
 //! `tink use`: compile a skillset's `required` members into persistent rules.
 //!
-//! The pin at `$TINK_HOME/skillsets/<name>.json` names the members that carry
+//! The pin (`<project>/.tink/skillsets/<name>.json`, else `$TINK_HOME/skillsets/<name>.json`) names the members that carry
 //! discipline rules (`"required": [...]`). Each one passes the same trust checks
 //! as `tink mount --json --payload` (no symlinks, identity, approved digest)
 //! before a one-line rule per skill is written into a managed block of
@@ -349,18 +349,25 @@ pub fn run(cwd: &Path, options: &Options) -> Result<Report, Failure> {
     let canonical = skillsets::canonicalize_skillset_name(&options.skillset)
         .map_err(|e| refuse("invalid_name", e.to_string()))?;
     let home_root = home::resolve_home()?;
-    let pin_path = home::skillset_pin_path(&home_root, &canonical);
-    if !pin_path.exists() && !pin_path.is_symlink() {
-        return Err(refuse(
-            "skillset_not_found",
-            format!(
-                "Skillset pin {canonical} not found: {}",
-                crate::output::display_path(&pin_path)
-            ),
-        ));
-    }
-    let meta = skillsets::read_skillset_pin(Some(&home_root), &canonical)
-        .map_err(|e| refuse("invalid_pin", e.to_string()))?;
+    let pin_path = match skillsets::find_pin(cwd, Some(&home_root), &canonical)
+        .map_err(|e| refuse("invalid_name", e.to_string()))?
+    {
+        Some(path) => path,
+        None => {
+            return Err(refuse(
+                "skillset_not_found",
+                format!(
+                    "Skillset pin {canonical} not found: looked for {} and {}",
+                    crate::output::display_path(
+                        &home::project_skillset_pins_path(cwd).join(format!("{canonical}.json"))
+                    ),
+                    crate::output::display_path(&home::skillset_pin_path(&home_root, &canonical))
+                ),
+            ));
+        }
+    };
+    let meta =
+        skillsets::read_pin_file(&pin_path).map_err(|e| refuse("invalid_pin", e.to_string()))?;
     validate_required(&canonical, &pin_path, &meta)?;
     let compiled = compile_skills(&home_root, &meta, options.check)?;
 

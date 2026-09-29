@@ -60,6 +60,7 @@ top-level `add` / `check` / `refresh` aliases. CLI binary updates use top-level
 | `tink skillset update [name]` | Advance pinned revision to upstream default branch and update project and library trees; preserves router |
 | `tink skillset remove <name>-skillset` | Delete only the installed project skillset; preserve its definition and library copy |
 | `tink use <skillset> [--agents-md PATH] [--snapshot DIR] [--max-bytes N] [--check] [--json]` | Compile the pin's optional `required` members (each passing the `mount --json --payload` trust checks) into a managed `tink:rules` block of an existing AGENTS.md, optionally with `DIR/rules.md` + `DIR/skills.lock.json`; `--check` writes nothing and exits 1 on drift. Evidence: `tests/e2e/use_skillset.py` (not a Rust sensor) |
+| `tink library fetch <PIN>... [--json]` | Deposit the members of reviewed pins (project `.tink/skillsets/` or home) at their exact revisions into `$TINK_HOME/skills/` with provenance and approved digests; validate all before writing; refuse divergent library copies. Evidence: `tests/e2e/library_fetch.py` (not a Rust sensor) |
 | `tink inspect <GITHUB_URL>` | Inspect skills and source-defined skillsets in a public GitHub URL without writing project or home state |
 | `tink update` | Replace this binary with a newer verified public GitHub Release (requires `curl` + `tar`) |
 | `tink destroy [--yes]` | Remove `.agents/skills/` and an empty `.agents/`; preserve files outside `.agents/` (including `AGENTS.md`), unrelated `.agents/` siblings, and the library |
@@ -76,6 +77,7 @@ top-level `add` / `check` / `refresh` aliases. CLI binary updates use top-level
 | Skillset pin | `skillsets/<name>-skillset.json` with `source`, `revision`, `sourceRoot`, `members`, and optional author-owned `required` (subset of `members`); tink's own pin rewrites preserve `required` |
 | Skillsets library | `skillsets/<name>-skillset/` derived copies of validated project skillsets (project is primary; not an agent discovery root) |
 | Skillset pin | `$TINK_HOME/skillsets/<name>-skillset.json` is create-only authored by `tink skillset add <url>` or externally authored desired state with `source`, immutable `revision`, repository-relative `sourceRoot`, and explicit `members` |
+| Project skillset pin | `<project>/.tink/skillsets/<name>-skillset.json` (or `<name>.json`): same schema as the home pin, committed and author-owned; takes precedence over the home pin for `tink use` and is consumed by `tink library fetch`; tink never writes it |
 | Project manifest | `.tink/skills.toml` version 1 declares each standalone skill's `name`, typed `source`, and optional repository-relative `path` |
 | Project lock | `.tink/skills.lock` version 2; a domain-separated, length-framed SHA-256 pins path bytes, entry kind, canonical executable/non-executable mode, and contents (receipt excluded). Version 1 must be regenerated with `skill lock`. |
 | Skillset receipt | `.tink-skillset.json` digest version 2 pins the same tree semantics; `skillset refresh` is the migration path for a legacy receipt. |

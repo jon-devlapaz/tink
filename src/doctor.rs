@@ -38,14 +38,15 @@ pub fn doctor(root: &Path) -> Result<Vec<ProbeRow>, Error> {
 }
 
 pub(crate) fn doctor_at(home: Option<&Path>, root: &Path) -> Result<Vec<ProbeRow>, Error> {
-    let rows = vec![
+    let mut rows = vec![
         probe_git(root),
         probe_home(home),
         probe_skills(root),
         probe_manifest(root),
         probe_library(home),
-        probe_network(root),
     ];
+    rows.extend(probe_pins(home, root));
+    rows.push(probe_network(root));
     Ok(rows)
 }
 
@@ -193,6 +194,59 @@ fn probe_library(home: Option<&Path>) -> ProbeRow {
         },
         detail,
     )
+}
+
+/// Committed project pins (`.tink/skillsets/*.json`): how many members are not yet
+/// in the library. Warns only; an unreadable pin counts as no members. Absent when
+/// the project has no pins.
+fn probe_pins(home: Option<&Path>, root: &Path) -> Option<ProbeRow> {
+    let files = crate::skillsets::project_pin_files(root);
+    if files.is_empty() {
+        return None;
+    }
+    let library = match home::existing_inventory_root(home) {
+        Ok(Some(home_root)) => Some(home::skills_library_path(&home_root)),
+        _ => None,
+    };
+    let mut missing = BTreeSet::new();
+    let mut first_missing_pin: Option<String> = None;
+    for file in &files {
+        let Ok(meta) = crate::skillsets::read_pin_file(file) else {
+            continue;
+        };
+        for member in &meta.members {
+            let present = library
+                .as_ref()
+                .is_some_and(|dir| dir.join(member).is_dir());
+            if !present {
+                missing.insert(member.clone());
+                first_missing_pin.get_or_insert_with(|| {
+                    file.file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_default()
+                });
+            }
+        }
+    }
+    let mut detail = format!(
+        "{} project pin(s); {} member(s) not in the library",
+        files.len(),
+        missing.len()
+    );
+    let outcome = match first_missing_pin {
+        Some(name) => {
+            detail.push_str(&format!(
+                "; run `tink library fetch .tink/skillsets/{name}`"
+            ));
+            ProbeOutcome::Warn
+        }
+        None => ProbeOutcome::Pass,
+    };
+    Some(ProbeRow {
+        name: "pins",
+        outcome,
+        detail,
+    })
 }
 
 fn first_remote_source(root: &Path) -> Option<String> {
