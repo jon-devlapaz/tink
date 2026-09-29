@@ -447,21 +447,71 @@ pub(crate) fn read_skillset_pin(home: Option<&Path>, name: &str) -> Result<Skill
         Some(home) => home.to_path_buf(),
         None => home::resolve_home()?,
     };
-    let meta_path = home::skillset_pin_path(&home, name);
-    refuse_symlink(&meta_path)?;
-    let meta: SkillsetMeta = read_json(&meta_path, "skillset pin").map_err(|e| {
+    read_pin_file(&home::skillset_pin_path(&home, name))
+}
+
+/// Read and validate one pin file wherever it lives (home or project). Errors name `path`.
+pub(crate) fn read_pin_file(meta_path: &Path) -> Result<SkillsetMeta, Error> {
+    refuse_symlink(meta_path)?;
+    let meta: SkillsetMeta = read_json(meta_path, "skillset pin").map_err(|e| {
         let message = e.to_string();
         if message.starts_with("Invalid skillset pin:") {
             Error::msg(format!(
                 "{message} (in {})",
-                output::display_path(&meta_path)
+                output::display_path(meta_path)
             ))
         } else {
             e
         }
     })?;
-    validate_meta(&meta).map_err(|e| pin_error_with_context(&e.to_string(), &meta, &meta_path))?;
+    validate_meta(&meta).map_err(|e| pin_error_with_context(&e.to_string(), &meta, meta_path))?;
     Ok(meta)
+}
+
+/// Where a skillset name resolves: committed project pins first (canonical file
+/// name, then the name without `-skillset`), then the home pin. Only existing
+/// paths (including dangling symlinks, which reads then refuse) are returned.
+pub(crate) fn find_pin(
+    cwd: &Path,
+    home_root: Option<&Path>,
+    raw_name: &str,
+) -> Result<Option<PathBuf>, Error> {
+    let canonical = canonicalize_skillset_name(raw_name)?;
+    let bare = canonical.strip_suffix(NAME_SUFFIX).unwrap_or(&canonical);
+    let project_dir = home::project_skillset_pins_path(cwd);
+    let mut candidates = vec![
+        project_dir.join(format!("{canonical}.json")),
+        project_dir.join(format!("{bare}.json")),
+    ];
+    if let Some(home_root) = home_root {
+        candidates.push(home::skillset_pin_path(home_root, &canonical));
+    }
+    Ok(candidates
+        .into_iter()
+        .find(|path| path.exists() || path.is_symlink()))
+}
+
+/// Project pin files (`<project>/.tink/skillsets/*.json`), sorted; empty when absent.
+pub(crate) fn project_pin_files(cwd: &Path) -> Vec<PathBuf> {
+    let dir = home::project_skillset_pins_path(cwd);
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect();
+    files.sort();
+    files
+}
+
+pub(crate) fn parse_pin_source(source: &str) -> Result<sources::RemoteSource, Error> {
+    parse_source(source)
+}
+
+pub(crate) fn pin_source_root(meta: &SkillsetMeta) -> Result<PathBuf, Error> {
+    normalized_source_root(&meta.source_root)
 }
 
 fn source_member_root(

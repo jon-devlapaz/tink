@@ -196,6 +196,20 @@ file but has no command that writes it. For example:
 }
 ```
 
+**Project pins.** A stage or team can commit pins under
+`<project>/.tink/skillsets/<name>-skillset.json` (same schema, optional `required`).
+`tink use <skillset>` resolves `.tink/skillsets/<name>-skillset.json`, then
+`.tink/skillsets/<name>.json`, then `$TINK_HOME/skillsets/<name>-skillset.json`; a
+project pin wins over a home pin and errors name the file actually used. tink never
+writes pins. `tink library fetch <PIN>... [--json]` (a pin `.json` path, or a name
+resolved the same way) treats a reviewed pin as the trust anchor: it clones `source`,
+checks out exactly `revision`, verifies every member of every pin (regular files only,
+`name` matches directory) and only then deposits them into
+`$TINK_HOME/skills/<member>` with `.tink-source.json` provenance and approves their
+digests. Re-runs are no-ops (`unchanged`); a different tree already in the library
+is refused (`library_divergent`, nothing written) and never overwritten. `tink doctor`
+adds a `pins` row when project pins exist. Fetch supports public GitHub HTTPS sources.
+
 Creating or changing that exact definition is a separate, explicitly authorized
 authoring step. `tink inspect` can propose source structure, but it never creates a
 definition. Do not hand-edit `.tink-skillset.json` receipts, installed skillset

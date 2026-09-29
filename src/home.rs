@@ -37,6 +37,11 @@ pub fn project_skills_path(project_root: &Path) -> PathBuf {
         .join(PROJECT_SKILLS_DIR)
 }
 
+/// Path to a project's committed skillset pins (`.tink/skillsets`).
+pub fn project_skillset_pins_path(project_root: &Path) -> PathBuf {
+    project_root.join(PROJECT_TINK_DIR).join("skillsets")
+}
+
 /// Path to a project's ephemeral active skills directory (`.tink/.active`).
 pub fn project_active_skills_path(project_root: &Path) -> PathBuf {
     project_root.join(PROJECT_TINK_DIR).join(PROJECT_ACTIVE_DIR)
