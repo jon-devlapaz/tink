@@ -121,7 +121,6 @@ class Env:
             GIT_CONFIG_VALUE_1=MISSING,
             GIT_TERMINAL_PROMPT="0",
         )
-        self.env.pop("TINK_ROUTE_INSTALL", None)
         if init:
             self.run("git", "init", "-q", ".")
             r = self.run("tink", "init", "--no-tink-skills", "--no-manage-tink", "--no-sdlc")

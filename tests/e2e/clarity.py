@@ -47,7 +47,6 @@ class Env:
             d.mkdir(parents=True)
         (self.bin / "tink").symlink_to(REPO / "target" / "debug" / "tink")
         self.env = dict(os.environ, TINK_HOME=str(self.home), PATH=f"{self.bin}:{os.environ['PATH']}")
-        self.env.pop("TINK_ROUTE_INSTALL", None)
         self.run("git", "init", "-q", ".")
         if init:
             self.run("tink", "init", "--no-tink-skills", "--no-manage-tink", "--no-sdlc")
