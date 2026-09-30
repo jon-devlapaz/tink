@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """E2E: tink + tink-route interop against the tink-route CLI contract
-(`tink-route [--skillset NAME] [--strict] [--receipt PATH] [--inline-max N] [--json] [--pick] "<task>"`).
+(`tink-route [--skillset NAME | --anywhere] [--receipt PATH] [--inline-max N] [--json] [--pick] "<task>"`;
+the phase decides the shelf via the `tink:rules` block `tink use` writes into AGENTS.md).
 
 Drives this checkout's `tink` (target/debug/tink, built here) and the sibling
 tink-route checkout (../tink-route/src) together in a throwaway git project with
@@ -9,9 +10,10 @@ an isolated TINK_HOME. Neither the caller's repo nor ~/.tink-library is touched.
 Deterministic cases need no network. Live cases (L*) call TypeSafe Jev and are
 SKIPped without TYPESAFE_API_KEY.
 
-Cases: D1 empty task, D2 --strict needs --skillset, D3 removed flags, D4 --version,
+Cases: D1 empty task, D2 shelf misuse fails open offline, D3 removed flags, D4 --version,
        D5 mount git-ignore (all deterministic); L1 delivery, L2 no-skill, L3 --pick writes
-       nothing, L4 --skillset excludes a pin's `required` (live, <=12 API calls).
+       nothing, L4 --skillset excludes a pin's `required`, L5 the phase decides the shelf and an
+       off-shelf task gets a hint, never a delivery (live, <=16 API calls).
 
 Run:   python3 tests/e2e/tink_route_interop.py [--only D1,D3] [--no-live]
 Env:   TINK_ROUTE_SRC   path to tink-route `src/` (default ../tink-route/src)
@@ -119,17 +121,37 @@ def d1_empty_task_is_a_two_line_usage_error(e: Env):
     return ok, f"{rows} wrapper_exit={None if w is None else w.returncode}"
 
 
-def d2_strict_without_skillset_is_a_usage_error(e: Env):
-    """D2: `--strict` without --skillset exits 2 (strict only disables the skillset fallback)."""
-    p = e.run("tink-route", "--strict", "x")
-    return p.returncode == 2 and not p.stdout.strip(), _tail(p)
+def d2_shelf_misuse_fails_open_offline(e: Env):
+    """D2: `--anywhere` with `--skillset` is a two-line usage error; a malformed or unresolvable rules block exits 2
+    with a plain fail-open sentence and never widens to the whole library (a dummy key proves no routing call is needed)."""
+    env = {"TYPESAFE_API_KEY": "dummy-not-a-real-key"}
+    rows, ok = {}, True
+    p = e.run("tink-route", "--anywhere", "--skillset", "x", "t", extra_env=env)
+    lines = [l for l in p.stderr.splitlines() if l.strip()]
+    good = p.returncode == 2 and len(lines) == 2 and not p.stdout.strip()
+    ok &= good
+    rows["anywhere+skillset"] = (p.returncode, len(lines))
+    agents = e.proj / "AGENTS.md"
+    base = agents.read_text()
+    agents.write_text(base + "\n<!-- tink:rules begin skillset=x-skillset digest=abc -->\nrules\n")  # no end marker
+    p = e.run("tink-route", "t", extra_env=env)
+    good = p.returncode == 2 and "malformed tink:rules block" in p.stdout and "proceed without a skill" in p.stdout
+    ok &= good
+    rows["unbalanced"] = (p.returncode, p.stdout.strip()[:100])
+    agents.write_text(base + "\n<!-- tink:rules begin skillset=nope-skillset digest=abc -->\nrules\n<!-- tink:rules end -->\n")
+    p = e.run("tink-route", "t", extra_env=env)
+    good = p.returncode == 2 and "nope-skillset" in p.stdout and "proceed without a skill" in p.stdout
+    ok &= good
+    rows["unknown skillset"] = (p.returncode, p.stdout.strip()[:100])
+    agents.write_text(base)
+    return ok, str(rows)
 
 
 def d3_removed_flags_are_rejected(e: Env):
-    """D3: the removed persistent-install surface (-i, --install, --prune, --stage, --multi) exits 2 and touches nothing."""
+    """D3: the removed surface (-i, --install, --prune, --stage, --multi, --strict) exits 2 and touches nothing."""
     before = e.snapshot()
     rows, ok = [], True
-    for args in (["-i", "x"], ["--install", "x"], ["--prune"], ["--stage", "build", "x"], ["--multi", "x"]):
+    for args in (["-i", "x"], ["--install", "x"], ["--prune"], ["--stage", "build", "x"], ["--multi", "x"], ["--strict", "x"]):
         p = e.run("tink-route", *args)
         ok &= p.returncode == 2 and not p.stdout.strip()
         rows.append((args, p.returncode))
@@ -217,9 +239,30 @@ def l4_skillset_excludes_required_skills(e: Env):
     return ok, f"winner={j.get('winner')} status={j.get('status')} shortlist={listed[:200]} {_tail(p)}"
 
 
+def l5_phase_decides_the_shelf_and_hints(e: Env):
+    """L5: after `tink use x-skillset` the ELI5 task delivers with NO flags; after `tink use y-skillset` (eli5 not on the
+    shelf) the same task exits 1 with a Hint naming x-skillset and delivers nothing (no mount link, no payload)."""
+    sk = e.proj / ".tink" / "skillsets"
+    sk.mkdir(parents=True, exist_ok=True)
+    for name, members, required in (("x", ["alpha", "eli5"], ["alpha"]), ("y", ["alpha", "beta"], ["beta"])):
+        (sk / f"{name}-skillset.json").write_text(json.dumps({
+            "source": "https://github.com/e2e-org/upstream.git", "revision": "0" * 40, "sourceRoot": "skills",
+            "members": members, "required": required}, indent=2))
+    u = e.run("tink", "use", "x-skillset")
+    on = e.run("tink-route", ELI5)  # 1-3 API calls
+    on_ok = u.returncode == 0 and on.returncode == 0 and on.stdout.startswith("# tink skill: eli5")
+    u2 = e.run("tink", "use", "y-skillset")
+    off = e.run("tink-route", ELI5)  # 2-5 API calls (shelf + hint)
+    linked = [k for k in e.snapshot() if "/.tink/.active/" in k]
+    off_ok = (u2.returncode == 0 and off.returncode == 1 and "y-skillset shelf" in off.stdout
+              and "Hint: eli5" in off.stdout and "x-skillset" in off.stdout
+              and "# tink skill:" not in off.stdout and "# eli5" not in off.stdout and not linked)
+    return on_ok and off_ok, f"on:[{_tail(on)}] off:[{_tail(off)}] linked={linked}"
+
+
 CASES = [
     ("D1", d1_empty_task_is_a_two_line_usage_error, False),
-    ("D2", d2_strict_without_skillset_is_a_usage_error, False),
+    ("D2", d2_shelf_misuse_fails_open_offline, False),
     ("D3", d3_removed_flags_are_rejected, False),
     ("D4", d4_version_matches_sibling_pyproject, False),
     ("D5", d5_mount_ignores_active_dir, False),
@@ -227,6 +270,7 @@ CASES = [
     ("L2", l2_unrelated_prompt_exits_1, True),
     ("L3", l3_pick_json_decides_and_writes_nothing, True),
     ("L4", l4_skillset_excludes_required_skills, True),
+    ("L5", l5_phase_decides_the_shelf_and_hints, True),
 ]
 
 
