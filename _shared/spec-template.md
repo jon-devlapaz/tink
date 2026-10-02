@@ -12,7 +12,7 @@ Detailed breakdown of what the system must do.
 - API routes or interfaces:
 
 ## 3. Skill & Dependency Capabilities
-- Offline skills routed via `tink-route`:
+- Skills routed via `tink-route` (receipt path):
 - External libraries or skills scouted via `skill-scout`:
 
 ## 4. Flagged Policy & Design Concerns

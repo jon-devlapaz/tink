@@ -1,0 +1,22 @@
+{
+  "source": "https://github.com/McCune1224/pi-pstack.git",
+  "revision": "a404763afd007ee280dc0c59a86402e12e5369d2",
+  "sourceRoot": "skills",
+  "members": [
+    "deslop",
+    "no-comments",
+    "principle-build-the-lever",
+    "principle-laziness-protocol",
+    "principle-sequence-verifiable-units",
+    "principle-subtract-before-you-add",
+    "principle-type-system-discipline",
+    "show-me-your-work",
+    "tdd",
+    "typescript-best-practices",
+    "unslop"
+  ],
+  "required": [
+    "principle-build-the-lever",
+    "unslop"
+  ]
+}
