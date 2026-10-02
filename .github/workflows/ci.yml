@@ -38,6 +38,9 @@ jobs:
           sh -n install.sh
           shellcheck -x install.sh
 
+      - name: Installed workflow regression
+        run: python3 -m unittest discover -s tests -p test_sdlc_install.py -v
+
       - name: Documentation tests
         run: cargo test --workspace --locked --doc
 

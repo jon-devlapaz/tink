@@ -1,0 +1,22 @@
+{
+  "source": "https://github.com/McCune1224/pi-pstack.git",
+  "revision": "a404763afd007ee280dc0c59a86402e12e5369d2",
+  "sourceRoot": "skills",
+  "members": [
+    "architect",
+    "arena",
+    "blast-radius",
+    "principle-build-the-lever",
+    "principle-exhaust-the-design-space",
+    "principle-foundational-thinking",
+    "principle-model-the-domain",
+    "principle-redesign-from-first-principles",
+    "principle-separate-before-serializing-shared-state",
+    "swarm"
+  ],
+  "required": [
+    "architect",
+    "principle-build-the-lever",
+    "principle-foundational-thinking"
+  ]
+}

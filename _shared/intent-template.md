@@ -5,7 +5,7 @@
 **Date:** [YYYY-MM-DD]  
 
 ## 1. Problem Statement
-Describe what is broken, missing, or inefficient in plain terms.
+List what is broken, missing, or inefficient in plain terms.
 
 ## 2. Proposed Outcome
 What does success look like when this is complete?

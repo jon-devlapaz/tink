@@ -1,0 +1,19 @@
+{
+  "source": "https://github.com/McCune1224/pi-pstack.git",
+  "revision": "a404763afd007ee280dc0c59a86402e12e5369d2",
+  "sourceRoot": "skills",
+  "members": [
+    "control-cli",
+    "control-ui",
+    "create-verification-skill",
+    "maintain-verification-skill",
+    "principle-attack-the-premise",
+    "principle-build-the-lever",
+    "principle-prove-it-works",
+    "principle-test-behavior-not-implementation"
+  ],
+  "required": [
+    "principle-build-the-lever",
+    "principle-prove-it-works"
+  ]
+}
