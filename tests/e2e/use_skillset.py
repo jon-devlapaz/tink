@@ -58,7 +58,7 @@ def skill_md(name, description=None, rule=None, body="Body text.\n"):
 
 
 def rule_line(name, rule):
-    return f"- {name}: {rule} (full: .tink/.active/{name}/SKILL.md; run: tink mount {name})\n"
+    return f"- {name}: {rule} (read: tink mount {name} --json --payload)\n"
 
 
 def body_for(rules):
@@ -384,7 +384,7 @@ def c7_rule_frontmatter_else_description_sentence(e: Env):
     lines = {l.split(":", 1)[0][2:]: l for l in got.splitlines() if l.startswith("- ")}
     trimmed = ""
     if "longone" in lines:
-        trimmed = lines["longone"].split(": ", 1)[1].rsplit(" (full:", 1)[0]
+        trimmed = lines["longone"].split(": ", 1)[1].rsplit(" (read:", 1)[0]
     ok = (
         p.returncode == 0
         and lines.get("has-rule") == rule_line("has-rule", "Always run the failing test first").rstrip("\n")

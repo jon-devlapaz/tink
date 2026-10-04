@@ -226,9 +226,7 @@ fn compile_skills(
         compiled.push(Compiled {
             name: name.clone(),
             digest: skill.tree_digest(),
-            line: format!(
-                "- {name}: {rule} (full: .tink/.active/{name}/SKILL.md; run: tink mount {name})\n"
-            ),
+            line: format!("- {name}: {rule} (read: tink mount {name} --json --payload)\n"),
             unapproved,
         });
     }

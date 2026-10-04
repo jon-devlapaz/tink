@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "skillset": "planning-skillset",
+  "rules_digest": "sha256:fd63561725e2b3de5066f0097d4a02fc42f910d8464d744cd43fa9f153c4c027",
+  "skills": [
+    {
+      "name": "principle-build-the-lever",
+      "digest": "sha256:e3bba643a08d279036ca2272ab7dbc7b809ac49e11986fcf186e9fa1576be145",
+      "source": "https://github.com/McCune1224/pi-pstack.git",
+      "revision": "a404763afd007ee280dc0c59a86402e12e5369d2"
+    }
+  ]
+}
