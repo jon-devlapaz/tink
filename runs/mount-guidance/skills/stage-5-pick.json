@@ -1,0 +1,9 @@
+{
+  "stage": 5,
+  "document": "runs/mount-guidance/brief.md",
+  "sha256": "6e7e33cc52a159da9a7ebd97926919920bd68d462e63905e2eb8f06a35329562",
+  "chars": 3784,
+  "status": "routed",
+  "winner": "manage-tink",
+  "confidence": 0.57
+}
