@@ -1,0 +1,91 @@
+{
+  "ran_at": "2026-10-04T18:30:55-0500",
+  "tink": "tink 1.0.49",
+  "cases": [
+    {
+      "id": "C1",
+      "result": "PASS",
+      "claim": "C1: compile appends an exact managed block after untouched AGENTS.md bytes, in `required` order (non-required members skipped); second run is byte-identical.",
+      "detail": "exit=0 stdout='Compiled 2 rule(s) from gates-skillset into /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-a4ou2478/proj/AGENTS.md (214 bytes)' stderr='' stdout_line_want='Compiled 2 rule(s) from gates-skillset into /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-a4ou2478/proj/AGENTS.md (214 bytes)' got='# Project\\n\\nHand-written notes.\\nSecond line without magic.\\n\\n<!-- tink:rules begin skillset=gates-skillset digest=ff6c31b3ab90388f1fbe185fa404fc6f12d416f71ec53d1ce2ce233d6d59a855 -->\\nDiscipline rules for this phase (compiled by tink; do not edit by hand):\\n- beta: Fixture skill beta. (read: tink mount beta --json --payload)\\n- alpha: Fixture skill alpha. (read: tink mount alpha --json --payload)\\n<!-- tink:rules end -->\\n'"
+    },
+    {
+      "id": "C2",
+      "result": "PASS",
+      "claim": "C2: an existing block (any skillset/digest) is replaced in place; bytes before and after are preserved exactly.",
+      "detail": "exit=0 stdout='Compiled 1 rule(s) from gates-skillset into /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-4i4ykyfn/proj/AGENTS.md (133 bytes)' stderr='' got='# Project\\n\\nHand-written notes.\\nSecond line without magic.\\n<!-- tink:rules begin skillset=gates-skillset digest=b053501aefd6a69c174eaa9397bbdfc8072bd8b11a9bd248a4d4813ba97dd995 -->\\nDiscipline rules for this phase (compiled by tink; do not edit by hand):\\n- a: Fixture skill a. (read: tink mount a --json --payload)\\n<!-- tink:rules end -->\\n\\n## After\\n\\nTrailing prose, no final newline'"
+    },
+    {
+      "id": "C3",
+      "result": "PASS",
+      "claim": "C3: missing AGENTS.md is refused (never created); a symlinked AGENTS.md is refused and its target untouched.",
+      "detail": "missing:[exit=2 stdout='{\"code\":\"agents_md_missing\",\"contract_version\":1,\"error\":\"AGENTS.md not found: /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-__kllqyq/proj/AGENTS.md (tink use never creates it)\"}' stderr=''] custom:[exit=2 stdout='' stderr='tink use: AGENTS.md not found: /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-__kllqyq/proj/docs/AGENTS.md (tink use never creates it) [agents_md_missing]'] symlink:[exit=2 stdout='{\"code\":\"agents_md_symlink\",\"contract_version\":1,\"error\":\"Refusing symlinked AGENTS.md: /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-__kllqyq/proj/AGENTS.md\"}' stderr='']"
+    },
+    {
+      "id": "C4",
+      "result": "PASS",
+      "claim": "C4: malformed, duplicated, unbalanced, nested or reversed markers are refused and the file is not modified.",
+      "detail": "failures=[]"
+    },
+    {
+      "id": "C5",
+      "result": "PASS",
+      "claim": "C5: pin without `required`, empty `required`, non-subset, duplicate names, and a missing pin are refused (exit 2) with the fix named; nothing is written.",
+      "detail": "failures=[]"
+    },
+    {
+      "id": "C6",
+      "result": "PASS",
+      "claim": "C6: unapproved, digest mismatch after edit, symlinked SKILL.md, name!=dir, missing skill each refuse the whole command (exit 2) naming skill + code; AGENTS.md and snapshot untouched.",
+      "detail": "failures=[]"
+    },
+    {
+      "id": "C7",
+      "result": "PASS",
+      "claim": "C7: `rule:` frontmatter wins; else the FULL description (whitespace collapsed, so the rule sentence after the `Apply when` trigger is kept); anything over 400 chars is trimmed to 400 with an ellipsis.",
+      "detail": "exit=0 stdout='{\"contract_version\":1,\"skillset\":\"gates-skillset\",\"skills\":[\"has-rule\",\"sentence\",\"question\",\"nostop\",\"longone\"],\"bytes\":880,\"rules_digest\":\"sha256:dfc9790dd183026512d5a75a01a068521b0dc680855277d421840d355fb50eec\",\"agents_md\":\"/private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-i3b7bn72/proj/AGENTS.md\",\"snapshot\":null}' stderr='' trimmed_len=400"
+    },
+    {
+      "id": "C8",
+      "result": "PASS",
+      "claim": "C8: a body over the 8192-byte cap is refused with the actual size and the largest skills, nothing modified; --max-bytes raises the cap.",
+      "detail": "size=10873 refused:[exit=2 stdout='{\"code\":\"over_cap\",\"contract_version\":1,\"error\":\"Compiled rules for gates-skillset are 10873 bytes, over the 8192-byte cap; largest: big5 (2050 bytes), big4 (1950 bytes), big3 (1850 bytes). Trim `required` or pass --max-bytes\"}' stderr=''] tight:[exit=2 stdout='' stderr='tink use: Compiled rules for gates-skillset are 10873 bytes, over the 10872-byte cap; largest: big5 (2050 bytes), big4 (1950 bytes), big3 (1850 bytes). Trim `required` or pass --max-bytes [over_cap]'] exact:[exit=0 stdout='Compiled 6 rule(s) from gates-skillset into /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-tw5wshij/proj/AGENTS.md (10873 bytes)' stderr='']"
+    },
+    {
+      "id": "C9",
+      "result": "PASS",
+      "claim": "C9: --snapshot writes exactly rules.md (block body) + skills.lock.json (digests, source, revision, required order); creates DIR; refuses a symlinked DIR.",
+      "detail": "exit=0 stdout='{\"contract_version\":1,\"skillset\":\"gates-skillset\",\"skills\":[\"beta\",\"alpha\"],\"bytes\":214,\"rules_digest\":\"sha256:ff6c31b3ab90388f1fbe185fa404fc6f12d416f71ec53d1ce2ce233d6d59a855\",\"agents_md\":\"/private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-17y9pe70/proj/AGENTS.md\",\"snapshot\":\"/private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-17y9pe70/proj/out/snap\"}' stderr='' files=['rules.md', 'skills.lock.json'] lock={'schema': 1, 'skillset': 'gates-skillset', 'rules_digest': 'sha256:ff6c31b3ab90388f1fbe185fa404fc6f12d416f71ec53d1ce2ce233d6d59a855', 'skills': [{'name': 'beta', 'digest': 'sha256:85a37c7805f3df37679f67bbc0673563706ace7543836829124fffdcb8d46862', 'source': 'https://github.com/e2e-org/fixtures.git', 'revision': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'}, {'name': 'alpha', 'digest': 'sha256:d32a0a7223441070719469501bed715821d1b1abe18e5ee63b5da5d0399679e3', 'source': 'https://github.com/e2e-org/fixtures.git', 'revision': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'}]} symlink:[exit=2 stdout='{\"code\":\"snapshot_symlink\",\"contract_version\":1,\"error\":\"Refusing symlinked snapshot directory: /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-17y9pe70/proj/linksnap\"}' stderr='']"
+    },
+    {
+      "id": "C10",
+      "result": "PASS",
+      "claim": "C10: --check exits 0 (no writes) right after compile, with and without --snapshot.",
+      "detail": "exit=0 stdout='Verified 2 rule(s) from gates-skillset in /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-5b7pswqa/proj/AGENTS.md (193 bytes)' stderr='' exit=0 stdout='Verified 2 rule(s) from gates-skillset in /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-5b7pswqa/proj/AGENTS.md (193 bytes)' stderr='' exit=0 stdout='{\"contract_version\":1,\"skillset\":\"gates-skillset\",\"skills\":[\"a\",\"b\"],\"bytes\":193,\"rules_digest\":\"sha256:9e0867f826351a3a30b20e7153d85009b23a05168260e41784b07d4248de4827\",\"agents_md\":\"/private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-5b7pswqa/proj/AGENTS.md\",\"snapshot\":\"/private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-5b7pswqa/proj/snap\"}' stderr=''"
+    },
+    {
+      "id": "C11",
+      "result": "PASS",
+      "claim": "C11: --check exits 1 with a one-line reason per mismatch after: hand-edited block, missing block, edited skill body, revoked approval, deleted snapshot file, tampered lock.",
+      "detail": "failures=[]"
+    },
+    {
+      "id": "C12",
+      "result": "PASS",
+      "claim": "C12: --json success and refusal match the contract exactly (exit 0 / 2), and bad usage is a clap error.",
+      "detail": "exit=0 stdout='{\"contract_version\":1,\"skillset\":\"gates-skillset\",\"skills\":[\"a\",\"b\"],\"bytes\":193,\"rules_digest\":\"sha256:9e0867f826351a3a30b20e7153d85009b23a05168260e41784b07d4248de4827\",\"agents_md\":\"/private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-qmypskaq/proj/AGENTS.md\",\"snapshot\":\"/private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-qmypskaq/proj/snap\"}' stderr='' exit=2 stdout='{\"code\":\"skillset_not_found\",\"contract_version\":1,\"error\":\"Skillset pin nosuch-skillset not found: looked for /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-qmypskaq/proj/.tink/skillsets/nosuch-skillset.json and /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-qmypskaq/home/skillsets/nosuch-skillset.json\"}' stderr='' exit=2 stdout='' stderr=\"error: the following required arguments were not provided:\\n  <SKILLSET>\\n\\nUsage: tink use <SKILLSET>\\n\\nFor more information, try '--help'.\" j={'contract_version': 1, 'skillset': 'gates-skillset', 'skills': ['a', 'b'], 'bytes': 193, 'rules_digest': 'sha256:9e0867f826351a3a30b20e7153d85009b23a05168260e41784b07d4248de4827', 'agents_md': '/private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-qmypskaq/proj/AGENTS.md', 'snapshot': '/private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-qmypskaq/proj/snap'}"
+    },
+    {
+      "id": "C13",
+      "result": "PASS",
+      "claim": "C13: a pin's `required` key survives tink's own pin rewrite (`tink skillset update`) and is still accepted by skillset reads.",
+      "detail": "add:[exit=0 stdout='\u2713 Installed skillset: e2e-org-upstream-skillset (2 members)\\n    Location: .agents/skills/e2e-org-upstream-skillset/\\n    Router:   .agents/skills/e2e-org-upstream-skillset/SKILL.md (baseline generated)' stderr=''] update:[exit=0 stdout='Updated e2e-org-upstream-skillset (1a7e9b8 \u2192 ffc874e, 3 members)' stderr=''] pin_after={'source': 'https://github.com/e2e-org/upstream.git', 'revision': 'ffc874e6f67a8964ce96c86413a19870874a2f86', 'sourceRoot': 'skills', 'members': ['member-a', 'member-b', 'member-c'], 'required': ['member-a']} list:[exit=0 stdout='e2e-org-upstream-skillset (3 skills)\\n  member-a\\n  member-b\\n  member-c' stderr='']"
+    },
+    {
+      "id": "C14",
+      "result": "PASS",
+      "claim": "C14: existing commands (mount, mount --json --payload, library list, help) behave as before with `use` present.",
+      "detail": "exit=0 stdout='Mounted plain \u2192 /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-dw1ernhd/proj/.tink/.active/plain\\nCreated .tink/.gitignore; commit it so .tink/.active stays ignored.' stderr='' exit=0 stdout='{\"contract_version\":1,\"skill\":\"plain\",\"target\":null,\"entrypoint\":\"/private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-use-dw1ernhd/home/skills/plain/SKILL.md\",\"has_scripts\":false,\"has_references\":false,\"references\":[],\"scripts\":[],\"tree_digest\":\"sha256:a874eb9347f2a230b40750223a958ff1b4102ae14983eb962a3c3e95f6fb01e6\",\"mounted\":false,\"payload\":{\"content\":\"---\\\\nname: plain\\\\ndescription: Fixture skill plain.\\\\n---\\\\n# plain\\\\n\\\\nBody text.\\\\n\",\"chars\":74}}' stderr='' exit=0 stdout='plain' stderr=''"
+    }
+  ],
+  "failures": 0
+}

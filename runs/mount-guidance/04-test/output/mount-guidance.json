@@ -1,0 +1,117 @@
+{
+  "revision": "efc18b5f8c835ac5ab3cf25ec7524413cb73c76a",
+  "commands": [
+    {
+      "argv": [
+        "tink",
+        "mount",
+        "--help"
+      ],
+      "exit": 0,
+      "stdout": "Ephemerally mount a library skill into `.tink/.active/`\n\nUsage: tink mount [OPTIONS] <SKILL>\n\nArguments:\n  <SKILL>  Skill name to mount (library directory name)\n\nOptions:\n      --json     Verify the skill and print one JSON object; link only skills with `scripts/`\n      --payload  Include the whole skill (SKILL.md + inlined references); requires --json and approval\n  -h, --help     Print help\n\nRead a complete approved skill: tink mount <skill> --json --payload\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "tink",
+        "mount",
+        "plain",
+        "--payload"
+      ],
+      "exit": 2,
+      "stdout": "",
+      "stderr": "error: the following required arguments were not provided:\n  --json\n\nUsage: tink mount --json --payload <SKILL>\n\nFor more information, try '--help'.\n"
+    },
+    {
+      "argv": [
+        "tink",
+        "init",
+        "--no-tink-skills",
+        "--no-manage-tink",
+        "--no-sdlc"
+      ],
+      "exit": 0,
+      "stdout": "Created /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-mount-guidance-uzygpmx6/project/.agents/skills\nCreated AGENTS.md\nNew home at /var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-mount-guidance-uzygpmx6/library\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "tink",
+        "mount",
+        "plain",
+        "--json",
+        "--payload"
+      ],
+      "exit": 2,
+      "stdout": "{\"code\":\"unapproved\",\"contract_version\":1,\"error\":\"Skill 'plain' is not approved; review it, then run `tink library approve plain`\"}\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "tink",
+        "library",
+        "approve",
+        "plain"
+      ],
+      "exit": 0,
+      "stdout": "Approved plain sha256:8e8ce3232112a7beb7353315373a1f52919233c786c3fd1ad6158973e0a09ecd\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "tink",
+        "use",
+        "guidance"
+      ],
+      "exit": 0,
+      "stdout": "Compiled 1 rule(s) from guidance-skillset into /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-mount-guidance-uzygpmx6/project/AGENTS.md (142 bytes)\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "tink",
+        "mount",
+        "plain",
+        "--json",
+        "--payload"
+      ],
+      "exit": 0,
+      "stdout": "{\"contract_version\":1,\"skill\":\"plain\",\"target\":null,\"entrypoint\":\"/private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-mount-guidance-uzygpmx6/library/skills/plain/SKILL.md\",\"has_scripts\":false,\"has_references\":false,\"references\":[],\"scripts\":[],\"tree_digest\":\"sha256:8e8ce3232112a7beb7353315373a1f52919233c786c3fd1ad6158973e0a09ecd\",\"mounted\":false,\"payload\":{\"content\":\"---\\nname: plain\\ndescription: Read the fixture.\\n---\\n# Plain\\n\\nUnique fixture instruction.\\n\",\"chars\":88}}\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "tink",
+        "mount",
+        "plain",
+        "--json",
+        "--payload"
+      ],
+      "exit": 0,
+      "stdout": "{\"contract_version\":1,\"skill\":\"plain\",\"target\":null,\"entrypoint\":\"/private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-mount-guidance-uzygpmx6/library/skills/plain/SKILL.md\",\"has_scripts\":false,\"has_references\":false,\"references\":[],\"scripts\":[],\"tree_digest\":\"sha256:8e8ce3232112a7beb7353315373a1f52919233c786c3fd1ad6158973e0a09ecd\",\"mounted\":false,\"payload\":{\"content\":\"---\\nname: plain\\ndescription: Read the fixture.\\n---\\n# Plain\\n\\nUnique fixture instruction.\\n\",\"chars\":88}}\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "tink",
+        "mount",
+        "plain"
+      ],
+      "exit": 0,
+      "stdout": "Mounted plain \u2192 /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-mount-guidance-uzygpmx6/project/.tink/.active/plain\nCreated .tink/.gitignore; commit it so .tink/.active stays ignored.\n",
+      "stderr": ""
+    }
+  ],
+  "checks": {
+    "help_states_json_requirement": true,
+    "help_has_complete_example": true,
+    "payload_alone_still_refused": true,
+    "unapproved_payload_refused": true,
+    "guidance_has_no_unconditional_active_pointer": true,
+    "generated_read_command_delivers_payload": true,
+    "approved_prompt_payload_without_link": true,
+    "plain_mount_still_creates_link": true
+  },
+  "generated_guidance": "This project uses Tink to manage Agent Skills under `.agents/skills/`.\n\n<!-- tink:rules begin skillset=guidance-skillset digest=ceb73f4e3eb58f53e9cb336051ec443e4ed053c614db5d3130fdd47ffac32ae9 -->\nDiscipline rules for this phase (compiled by tink; do not edit by hand):\n- plain: Read the fixture. (read: tink mount plain --json --payload)\n<!-- tink:rules end -->\n",
+  "active_entrypoint_after_use": false
+}
