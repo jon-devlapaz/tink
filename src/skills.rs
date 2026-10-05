@@ -1136,10 +1136,10 @@ mod tests {
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.starts_with(".tink-orphan-target-")),
             "unexpected orphan name: {}",
-            orphan.display()
+            output::display_path(orphan)
         );
         assert!(
-            error.to_string().contains(&orphan.display().to_string()),
+            error.to_string().contains(&output::display_path(orphan)),
             "{error}"
         );
         assert_eq!(fs::read(orphan.join("original")).unwrap(), b"preserve me");

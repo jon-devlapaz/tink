@@ -439,7 +439,7 @@ fn dispatch(cli: Cli, cwd: PathBuf) -> Result<(), Error> {
                     println!(
                         "{} {}",
                         style.success("Removed"),
-                        style.accent(path.display())
+                        style.accent(output::display_path(path))
                     );
                 }
             }
@@ -780,7 +780,7 @@ fn dispatch_skillset(cwd: &Path, command: SkillsetCommand) -> Result<(), Error> 
             println!(
                 "{} {}",
                 style.success("Removed"),
-                style.accent(path.display())
+                style.accent(output::display_path(&path))
             );
             Ok(())
         }
@@ -1088,13 +1088,13 @@ fn dispatch_init(
         println!(
             "{} {}",
             style.success("Created"),
-            style.accent(report.skills_path.display())
+            style.accent(output::display_path(&report.skills_path))
         );
     } else {
         println!(
             "{} {}",
             style.success("Ready"),
-            style.accent(report.skills_path.display())
+            style.accent(output::display_path(&report.skills_path))
         );
     }
     if report.agents_written {
@@ -1110,13 +1110,13 @@ fn dispatch_init(
         println!(
             "{} {}",
             style.success("New home at"),
-            style.accent(report.inventory_home.display())
+            style.accent(output::display_path(&report.inventory_home))
         );
     } else {
         println!(
             "{} {}",
             style.muted("Home at"),
-            style.accent(report.inventory_home.display())
+            style.accent(output::display_path(&report.inventory_home))
         );
     }
     Ok(())
@@ -1257,7 +1257,7 @@ fn dispatch_skill_remove(cwd: &Path, name: &str) -> Result<(), Error> {
     println!(
         "{} {}",
         style.success("Removed"),
-        style.accent(report.removed.display())
+        style.accent(output::display_path(&report.removed))
     );
     Ok(())
 }
@@ -1273,7 +1273,7 @@ fn dispatch_skill_harvest(cwd: &Path) -> Result<(), Error> {
                     "{} {} {}",
                     out.success("Harvested"),
                     out.skill(&event.name),
-                    out.muted(event.source.display())
+                    out.muted(output::display_path(&event.source))
                 );
             }
             harvest::HarvestAction::Unchanged => {
@@ -1285,7 +1285,7 @@ fn dispatch_skill_harvest(cwd: &Path) -> Result<(), Error> {
                     "{} {} {} ({})",
                     err.warn("Skipped"),
                     err.skill(&event.name),
-                    err.muted(event.source.display()),
+                    err.muted(output::display_path(&event.source)),
                     detail
                 );
             }
@@ -1302,7 +1302,11 @@ fn dispatch_skill_harvest(cwd: &Path) -> Result<(), Error> {
         out.accent(report.skipped),
         out.muted("skipped")
     );
-    println!("{} {}", out.muted("Home"), out.accent(home.display()));
+    println!(
+        "{} {}",
+        out.muted("Home"),
+        out.accent(output::display_path(&home))
+    );
     Ok(())
 }
 
@@ -1318,7 +1322,7 @@ fn dispatch_skill_promote(cwd: &Path, name: &str, replace: bool) -> Result<(), E
         "{} {} {}\n{} {}\n{} {}",
         action,
         style.skill(name),
-        style.accent(outcome.destination.display()),
+        style.accent(output::display_path(&outcome.destination)),
         style.muted("Origin"),
         style.accent(format!("project skill {name}")),
         style.muted("Digest"),

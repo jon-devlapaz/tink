@@ -121,7 +121,7 @@ pub fn existing_inventory_root(root: Option<&Path>) -> Result<Option<PathBuf>, E
     if !root.is_dir() {
         return Err(Error::msg(format!(
             "Refusing to read non-directory inventory root: {}",
-            root.display()
+            output::display_path(&root)
         )));
     }
     validate_layout_marker(&root, &root.join(LAYOUT_FILENAME))?;
@@ -161,7 +161,7 @@ pub fn ensure_inventory_root(root: Option<&Path>) -> Result<(PathBuf, bool), Err
     if root.exists() && !root.is_dir() {
         return Err(Error::msg(format!(
             "Refusing to replace non-directory inventory root: {}",
-            root.display()
+            output::display_path(&root)
         )));
     }
     preflight_inventory_root(&root)?;
@@ -197,7 +197,7 @@ fn preflight_inventory_root(root: &Path) -> Result<(), Error> {
     }
     Err(Error::msg(format!(
         "Refusing to initialize non-empty directory as Tink home: {}",
-        root.display()
+        output::display_path(root)
     )))
 }
 
@@ -255,16 +255,20 @@ fn validate_layout_marker(root: &Path, layout: &Path) -> Result<(), Error> {
     if !layout.is_file() {
         return Err(Error::msg(format!(
             "Not a Tink home inventory: {}",
-            root.display()
+            output::display_path(root)
         )));
     }
     let raw = fs::read_to_string(layout).map_err(|e| map_io(layout, e))?;
-    let value: serde_json::Value = serde_json::from_str(&raw)
-        .map_err(|_| Error::msg(format!("Not a Tink home inventory: {}", root.display())))?;
+    let value: serde_json::Value = serde_json::from_str(&raw).map_err(|_| {
+        Error::msg(format!(
+            "Not a Tink home inventory: {}",
+            output::display_path(root)
+        ))
+    })?;
     if value.get("kind").and_then(serde_json::Value::as_str) != Some(LAYOUT_KIND) {
         return Err(Error::msg(format!(
             "Not a Tink home inventory: {}",
-            root.display()
+            output::display_path(root)
         )));
     }
     Ok(())

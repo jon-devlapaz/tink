@@ -127,7 +127,10 @@ fn read_toml<T: for<'de> Deserialize<'de>>(
     refuse_symlink(&root.join(DIRECTORY))?;
     refuse_symlink(file)?;
     if !file.is_file() {
-        return Err(Error::msg(format!("Missing {label}: {}", file.display())));
+        return Err(Error::msg(format!(
+            "Missing {label}: {}",
+            output::display_path(file)
+        )));
     }
     let text = fs::read_to_string(file).map_err(|e| map_io(file, e))?;
     toml::from_str(&text).map_err(|e| Error::msg(format!("Invalid {label}: {e}")))
@@ -490,7 +493,7 @@ fn write_atomic(root: &Path, manifest: &str, lock: &str) -> Result<(), Error> {
     if !directory.is_dir() {
         return Err(Error::msg(format!(
             "Refusing non-directory manifest root: {}",
-            directory.display()
+            output::display_path(&directory)
         )));
     }
     let manifest_path = directory.join(MANIFEST_FILE);

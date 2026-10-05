@@ -75,7 +75,7 @@ fn promotion_source(project_root: &Path, name: &str) -> Result<Skill, Error> {
     if path.join(".git").exists() || path.join(".git").is_symlink() {
         return Err(Error::msg(format!(
             "Refusing repository metadata in skill: {}",
-            path.display()
+            crate::output::display_path(&path)
         )));
     }
     skills::validate_skill_tree(&path)?;
@@ -110,7 +110,7 @@ fn promote_at(
         if !target.is_dir() {
             return Err(Error::msg(format!(
                 "Refusing to replace non-directory library skill: {}",
-                target.display()
+                crate::output::display_path(&target)
             )));
         }
         crate::skillsets::ensure_standalone_source(&target, name)?;
@@ -227,7 +227,7 @@ fn iter_library_skills(library: &Path) -> Result<Vec<Skill>, Error> {
     if !library.is_dir() {
         return Err(Error::msg(format!(
             "Refusing to read non-directory library: {}",
-            library.display()
+            crate::output::display_path(library)
         )));
     }
 
@@ -407,7 +407,7 @@ fn load_library_skill(library: &Path, name: &str) -> Result<Skill, Error> {
     if path.is_symlink() {
         return Err(Error::msg(format!(
             "Refusing to follow symlink: {}",
-            path.display()
+            crate::output::display_path(&path)
         )));
     }
     if !path.is_dir() {
@@ -441,7 +441,7 @@ pub(crate) fn load_existing_at(home: Option<&Path>, name: &str) -> Result<Skill,
     if !library.is_dir() {
         return Err(Error::msg(format!(
             "Refusing to read non-directory library: {}",
-            library.display()
+            crate::output::display_path(&library)
         )));
     }
     load_library_skill(&library, name)

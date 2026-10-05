@@ -263,7 +263,7 @@ mod tests {
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.starts_with(".tink-orphan-target-")),
             "unexpected orphan name: {}",
-            recovery.display()
+            output::display_path(&recovery)
         );
         assert_eq!(
             fs::read(recovery.join("payload.txt")).unwrap(),

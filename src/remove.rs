@@ -37,7 +37,7 @@ pub fn remove_skill(project_root: &Path, name: &str) -> Result<RemoveReport, Err
     if !target.is_dir() {
         return Err(Error::msg(format!(
             "Refusing to remove non-directory: {}",
-            target.display()
+            crate::output::display_path(&target)
         )));
     }
     if crate::skillsets::has_receipt_entry(&target) {

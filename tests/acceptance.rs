@@ -146,7 +146,7 @@ fn current_branch(path: &Path) -> String {
 fn github_redirect(local_repo: &Path, public_url: &str) -> Vec<(String, String)> {
     let file_url = format!(
         "file://{}",
-        local_repo.canonicalize().expect("canon").display()
+        local_repo.canonicalize().expect("canon").to_string_lossy()
     );
     vec![
         ("GIT_CONFIG_COUNT".into(), "1".into()),
@@ -335,7 +335,7 @@ fn i8_relative_tink_home_resolves_absolute_not_nested() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            expected_home.display().to_string(),
+            expected_home.to_string_lossy().to_string(),
         ));
 
     assert!(
@@ -365,7 +365,7 @@ fn i9_init_rerun_is_idempotent() {
     ];
     let before: Vec<Vec<u8>> = contract_files
         .iter()
-        .map(|path| fs::read(path).unwrap_or_else(|_| panic!("missing {}", path.display())))
+        .map(|path| fs::read(path).unwrap_or_else(|_| panic!("missing {}", path.to_string_lossy())))
         .collect();
 
     ws.cmd(&project).args(args).assert().success().stdout(
@@ -375,7 +375,7 @@ fn i9_init_rerun_is_idempotent() {
 
     let after: Vec<Vec<u8>> = contract_files
         .iter()
-        .map(|path| fs::read(path).unwrap_or_else(|_| panic!("missing {}", path.display())))
+        .map(|path| fs::read(path).unwrap_or_else(|_| panic!("missing {}", path.to_string_lossy())))
         .collect();
     assert_eq!(after, before, "re-running init changed contract files");
 }
@@ -6100,7 +6100,7 @@ fn write_release_fixture_with_mode(
         format!("{:x}", Sha256::digest(bytes))
     };
 
-    let archive_url = format!("file://{}", archive.display());
+    let archive_url = format!("file://{}", archive.to_string_lossy());
     let meta = dir.join("release.json");
     let body = format!(
         r#"{{
@@ -6147,13 +6147,16 @@ fn wait_for_marker(path: &Path, child: &mut std::process::Child) {
         if let Some(status) = child.try_wait().expect("poll fixture process") {
             panic!(
                 "fixture process exited with {status} before marker: {}",
-                path.display()
+                path.to_string_lossy()
             );
         }
         if started.elapsed() >= std::time::Duration::from_secs(60) {
             interrupt_process_group(child.id());
             let _ = child.wait();
-            panic!("timed out waiting for fixture marker: {}", path.display());
+            panic!(
+                "timed out waiting for fixture marker: {}",
+                path.to_string_lossy()
+            );
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
@@ -6340,7 +6343,10 @@ fn u6_install_script_rejects_invalid_payload_and_preserves_existing_binary() {
     let output = StdCommand::new("sh")
         .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("install.sh"))
         .env("TINK_INSTALL_DIR", &install_dir)
-        .env("TINK_RELEASES_API", format!("file://{}", meta.display()))
+        .env(
+            "TINK_RELEASES_API",
+            format!("file://{}", meta.to_string_lossy()),
+        )
         .output()
         .expect("run install.sh");
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -6379,7 +6385,10 @@ fn u7_install_script_publishes_verified_payload_after_successful_probe() {
     let output = StdCommand::new("sh")
         .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("install.sh"))
         .env("TINK_INSTALL_DIR", &install_dir)
-        .env("TINK_RELEASES_API", format!("file://{}", meta.display()))
+        .env(
+            "TINK_RELEASES_API",
+            format!("file://{}", meta.to_string_lossy()),
+        )
         .output()
         .expect("run install.sh");
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -6415,7 +6424,7 @@ fn u8_install_script_rejects_non_semver_metadata_cleanly() {
         .env("TINK_INSTALL_DIR", &install_dir)
         .env(
             "TINK_RELEASES_API",
-            format!("file://{}", metadata.display()),
+            format!("file://{}", metadata.to_string_lossy()),
         )
         .output()
         .expect("run install.sh");
@@ -6482,7 +6491,7 @@ fn u10_install_script_bounds_candidate_probe_and_preserves_existing_binary() {
         .env("TINK_PROBE_STARTED", &candidate_started)
         .env(
             "TINK_RELEASES_API",
-            format!("file://{}", metadata.display()),
+            format!("file://{}", metadata.to_string_lossy()),
         )
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -6521,7 +6530,7 @@ fn u11_install_script_rejects_non_ascii_semver_digits_and_preserves_existing_bin
         .env("TINK_INSTALL_DIR", &install_dir)
         .env(
             "TINK_RELEASES_API",
-            format!("file://{}", metadata.display()),
+            format!("file://{}", metadata.to_string_lossy()),
         )
         .output()
         .expect("run install.sh");
@@ -6568,7 +6577,7 @@ fn u12_install_script_kills_timed_out_candidate_descendants() {
         .env("TINK_DESCENDANT_MARKER", &marker)
         .env(
             "TINK_RELEASES_API",
-            format!("file://{}", metadata.display()),
+            format!("file://{}", metadata.to_string_lossy()),
         )
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -6617,7 +6626,7 @@ fn u13_install_script_rolls_back_when_published_probe_fails() {
         .env("TINK_INSTALL_DIR", &install_dir)
         .env(
             "TINK_RELEASES_API",
-            format!("file://{}", metadata.display()),
+            format!("file://{}", metadata.to_string_lossy()),
         )
         .output()
         .expect("run install.sh");
@@ -6669,7 +6678,7 @@ fn u14_install_interrupt_kills_candidate_group_without_traceback() {
         .env("TINK_CANCEL_SURVIVED", &survived)
         .env(
             "TINK_RELEASES_API",
-            format!("file://{}", metadata.display()),
+            format!("file://{}", metadata.to_string_lossy()),
         )
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -6740,7 +6749,7 @@ fn u18_install_handles_interrupt_raised_during_candidate_spawn() {
         .env("TINK_CANCEL_SURVIVED", &survived)
         .env(
             "TINK_RELEASES_API",
-            format!("file://{}", metadata.display()),
+            format!("file://{}", metadata.to_string_lossy()),
         )
         .output()
         .expect("run spawn-interrupted installer");
@@ -6794,7 +6803,7 @@ fn u15_update_interrupt_kills_candidate_group_and_preserves_binary() {
         .env("TINK_CANCEL_SURVIVED", &survived)
         .env(
             "TINK_RELEASES_API",
-            format!("file://{}", metadata.display()),
+            format!("file://{}", metadata.to_string_lossy()),
         )
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -6839,7 +6848,7 @@ fn u16_update_output_escapes_terminal_controls_in_binary_path() {
         .env("TINK_HOME", &ws.inventory)
         .env(
             "TINK_RELEASES_API",
-            format!("file://{}", metadata.display()),
+            format!("file://{}", metadata.to_string_lossy()),
         )
         .output()
         .expect("run updater from control-bearing path");
@@ -6890,7 +6899,7 @@ fn u17_install_script_rejects_probe_output_over_capture_limit() {
         .env("TINK_PROBE_STARTED", &candidate_started)
         .env(
             "TINK_RELEASES_API",
-            format!("file://{}", metadata.display()),
+            format!("file://{}", metadata.to_string_lossy()),
         )
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -6939,7 +6948,7 @@ fn v6_install_script_keeps_verified_install_successful_when_stdout_is_closed() {
         .env("TINK_INSTALL_DIR", &install_dir)
         .env(
             "TINK_RELEASES_API",
-            format!("file://{}", metadata.display()),
+            format!("file://{}", metadata.to_string_lossy()),
         )
         .stdout(Stdio::from(write_end))
         .stderr(Stdio::piped())
@@ -6980,7 +6989,7 @@ fn u2_update_reports_up_to_date_for_current_version() {
     let version = package_version();
     let bin = assert_cmd::cargo::cargo_bin!("tink");
     let meta = write_release_fixture(&fixture, &version, bin);
-    let api = format!("file://{}", meta.display());
+    let api = format!("file://{}", meta.to_string_lossy());
 
     let install_dir = ws.root.join("install");
     fs::create_dir_all(&install_dir).unwrap();
@@ -7018,7 +7027,7 @@ fn u3_update_replaces_binary_when_newer_release_exists() {
         fs::set_permissions(&replacement, fs::Permissions::from_mode(0o755)).unwrap();
     }
     let meta = write_release_fixture(&fixture, "99.0.0", &replacement);
-    let api = format!("file://{}", meta.display());
+    let api = format!("file://{}", meta.to_string_lossy());
 
     let install_dir = ws.root.join("install");
     fs::create_dir_all(&install_dir).unwrap();
@@ -7067,7 +7076,7 @@ fn u4_update_rejects_invalid_payload_and_preserves_running_binary() {
     fs::write(&invalid_payload, b"this is not a tink executable\n").unwrap();
     fs::set_permissions(&invalid_payload, fs::Permissions::from_mode(0o644)).unwrap();
     let meta = write_release_fixture_with_mode(&fixture, "99.0.0", &invalid_payload, 0o644);
-    let api = format!("file://{}", meta.display());
+    let api = format!("file://{}", meta.to_string_lossy());
 
     let install_dir = ws.root.join("install");
     fs::create_dir_all(&install_dir).unwrap();
@@ -7116,7 +7125,10 @@ fn u5_update_refuses_downgrade_and_preserves_running_binary() {
 
     Command::new(&installed)
         .arg("update")
-        .env("TINK_RELEASES_API", format!("file://{}", meta.display()))
+        .env(
+            "TINK_RELEASES_API",
+            format!("file://{}", meta.to_string_lossy()),
+        )
         .env("TINK_HOME", &ws.inventory)
         .assert()
         .failure()
@@ -7139,7 +7151,7 @@ fn u19_update_and_installer_accept_case_insensitive_sha256_metadata() {
     fs::set_permissions(&replacement, fs::Permissions::from_mode(0o755)).unwrap();
     let metadata = write_release_fixture(&fixture, "99.0.0", &replacement);
     rewrite_release_digest(&metadata, "ShA256", true);
-    let api = format!("file://{}", metadata.display());
+    let api = format!("file://{}", metadata.to_string_lossy());
 
     let update_dir = ws.root.join("update-install");
     fs::create_dir_all(&update_dir).unwrap();
@@ -7183,7 +7195,7 @@ fn u20_update_and_installer_reject_non_ascii_sha256_algorithm() {
     fs::set_permissions(&replacement, fs::Permissions::from_mode(0o755)).unwrap();
     let metadata = write_release_fixture(&fixture, "99.0.0", &replacement);
     rewrite_release_digest(&metadata, "ſha256", false);
-    let api = format!("file://{}", metadata.display());
+    let api = format!("file://{}", metadata.to_string_lossy());
 
     let update_dir = ws.root.join("update-install");
     fs::create_dir_all(&update_dir).unwrap();

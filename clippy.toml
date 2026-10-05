@@ -1,0 +1,5 @@
+# Paths can come from untrusted repositories. `output::display_path` escapes control
+# characters so a filename cannot inject terminal escape sequences into output.
+disallowed-methods = [
+    { path = "std::path::Path::display", reason = "use output::display_path (escapes terminal control characters)" },
+]

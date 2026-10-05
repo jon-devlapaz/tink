@@ -247,7 +247,7 @@ fn link_into_active(project_root: &Path, skill_name: &str, src: &Path) -> Result
     if target.is_dir() && !target.is_symlink() {
         return Err(Error::msg(format!(
             "Refusing to overwrite non-symlink directory: {}",
-            target.display()
+            crate::output::display_path(&target)
         )));
     }
 
@@ -415,7 +415,7 @@ pub fn unmount_skill(project_root: &Path, skill_name: &str) -> Result<UnmountOut
     if target.is_dir() && !target.is_symlink() {
         return Err(Error::msg(format!(
             "Refusing to remove non-symlink directory: {}",
-            target.display()
+            crate::output::display_path(&target)
         )));
     }
 
