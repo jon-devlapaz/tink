@@ -1116,16 +1116,23 @@ def stage_pick(path, run, n, check):
             picked = json.loads(out)
         except ValueError:
             picked = {}
+        if not isinstance(picked, dict):
+            picked = {}
         if code == 0 and picked.get('status') == 'routed' and picked.get('winner'):
             receipt.update(status='routed', winner=picked['winner'], confidence=picked.get('confidence'))
             sentence = (f" Stage-open skill pick: {picked['winner']} (confidence {picked.get('confidence')}); "
-                        f"read it before relying on it: tink mount {picked['winner']} --payload.")
+                        f"read it before relying on it: tink mount {picked['winner']} --json --payload.")
         elif code == 1:
             receipt['status'] = 'none'
             line = 'skill pick: no specialist skill applies'
         else:
             receipt['status'] = 'error'
-            line = ('skill pick: skipped (router exited ' + str(code) + ')' if code > 0 else
+            reason = picked.get('reason')
+            reason = ' '.join(''.join(c if c.isprintable() else ' ' for c in reason).split())[:120] if isinstance(reason, str) else ''
+            if reason:
+                receipt['reason'] = reason
+            suffix = f': {reason}' if reason else ''
+            line = (f'skill pick: skipped (router exited {code}{suffix})' if code > 0 else
                     'skill pick: skipped (router output unreadable)' if code == 0 else 'skill pick: skipped (router did not complete)')
     with locked(path / '.writer-lock'):
         write_json(path / 'skills' / f'stage-{n}-pick.json', receipt)

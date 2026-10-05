@@ -23,14 +23,15 @@ independently retrieved baseline and protected runner/policy, as in `_system/SDL
 Skillset: `testing-skillset` (pin: `.tink/skillsets/testing-skillset.json`).
 - Once per machine/library, after reviewing the pin (it selects exact upstream code):
   `tink library fetch .tink/skillsets/testing-skillset.json`
-- At stage open, compile the required disciplines, then start a NEW session so
-  `AGENTS.md` is re-read: `tink use testing-skillset --snapshot runs/<slug>/04-test`
-  The launcher does this for you: `python3 _system/scripts/sdlc.py stage <slug> 4`.
+- Continue verification in the stage-3 build session. The launcher does not open
+  stage 4. Read both required skills below through the serialized wrapper:
+  `python3 _system/scripts/sdlc.py skills tink -- mount <skill> --json --payload`.
+  Read the returned `payload.content`, then run `sdlc.py verify <slug>` as above.
 - For a capability gap: `tink-route --receipt runs/<slug>/skills.jsonl "<what you need>"`
   (searches the whole library; prints the skill on stdout. Exit 1 means nothing fits; exit 1 or 2 means
   continue without a skill).
 
-Stage skills (always for this stage; `tink use` compiles the same set):
+Stage skills (required in the existing build session):
 - `principle-prove-it-works`: Before declaring done: run the real artifact and show its output; a green build or "it compiles" is not proof.
 - `principle-build-the-lever`: Non-trivial work: build the script or tool that does or proves it, so a reviewer can rerun it, instead of doing it by hand.
 When one of these triggers fires, or the stage-open pick (`runs/<slug>/skills/stage-<n>-pick.json`) names a skill, read that skill in full before acting on it. In the handoff note, name each skill that changed a decision and the decision it changed.
