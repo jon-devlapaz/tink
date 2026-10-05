@@ -1,0 +1,105 @@
+{
+  "revision": "0e8e6f481aacb91df6e77e390efd12bbb35002de",
+  "commands": [
+    {
+      "argv": [
+        "tink",
+        "mount",
+        "--help"
+      ],
+      "exit": 0,
+      "stdout": "Ephemerally mount a library skill into `.tink/.active/`\n\nUsage: tink mount [OPTIONS] <SKILL>\n\nArguments:\n  <SKILL>  Skill name to mount (library directory name)\n\nOptions:\n      --json     Verify the skill and print one JSON object; link only skills with `scripts/`\n      --payload  Include the whole skill (SKILL.md + inlined references); requires approval\n  -h, --help     Print help\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "tink",
+        "mount",
+        "plain",
+        "--payload"
+      ],
+      "exit": 2,
+      "stdout": "",
+      "stderr": "error: the following required arguments were not provided:\n  --json\n\nUsage: tink mount --json --payload <SKILL>\n\nFor more information, try '--help'.\n"
+    },
+    {
+      "argv": [
+        "tink",
+        "init",
+        "--no-tink-skills",
+        "--no-manage-tink",
+        "--no-sdlc"
+      ],
+      "exit": 0,
+      "stdout": "Created /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-mount-guidance-ajigqvfx/project/.agents/skills\nCreated AGENTS.md\nNew home at /var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-mount-guidance-ajigqvfx/library\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "tink",
+        "mount",
+        "plain",
+        "--json",
+        "--payload"
+      ],
+      "exit": 2,
+      "stdout": "{\"code\":\"unapproved\",\"contract_version\":1,\"error\":\"Skill 'plain' is not approved; review it, then run `tink library approve plain`\"}\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "tink",
+        "library",
+        "approve",
+        "plain"
+      ],
+      "exit": 0,
+      "stdout": "Approved plain sha256:8e8ce3232112a7beb7353315373a1f52919233c786c3fd1ad6158973e0a09ecd\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "tink",
+        "use",
+        "guidance"
+      ],
+      "exit": 0,
+      "stdout": "Compiled 1 rule(s) from guidance-skillset into /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-mount-guidance-ajigqvfx/project/AGENTS.md (160 bytes)\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "tink",
+        "mount",
+        "plain",
+        "--json",
+        "--payload"
+      ],
+      "exit": 0,
+      "stdout": "{\"contract_version\":1,\"skill\":\"plain\",\"target\":null,\"entrypoint\":\"/private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-mount-guidance-ajigqvfx/library/skills/plain/SKILL.md\",\"has_scripts\":false,\"has_references\":false,\"references\":[],\"scripts\":[],\"tree_digest\":\"sha256:8e8ce3232112a7beb7353315373a1f52919233c786c3fd1ad6158973e0a09ecd\",\"mounted\":false,\"payload\":{\"content\":\"---\\nname: plain\\ndescription: Read the fixture.\\n---\\n# Plain\\n\\nUnique fixture instruction.\\n\",\"chars\":88}}\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "tink",
+        "mount",
+        "plain"
+      ],
+      "exit": 0,
+      "stdout": "Mounted plain \u2192 /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-mount-guidance-ajigqvfx/project/.tink/.active/plain\nCreated .tink/.gitignore; commit it so .tink/.active stays ignored.\n",
+      "stderr": ""
+    }
+  ],
+  "checks": {
+    "help_states_json_requirement": false,
+    "help_has_complete_example": false,
+    "payload_alone_still_refused": true,
+    "unapproved_payload_refused": true,
+    "guidance_has_no_unconditional_active_pointer": false,
+    "generated_read_command_delivers_payload": false,
+    "approved_prompt_payload_without_link": true,
+    "plain_mount_still_creates_link": true
+  },
+  "generated_guidance": "This project uses Tink to manage Agent Skills under `.agents/skills/`.\n\n<!-- tink:rules begin skillset=guidance-skillset digest=45c5f682b1654685b8bb4a45c4af32c7ae968bfec535d83652b34850451cdb13 -->\nDiscipline rules for this phase (compiled by tink; do not edit by hand):\n- plain: Read the fixture. (full: .tink/.active/plain/SKILL.md; run: tink mount plain)\n<!-- tink:rules end -->\n",
+  "active_entrypoint_after_use": false
+}

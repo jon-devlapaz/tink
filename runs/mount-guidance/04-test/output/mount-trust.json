@@ -1,0 +1,85 @@
+{
+  "ran_at": "2026-10-04T18:30:54-0500",
+  "tink": "tink 1.0.49",
+  "cases": [
+    {
+      "id": "P1",
+      "result": "PASS",
+      "claim": "P1: payload.content == SKILL.md + each references/** file inlined in sorted order; chars counts it; digest matches the bytes.",
+      "detail": "approve:[exit=0 stdout='Approved guide sha256:3bb85687a490942813d82df8646718863bd3da600f7c081754e072e63780d76a' stderr=''] mount:[exit=0 stdout='{\"contract_version\":1,\"skill\":\"guide\",\"target\":null,\"entrypoint\":\"/private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-mount-i3kwr_he/home/skills/guide/SKILL.md\",\"has_scripts\":false,\"has_references\":true,\"references\":[\"references/a.md\",\"references/b.md\",\"references/deep/c.md\"],\"scripts\":[],\"tree_digest\":\"sha256:3bb85687a490942813d82df8646718863bd3da600f7c081754e072e63780d76a\",\"mounted' stderr=''] want_chars=189"
+    },
+    {
+      "id": "P2",
+      "result": "PASS",
+      "claim": "P2: a skill with scripts/ is linked into .tink/.active (mounted=true); a refs-only skill is not (mounted=false, target=null).",
+      "detail": "runner:[exit=0 stdout='{\"contract_version\":1,\"skill\":\"runner\",\"target\":\"/private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-mount-fa0kopsi/proj/.tink/.active/runner\",\"entrypoint\":\"/private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-mount-fa0kopsi/home/skills/runner/SKILL.md\",\"has_scripts\":true,\"has_references\":true,\"references\":[\"references/r.md\"],\"scripts\":[\"scripts/run.sh\"],\"tree_digest\":\"s' stderr=''] reader:[exit=0 stdout='{\"contract_version\":1,\"skill\":\"reader\",\"target\":null,\"entrypoint\":\"/private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-mount-fa0kopsi/home/skills/reader/SKILL.md\",\"has_scripts\":false,\"has_references\":true,\"references\":[\"references/r.md\"],\"scripts\":[],\"tree_digest\":\"sha256:594bee3cfc62c952ff71e314c2979029e7a7a8d8096b0e58f21903fdb8296a70\",\"mounted\":false,\"payload\":{\"content\":\"---\\\\nname' stderr='']"
+    },
+    {
+      "id": "S1",
+      "result": "PASS",
+      "claim": "S1: SKILL.md that is a symlink (exfil vector) is refused with code symlink_refused, even after approve attempts.",
+      "detail": "json={'code': 'symlink_refused', 'contract_version': 1, 'error': \"Refusing symlink in skill 'exfil': /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-mount-fujl6u49/home/skills/exfil/SKILL.md\"} exit=2 stdout='{\"code\":\"symlink_refused\",\"contract_version\":1,\"error\":\"Refusing symlink in skill \\'exfil\\': /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-mount-fujl6u49/home/skills/exfil/SKILL.md\"}' stderr='' link_exists=False approve:[exit=1 stdout='' stderr=\"Refusing symlink in skill 'exfil': /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-mount-fujl6u49/home/skills/exfil/SKILL.md\"]"
+    },
+    {
+      "id": "S2",
+      "result": "PASS",
+      "claim": "S2: a symlink anywhere under references/ is refused (symlink_refused).",
+      "detail": "json={'code': 'symlink_refused', 'contract_version': 1, 'error': \"Refusing symlink in skill 'leaky': /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-mount-5mzfm02c/home/skills/leaky/references/config.md\"} exit=2 stdout='{\"code\":\"symlink_refused\",\"contract_version\":1,\"error\":\"Refusing symlink in skill \\'leaky\\': /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-mount-5mzfm02c/home/skills/leaky/references/config.md\"}' stderr='' link_exists=False"
+    },
+    {
+      "id": "S3",
+      "result": "PASS",
+      "claim": "S3: a library entry that is itself a symlink to a directory is refused (symlink_refused).",
+      "detail": "json={'code': 'symlink_refused', 'contract_version': 1, 'error': \"Skill 'linked' not found in library (refusing symlinked library entry: /var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-mount-dodu2tea/home/skills/linked)\"} exit=2 stdout='{\"code\":\"symlink_refused\",\"contract_version\":1,\"error\":\"Skill \\'linked\\' not found in library (refusing symlinked library entry: /var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-mount-dodu2tea/home/skills/linked)\"}' stderr='' link_exists=False"
+    },
+    {
+      "id": "I1",
+      "result": "PASS",
+      "claim": "I1: frontmatter name != directory name is refused (identity_mismatch).",
+      "detail": "json={'code': 'identity_mismatch', 'contract_version': 1, 'error': 'Skill directory \\'impostor\\' declares name \"trusted\"; refusing identity mismatch'} exit=2 stdout='{\"code\":\"identity_mismatch\",\"contract_version\":1,\"error\":\"Skill directory \\'impostor\\' declares name \\\\\"trusted\\\\\"; refusing identity mismatch\"}' stderr='' link_exists=False"
+    },
+    {
+      "id": "A1",
+      "result": "PASS",
+      "claim": "A1: --payload refuses a never-approved skill (unapproved) without mounting or returning content.",
+      "detail": "json={'code': 'unapproved', 'contract_version': 1, 'error': \"Skill 'fresh' is not approved; review it, then run `tink library approve fresh`\"} exit=2 stdout='{\"code\":\"unapproved\",\"contract_version\":1,\"error\":\"Skill \\'fresh\\' is not approved; review it, then run `tink library approve fresh`\"}' stderr='' link_exists=False"
+    },
+    {
+      "id": "A2",
+      "result": "PASS",
+      "claim": "A2: approve, then edit SKILL.md out of band -> digest_mismatch; re-approve -> success.",
+      "detail": "json={'code': 'digest_mismatch', 'contract_version': 1, 'error': \"Skill 'drift' changed since it was approved; review it, then run `tink library approve drift`\"} exit=2 stdout='{\"code\":\"digest_mismatch\",\"contract_version\":1,\"error\":\"Skill \\'drift\\' changed since it was approved; review it, then run `tink library approve drift`\"}' stderr='' link_exists=False reapproved:[exit=0 stdout='{\"contract_version\":1,\"skill\":\"drift\",\"target\":null,\"entrypoint\":\"/private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-mount-pxw32ywd/home/skills/drift/SKILL.md\",\"has_scripts\":false,\"has_references\":false,\"references\":[],\"scripts\":[],\"tree_digest\":\"sha256:9d19da9d9769a01bbe966dc9d3c9da6912edf0d07378682c28b967dea26ace4c\",\"mounted\":false,\"payload\":{\"content\":\"---\\\\nname: drift\\\\ndescripti' stderr='']"
+    },
+    {
+      "id": "A3",
+      "result": "PASS",
+      "claim": "A3: `library approve --all` approves every clean skill; approvals lists name + digest; all mount with payload.",
+      "detail": "approve:[exit=0 stdout='Approved one sha256:7903bdcbb3433538db3323baedf545d57e3b0ed98641ba24a9fd0d7aefde339b\\nApproved three sha256:e2bed9aee3e0b1036581603b295d35ad00c99dbfffe61ce3a9ea13ab17bf914d\\nApproved two sha256:6c885184786b86784f4e0b85d89d345abe7e108508c042e49835def3404dfb65\\nApproved 3 skill(s). Approval records a digest only; review skills you have not read.' stderr=''] approvals:[exit=0 stdout='one sha256:7903bdcbb3433538db3323baedf545d57e3b0ed98641ba24a9fd0d7aefde339b\\nthree sha256:e2bed9aee3e0b1036581603b295d35ad00c99dbfffe61ce3a9ea13ab17bf914d\\ntwo sha256:6c885184786b86784f4e0b85d89d345abe7e108508c042e49835def3404dfb65' stderr=''] stored={'version': 1, 'skills': {'one': 'sha256:7903bdcbb3433538db3323baedf545d57e3b0ed98641ba24a9fd0d7aefde339b', 'three': 'sha256:e2bed9aee3e0b1036581603b295d35ad00c99dbfffe61ce3a9ea13ab17bf914d', 'two': 'sha256:6c885184786b86784f4e0b85d89d345abe7e108508c042e49835def3404dfb65'}}"
+    },
+    {
+      "id": "W1",
+      "result": "PASS",
+      "claim": "W1: `tink skill add <local path>` writes the library and records its digest (approve-on-write).",
+      "detail": "add:[exit=0 stdout='Installed authored \u2192 /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-mount-8wz0xzf5/proj/.agents/skills/authored' stderr=''] mount:[exit=0 stdout='{\"contract_version\":1,\"skill\":\"authored\",\"target\":null,\"entrypoint\":\"/private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-mount-8wz0xzf5/home/skills/authored/SKILL.md\",\"has_scripts\":false,\"has_references\":false,\"references\":[],\"scripts\":[],\"tree_digest\":\"sha256:9b52e720d5461e25cb900fe152e3d17b028f3a8fe09d770eae2c01684709a00d\",\"mounted\":false,\"payload\":{\"content\":\"---\\\\nname: authored\\\\n' stderr='']"
+    },
+    {
+      "id": "J1",
+      "result": "PASS",
+      "claim": "J1: success and error JSON parse and match the contract schema exactly (no extra keys).",
+      "detail": "errors=[] nopayload:[exit=0 stdout='{\"contract_version\":1,\"skill\":\"shape\",\"target\":\"/private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-mount-zlo7ui1j/proj/.tink/.active/shape\",\"entrypoint\":\"/private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-mount-zlo7ui1j/home/skills/shape/SKILL.md\",\"has_scripts\":true,\"has_references\":true,\"references\":[\"references/r.md\"],\"scripts\":[\"scripts/s.sh\"],\"tree_digest\":\"sha256' stderr='']"
+    },
+    {
+      "id": "B1",
+      "result": "PASS",
+      "claim": "B1: plain `tink mount` works without approval, links even refs-only skills, keeps its message; unmount works.",
+      "detail": "mount:[exit=0 stdout='Mounted plain \u2192 /private/var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-mount-6k14jnzt/proj/.tink/.active/plain\\nCreated .tink/.gitignore; commit it so .tink/.active stays ignored.' stderr=''] missing:[exit=1 stdout='' stderr=\"Skill 'ghost' not found in library\"] unmount:[exit=0 stdout='Unmounted plain' stderr='']"
+    },
+    {
+      "id": "D1",
+      "result": "PASS",
+      "claim": "D1: `tink doctor` warns (exit 0) about symlinked library skills and counts unapproved ones.",
+      "detail": "row='warn library 3 library skill(s); 1 unapproved; symlinked: linked; review, then run `tink library approve <name>` (or --all)' exit=0 stdout='ok git git version 2.55.0\\nok home /var/folders/sk/r2ns7lvn2ygcsj7bhd0mvnyw0000gn/T/tink-e2e-mount-u04elwpn/home\\nok skills 0 valid project skill(s)\\nskip manifest no manifest; run `tink skill lock` to create one\\nwarn library 3 library skill(s); 1 unapproved; symlinked: linked; review, then run `tink library approve <name>` (or --all)\\nskip network no remote sources installed' stderr=''"
+    }
+  ],
+  "failures": 0
+}

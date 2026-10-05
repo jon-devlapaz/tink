@@ -138,13 +138,14 @@ pub enum Command {
         yes: bool,
     },
     /// Ephemerally mount a library skill into `.tink/.active/`
+    #[command(after_help = "Read a complete approved skill: tink mount <skill> --json --payload")]
     Mount {
         /// Skill name to mount (library directory name)
         skill: String,
         /// Verify the skill and print one JSON object; link only skills with `scripts/`
         #[arg(long)]
         json: bool,
-        /// Include the whole skill (SKILL.md + inlined references); requires approval
+        /// Include the whole skill (SKILL.md + inlined references); requires --json and approval
         #[arg(long, requires = "json")]
         payload: bool,
     },

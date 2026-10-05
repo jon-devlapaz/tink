@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "items": [
+    {
+      "id": "mount-guidance",
+      "description": "Help states the JSON prerequisite and a complete example; generated guidance delivers the approved skill without advertising an absent active file. Preserve tested mount and approval controls.",
+      "verify": "Run the approved pre-fix E2E reproduction; all eight checks must pass.",
+      "check": {
+        "argv": [
+          "python3",
+          "tests/e2e/mount_guidance.py"
+        ],
+        "timeout_seconds": 180
+      }
+    },
+    {
+      "id": "mount-trust",
+      "description": "Preserve JSON delivery, scripted mounts, approval, and library trust behavior.",
+      "verify": "Run the complete mount trust E2E suite.",
+      "check": {
+        "argv": [
+          "python3",
+          "tests/e2e/mount_trust.py"
+        ],
+        "timeout_seconds": 180
+      }
+    },
+    {
+      "id": "use-skillset",
+      "description": "Preserve compilation, ordering, idempotence, size limits, and refusal behavior with the updated read instruction.",
+      "verify": "Run the complete use-skillset E2E suite, keeping behavioral assertions.",
+      "check": {
+        "argv": [
+          "python3",
+          "tests/e2e/use_skillset.py"
+        ],
+        "timeout_seconds": 180
+      }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "files": {
+    "tests/e2e/mount_guidance.py": "4f269d65ec09af7e1f1fe89ed089342d1847ab86502e45df9ef9802334744290"
+  },
+  "candidate": {
+    "head": "0e8e6f481aacb91df6e77e390efd12bbb35002de",
+    "tree": "9302e64412d70917b33c9dcad184399e7c44b64d1d6263cfc619cad0263c94a4"
+  },
+  "review_source": "runs/mount-guidance/01-plan/output/baseline-review.md accepted by independent patch_baseline_review agent",
+  "failure_evidence": "runs/mount-guidance/01-plan/output/baseline.json"
+}

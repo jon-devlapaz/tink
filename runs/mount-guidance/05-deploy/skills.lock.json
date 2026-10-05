@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "skillset": "deployment-skillset",
+  "rules_digest": "sha256:dbf7e19cffa4cf6e99841c1fd2652e8002ed44fe76b7d425a8bcfe0d925fce5f",
+  "skills": [
+    {
+      "name": "principle-prove-it-works",
+      "digest": "sha256:9d340f7951ec6da96789486b4b4a56ba506c53290a3c2b4dcd37a87969fb5c54",
+      "source": "https://github.com/McCune1224/pi-pstack.git",
+      "revision": "a404763afd007ee280dc0c59a86402e12e5369d2"
+    }
+  ]
+}
