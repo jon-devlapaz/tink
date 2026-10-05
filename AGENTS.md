@@ -1,5 +1,9 @@
 This project uses Tink to manage Agent Skills under `.agents/skills/`.
 
+## Coding standards
+
+- Read [`CODING_STANDARDS.md`](CODING_STANDARDS.md) before writing or reviewing code. It links area checklists, such as filesystem mutations.
+
 ## Testing rules
 
 - Never write unit tests after you write code.
