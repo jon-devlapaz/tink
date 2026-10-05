@@ -112,7 +112,7 @@ fn git(cwd: &Path, args: &[&str]) {
 
 fn init_repo(path: &Path) {
     fs::create_dir_all(path).expect("repo");
-    git(path, &["init", "-q"]);
+    git(path, &["init", "-q", "--initial-branch=master"]);
 }
 
 fn commit_all(path: &Path, message: &str) -> String {
