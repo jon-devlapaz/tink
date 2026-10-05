@@ -52,14 +52,27 @@ fn acceptance_rows_and_test_sensors_remain_traceable() {
         );
     }
 
+    // A sensor is a `#[test]` function. An ID-prefixed helper that never runs proves nothing.
     let mut sensors = BTreeMap::<String, String>::new();
+    let mut marked_test = false;
     for line in tests.lines().map(str::trim) {
+        if line == "#[test]" {
+            marked_test = true;
+            continue;
+        }
+        if line.is_empty() || line.starts_with("#[") || line.starts_with("///") {
+            continue;
+        }
+        let is_test = std::mem::take(&mut marked_test);
         let Some(function) = line
             .strip_prefix("fn ")
             .and_then(|line| line.split('(').next())
         else {
             continue;
         };
+        if !is_test {
+            continue;
+        }
         let Some(id) = function.split('_').next().and_then(contract_id) else {
             continue;
         };
