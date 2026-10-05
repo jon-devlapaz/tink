@@ -30,7 +30,7 @@ pub fn destroy_project(project_root: &Path, yes: bool) -> Result<DestroyReport, 
         if !agents.is_dir() {
             return Err(Error::msg(format!(
                 "Refusing to remove non-directory: {}",
-                agents.display()
+                crate::output::display_path(&agents)
             )));
         }
     }
@@ -39,7 +39,7 @@ pub fn destroy_project(project_root: &Path, yes: bool) -> Result<DestroyReport, 
         if !skills.is_dir() {
             return Err(Error::msg(format!(
                 "Refusing to remove non-directory: {}",
-                skills.display()
+                crate::output::display_path(&skills)
             )));
         }
     }

@@ -74,7 +74,7 @@ fn probe_home(home: Option<&Path>) -> ProbeRow {
         Ok(Some(root)) => ProbeRow {
             name: "home",
             outcome: ProbeOutcome::Pass,
-            detail: root.display().to_string(),
+            detail: crate::output::display_path(&root),
         },
         Ok(None) => ProbeRow {
             name: "home",

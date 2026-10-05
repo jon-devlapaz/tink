@@ -256,7 +256,7 @@ pub(crate) fn harvest_at(home: Option<&Path>, cwd: &Path) -> Result<HarvestRepor
                 name: path
                     .file_name()
                     .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| path.display().to_string()),
+                    .unwrap_or_else(|| crate::output::display_path(&path)),
                 source: path,
                 action: HarvestAction::Skipped,
                 detail: Some("under library".into()),
